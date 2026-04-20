@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, cast
 
 import httpx
 
-from app.brokers.base import BaseBroker, Order, OrderStatus
+from app.brokers.base import BaseBroker, Order, OrderSide, OrderStatus, OrderType
 from app.models.domain import Position
 
 KRAKEN_DEFAULT_BASE_URL: Final[str] = "https://api.kraken.com/0/public"
@@ -46,6 +46,12 @@ class KrakenBroker(BaseBroker):
         self.crypto_usd_equiv = crypto_usd_equiv
         self._state = KrakenBrokerState(orders={}, positions={})
         self._halted = False
+
+    @property
+    def halted(self) -> bool:
+        """Return True when the broker is not accepting new orders."""
+
+        return self._halted
 
     def halt(self) -> None:
         """Prevent new orders from being submitted."""
@@ -95,7 +101,7 @@ class KrakenBroker(BaseBroker):
         )
         remote = await self._request("POST", "/AddOrder", data=payload)
         if remote is not None:
-            order = self._order_from_payload(remote, order)
+            order = self._order_from_payload(cast(Mapping[str, object], remote), order)
         order = self._transition(order, "submitted")
         self._state.orders[order.id] = order
         return order
@@ -119,7 +125,7 @@ class KrakenBroker(BaseBroker):
         payload = await self._request("POST", "/OpenPositions", data={"txid": symbol})
         if payload is None:
             return None
-        return self._position_from_payload(symbol, payload)
+        return self._position_from_payload(symbol, cast(Mapping[str, object], payload))
 
     async def get_account_balance(self) -> dict[str, float]:
         """Return Kraken balances."""
@@ -127,8 +133,11 @@ class KrakenBroker(BaseBroker):
         payload = await self._request("POST", "/Balance")
         if payload is None:
             return {"usd": self.usd_balance, "crypto_usd_equiv": self.crypto_usd_equiv}
-        usd = float(payload.get("ZUSD", self.usd_balance))
-        crypto = float(payload.get("crypto_usd_equiv", self.crypto_usd_equiv))
+        balance_payload = cast(Mapping[str, object], payload)
+        usd = float(cast(float | int | str, balance_payload.get("ZUSD", self.usd_balance)))
+        crypto = float(
+            cast(float | int | str, balance_payload.get("crypto_usd_equiv", self.crypto_usd_equiv))
+        )
         self.usd_balance = usd
         self.crypto_usd_equiv = crypto
         return {"usd": usd, "crypto_usd_equiv": crypto}
@@ -139,14 +148,15 @@ class KrakenBroker(BaseBroker):
         payload = await self._request("POST", "/OpenOrders")
         if payload is None:
             return list(self._state.orders.values())
-        orders = payload.get("open", {}) if isinstance(payload, Mapping) else {}
+        payload_map = cast(Mapping[str, object], payload)
+        orders = payload_map.get("open", {})
         parsed: list[Order] = []
         if isinstance(orders, Mapping):
             for order_id, item in orders.items():
                 if isinstance(item, Mapping):
                     parsed.append(
                         self._order_from_payload(
-                            {"id": order_id, **item},
+                            {"id": order_id, **cast(dict[str, object], item)},
                             Order.create("UNKNOWN", "buy", 0.0, "market"),
                         )
                     )
@@ -159,10 +169,10 @@ class KrakenBroker(BaseBroker):
         if payload is None:
             return list(self._state.positions.values())
         parsed: list[Position] = []
-        if isinstance(payload, Mapping):
-            for symbol, item in payload.items():
-                if isinstance(item, Mapping):
-                    parsed.append(self._position_from_payload(symbol, item))
+        payload_map = cast(Mapping[str, object], payload)
+        for symbol, item in payload_map.items():
+            if isinstance(item, Mapping):
+                parsed.append(self._position_from_payload(symbol, cast(Mapping[str, object], item)))
         return parsed
 
     async def get_balance(self) -> dict[str, float]:
@@ -206,16 +216,16 @@ class KrakenBroker(BaseBroker):
         response = await self.client.request(method, url, headers=headers, data=data)
         response.raise_for_status()
         try:
-            return response.json()
+            return cast(object, response.json())
         except ValueError:
             return None
 
-    def _normalize_side(self, side: str) -> str:
+    def _normalize_side(self, side: str) -> OrderSide:
         """Normalize order side strings."""
 
         return "buy" if side.lower() in {"buy", "long"} else "sell"
 
-    def _normalize_type(self, order_type: str) -> str:
+    def _normalize_type(self, order_type: str) -> OrderType:
         """Normalize order type strings."""
 
         return "limit" if order_type.lower() == "limit" else "market"
@@ -229,11 +239,11 @@ class KrakenBroker(BaseBroker):
             id=order_id,
             symbol=str(payload.get("symbol", fallback.symbol)),
             side=self._normalize_side(str(payload.get("side", fallback.side))),
-            size=float(payload.get("volume", fallback.size)),
+            size=float(cast(float | int | str, payload.get("volume", fallback.size))),
             order_type=self._normalize_type(str(payload.get("ordertype", fallback.order_type))),
             limit_price=self._optional_float(payload, "price", fallback.limit_price),
             status=status,
-            filled_size=float(payload.get("filled", fallback.filled_size)),
+            filled_size=float(cast(float | int | str, payload.get("filled", fallback.filled_size))),
             average_fill_price=self._optional_float(
                 payload,
                 "avg_price",
@@ -250,8 +260,8 @@ class KrakenBroker(BaseBroker):
             symbol=symbol.replace("X", "").replace("Z", ""),
             asset_class="crypto",
             side=str(payload.get("side", "long")),
-            entry_price=float(payload.get("entry_price", 0.0)),
-            size=float(payload.get("size", 0.0)),
+            entry_price=float(cast(float | int | str, payload.get("entry_price", 0.0))),
+            size=float(cast(float | int | str, payload.get("size", 0.0))),
             sl_price=self._optional_float(payload, "sl_price", None),
             tp_price=self._optional_float(payload, "tp_price", None),
             strategy_id=self._optional_str(payload, "strategy_id"),
@@ -266,7 +276,7 @@ class KrakenBroker(BaseBroker):
         value = status.lower()
         if value not in {"pending", "submitted", "partial", "filled", "cancelled", "rejected"}:
             return "submitted"
-        return value  # type: ignore[return-value]
+        return cast(OrderStatus, value)
 
     def _optional_float(
         self,
@@ -276,7 +286,7 @@ class KrakenBroker(BaseBroker):
     ) -> float | None:
         """Read an optional float from a payload."""
 
-        value = payload.get(key)
+        value = cast(float | int | str | bytes | bytearray | None, payload.get(key))
         return float(value) if value is not None else default
 
     def _optional_str(self, payload: Mapping[str, object], key: str) -> str | None:

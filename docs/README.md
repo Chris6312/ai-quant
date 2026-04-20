@@ -81,6 +81,10 @@ Optional values may include:
 - `LOG_LEVEL`
 - `ENVIRONMENT`
 
+Note: the defaults in `backend/app/config/settings.py` use `localhost` so local
+commands such as `alembic upgrade head` work outside Docker Compose. The compose
+file overrides these to use service hostnames like `db` and `redis`.
+
 ## Database Setup
 
 Apply Alembic migrations from `backend/`:

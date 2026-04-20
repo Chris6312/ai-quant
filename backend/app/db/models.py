@@ -1,8 +1,19 @@
 """ORM models for the core trading bot schema."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, Numeric, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,11 +45,15 @@ class WatchlistRow(Base):
     asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
     added_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     research_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    low_score_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -57,7 +72,7 @@ class ResearchSignalRow(Base):
     raw_data: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
 
@@ -78,7 +93,7 @@ class CongressTradeRow(Base):
     days_to_disclose: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
 
@@ -100,7 +115,7 @@ class InsiderTradeRow(Base):
     transaction_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
 
@@ -123,8 +138,55 @@ class PositionRow(Base):
     research_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class TradeRow(Base):
+    """Completed trade record for P&L accounting."""
+
+    __tablename__ = "trades"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    position_id: Mapped[str | None] = mapped_column(ForeignKey("positions.id"), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Numeric, nullable=False)
+    exit_price: Mapped[float] = mapped_column(Numeric, nullable=False)
+    size: Mapped[float] = mapped_column(Numeric, nullable=False)
+    realized_pnl: Mapped[float] = mapped_column(Numeric, nullable=False)
+    commission: Mapped[float] = mapped_column(Numeric, default=0.0, nullable=False)
+    strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+
+
+class PortfolioSnapshotRow(Base):
+    """Portfolio snapshot for NAV and P&L auditing."""
+
+    __tablename__ = "portfolio_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    nav: Mapped[float] = mapped_column(Numeric, nullable=False)
+    stock_cash: Mapped[float] = mapped_column(Numeric, nullable=False)
+    crypto_cash: Mapped[float] = mapped_column(Numeric, nullable=False)
+    open_position_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    realized_pnl_today: Mapped[float] = mapped_column(Numeric, nullable=False)
+    unrealized_pnl: Mapped[float] = mapped_column(Numeric, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )

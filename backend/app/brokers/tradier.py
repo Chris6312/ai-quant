@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, cast
 
 import httpx
 
-from app.brokers.base import BaseBroker, Order, OrderStatus
+from app.brokers.base import BaseBroker, Order, OrderSide, OrderStatus, OrderType
 from app.models.domain import Position
 
 TRADIER_DEFAULT_BASE_URL: Final[str] = "https://api.tradier.com/v1"
@@ -43,6 +43,12 @@ class TradierBroker(BaseBroker):
         self.equity = equity or cash_balance
         self._state = TradierBrokerState(orders={}, positions={})
         self._halted = False
+
+    @property
+    def halted(self) -> bool:
+        """Return True when the broker is not accepting new orders."""
+
+        return self._halted
 
     def halt(self) -> None:
         """Prevent new orders from being submitted."""
@@ -92,7 +98,7 @@ class TradierBroker(BaseBroker):
         )
         remote = await self._request("POST", "/accounts/orders", data=payload)
         if remote is not None:
-            order = self._order_from_payload(remote, order)
+            order = self._order_from_payload(cast(Mapping[str, object], remote), order)
         order = self._transition(order, "submitted")
         self._state.orders[order.id] = order
         return order
@@ -116,7 +122,7 @@ class TradierBroker(BaseBroker):
         payload = await self._request("GET", f"/accounts/{self.account_id}/positions/{symbol}")
         if payload is None:
             return None
-        return self._position_from_payload(payload)
+        return self._position_from_payload(cast(Mapping[str, object], payload))
 
     async def get_account_balance(self) -> dict[str, float]:
         """Return account balance data."""
@@ -124,8 +130,9 @@ class TradierBroker(BaseBroker):
         payload = await self._request("GET", f"/accounts/{self.account_id}/balances")
         if payload is None:
             return {"cash": self.cash_balance, "equity": self.equity}
-        cash = float(payload.get("cash", self.cash_balance))
-        equity = float(payload.get("equity", self.equity))
+        balance_payload = cast(Mapping[str, object], payload)
+        cash = float(cast(float | int | str, balance_payload.get("cash", self.cash_balance)))
+        equity = float(cast(float | int | str, balance_payload.get("equity", self.equity)))
         self.cash_balance = cash
         self.equity = equity
         return {"cash": cash, "equity": equity}
@@ -136,7 +143,8 @@ class TradierBroker(BaseBroker):
         payload = await self._request("GET", f"/accounts/{self.account_id}/orders")
         if payload is None:
             return list(self._state.orders.values())
-        orders = payload.get("orders") if isinstance(payload, Mapping) else None
+        payload_map = cast(Mapping[str, object], payload)
+        orders = payload_map.get("orders")
         if not isinstance(orders, list):
             return list(self._state.orders.values())
         parsed: list[Order] = []
@@ -144,7 +152,7 @@ class TradierBroker(BaseBroker):
             if isinstance(item, Mapping):
                 parsed.append(
                     self._order_from_payload(
-                        item,
+                        cast(Mapping[str, object], item),
                         Order.create("UNKNOWN", "buy", 0.0, "market"),
                     )
                 )
@@ -156,13 +164,14 @@ class TradierBroker(BaseBroker):
         payload = await self._request("GET", f"/accounts/{self.account_id}/positions")
         if payload is None:
             return list(self._state.positions.values())
-        positions = payload.get("positions") if isinstance(payload, Mapping) else None
+        payload_map = cast(Mapping[str, object], payload)
+        positions = payload_map.get("positions")
         if not isinstance(positions, list):
             return list(self._state.positions.values())
         parsed: list[Position] = []
         for item in positions:
             if isinstance(item, Mapping):
-                parsed.append(self._position_from_payload(item))
+                parsed.append(self._position_from_payload(cast(Mapping[str, object], item)))
         return parsed
 
     async def get_balance(self) -> dict[str, float]:
@@ -202,16 +211,16 @@ class TradierBroker(BaseBroker):
         response = await self.client.request(method, url, headers=headers, data=data)
         response.raise_for_status()
         try:
-            return response.json()
+            return cast(object, response.json())
         except ValueError:
             return None
 
-    def _normalize_side(self, side: str) -> str:
+    def _normalize_side(self, side: str) -> OrderSide:
         """Normalize side names."""
 
         return "buy" if side.lower() in {"buy", "long"} else "sell"
 
-    def _normalize_type(self, order_type: str) -> str:
+    def _normalize_type(self, order_type: str) -> OrderType:
         """Normalize order types."""
 
         return "limit" if order_type.lower() == "limit" else "market"
@@ -225,11 +234,11 @@ class TradierBroker(BaseBroker):
             id=order_id,
             symbol=str(payload.get("symbol", fallback.symbol)),
             side=self._normalize_side(str(payload.get("side", fallback.side))),
-            size=float(payload.get("quantity", fallback.size)),
+            size=float(cast(float | int | str, payload.get("quantity", fallback.size))),
             order_type=self._normalize_type(str(payload.get("type", fallback.order_type))),
             limit_price=self._optional_float(payload, "limit", fallback.limit_price),
             status=status,
-            filled_size=float(payload.get("filled", fallback.filled_size)),
+            filled_size=float(cast(float | int | str, payload.get("filled", fallback.filled_size))),
             average_fill_price=self._optional_float(
                 payload,
                 "price",
@@ -246,8 +255,8 @@ class TradierBroker(BaseBroker):
             symbol=str(payload.get("symbol", "UNKNOWN")),
             asset_class="stock",
             side=str(payload.get("side", "long")),
-            entry_price=float(payload.get("entry_price", 0.0)),
-            size=float(payload.get("quantity", 0.0)),
+            entry_price=float(cast(float | int | str, payload.get("entry_price", 0.0))),
+            size=float(cast(float | int | str, payload.get("quantity", 0.0))),
             sl_price=self._optional_float(payload, "sl_price", None),
             tp_price=self._optional_float(payload, "tp_price", None),
             strategy_id=self._optional_str(payload, "strategy_id"),
@@ -261,8 +270,8 @@ class TradierBroker(BaseBroker):
 
         value = status.lower()
         if value not in {"pending", "submitted", "partial", "filled", "cancelled", "rejected"}:
-            return "unknown"  # Explicitly handle unknown status
-        return value  # type: ignore[return-value]
+            return "submitted"
+        return cast(OrderStatus, value)
 
     def _optional_float(
         self,
@@ -272,7 +281,7 @@ class TradierBroker(BaseBroker):
     ) -> float | None:
         """Read an optional float from a payload."""
 
-        value = payload.get(key)
+        value = cast(float | int | str | bytes | bytearray | None, payload.get(key))
         return float(value) if value is not None else default
 
     def _optional_str(self, payload: Mapping[str, object], key: str) -> str | None:

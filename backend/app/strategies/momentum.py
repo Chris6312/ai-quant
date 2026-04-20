@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
+from app.config.constants import STOCK_SHORT_BALANCE_THRESHOLD
 from app.indicators.library import IndicatorLib
 from app.models.domain import Candle
 from app.signals.base import BaseStrategy, Signal
@@ -36,10 +38,10 @@ class MomentumStrategy(BaseStrategy):
 
         return cls(
             MomentumParams(
-                fast_period=int(params.get("fast_period", 8)),
-                slow_period=int(params.get("slow_period", 21)),
-                adx_threshold=float(params.get("adx_threshold", 25.0)),
-                strength=float(params.get("strength", 0.75)),
+                fast_period=int(cast(int | float | str, params.get("fast_period", 8))),
+                slow_period=int(cast(int | float | str, params.get("slow_period", 21))),
+                adx_threshold=float(cast(int | float | str, params.get("adx_threshold", 25.0))),
+                strength=float(cast(int | float | str, params.get("strength", 0.75))),
             )
         )
 
@@ -70,7 +72,13 @@ class MomentumStrategy(BaseStrategy):
                 strategy_id=self.strategy_id,
                 research_score=0.0,
             )
-        if candle.close < previous[-1].close and fast_ema[-1] < slow_ema[-1] and balance > 2_500.0:
+        if candle.asset_class != "stock":
+            return None
+        if (
+            candle.close < previous[-1].close
+            and fast_ema[-1] < slow_ema[-1]
+            and balance > STOCK_SHORT_BALANCE_THRESHOLD
+        ):
             return Signal(
                 symbol=candle.symbol,
                 asset_class=candle.asset_class,

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
+from app.config.constants import STOCK_SHORT_BALANCE_THRESHOLD
 from app.indicators.library import IndicatorLib
 from app.models.domain import Candle
 from app.signals.base import BaseStrategy, Signal
@@ -35,9 +37,11 @@ class BreakoutStrategy(BaseStrategy):
 
         return cls(
             BreakoutParams(
-                lookback=int(params.get("lookback", 20)),
-                volume_multiplier=float(params.get("volume_multiplier", 1.5)),
-                strength=float(params.get("strength", 0.7)),
+                lookback=int(cast(int | float | str, params.get("lookback", 20))),
+                volume_multiplier=float(
+                    cast(int | float | str, params.get("volume_multiplier", 1.5))
+                ),
+                strength=float(cast(int | float | str, params.get("strength", 0.7))),
             )
         )
 
@@ -67,7 +71,9 @@ class BreakoutStrategy(BaseStrategy):
                 strategy_id=self.strategy_id,
                 research_score=0.0,
             )
-        if candle.close < min(lows) and balance > 2_500.0:
+        if candle.asset_class != "stock":
+            return None
+        if candle.close < min(lows) and balance > STOCK_SHORT_BALANCE_THRESHOLD:
             return Signal(
                 symbol=candle.symbol,
                 asset_class=candle.asset_class,

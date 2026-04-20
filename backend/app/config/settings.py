@@ -13,8 +13,8 @@ class Settings(BaseSettings):
 
     app_name: str = Field(default="ml-trading-bot")
     environment: str = Field(default="dev")
-    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@db:5432/trading_bot")
-    redis_url: str = Field(default="redis://redis:6379/0")
+    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@localhost:5432/trading_bot")
+    redis_url: str = Field(default="redis://localhost:6379/0")
     log_level: str = Field(default="INFO")
     enable_sql_echo: bool = Field(default=False)
     alpaca_base_url: str = Field(default="https://data.alpaca.markets/v2")

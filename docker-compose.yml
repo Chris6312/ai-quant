@@ -50,5 +50,28 @@ services:
     depends_on:
       - redis
 
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   db_data:
+  grafana_data:

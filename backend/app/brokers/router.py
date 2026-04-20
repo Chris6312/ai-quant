@@ -8,6 +8,7 @@ from app.brokers.base import BaseBroker, Order
 from app.brokers.kraken import KrakenBroker
 from app.brokers.tradier import TradierBroker
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
+from app.models.domain import Position
 
 
 @dataclass(slots=True)
@@ -65,7 +66,7 @@ class BrokerRouter:
             "tradier": await self.tradier.get_open_orders(),
         }
 
-    async def get_open_positions(self) -> dict[str, list[object]]:
+    async def get_open_positions(self) -> dict[str, list[Position]]:
         """Return open positions grouped by broker."""
 
         return {
@@ -76,18 +77,6 @@ class BrokerRouter:
     async def halt_all(self) -> dict[str, bool]:
         """Halt both brokers by refusing new submissions."""
 
-        self.kraken.halt()  # type: ignore[no-untyped-call]
-        self.tradier.halt()  # type: ignore[no-untyped-call]
+        self.kraken.halt()
+        self.tradier.halt()
         return {"kraken": True, "tradier": True}
-
-    def kraken_balance_halt(self) -> None:
-        """Mark Kraken as halted when the broker supports it."""
-
-        if hasattr(self.kraken, "halt"):
-            self.kraken.halt()  # type: ignore[no-untyped-call]
-
-    def tradier_balance_halt(self) -> None:
-        """Mark Tradier as halted when the broker supports it."""
-
-        if hasattr(self.tradier, "halt"):
-            self.tradier.halt()  # type: ignore[no-untyped-call]

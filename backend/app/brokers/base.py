@@ -61,6 +61,21 @@ class Order:
 class BaseBroker(ABC):
     """Define the broker interface used by the trading engine."""
 
+    @property
+    def halted(self) -> bool:
+        """Return True when the broker is not accepting new orders."""
+
+        return False
+
+    @abstractmethod
+    def halt(self) -> None:
+        """Stop accepting new orders."""
+
+    def resume(self) -> None:
+        """Allow new orders again."""
+
+        return None
+
     @abstractmethod
     async def submit_order(
         self,

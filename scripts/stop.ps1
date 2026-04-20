@@ -3,6 +3,25 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
 $runRoot = Join-Path $repoRoot '.run'
+$composeFile = Join-Path $repoRoot 'docker-compose.yml'
+
+function Stop-DockerComposeServices {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Write-Host 'Docker was not found on PATH; skipping Docker Compose shutdown.'
+        return
+    }
+
+    if (-not (Test-Path $composeFile)) {
+        Write-Host 'docker-compose.yml was not found; skipping Docker Compose shutdown.'
+        return
+    }
+
+    Write-Host 'Stopping Docker Compose services (db, redis)...'
+    & docker compose -f $composeFile stop db redis
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Docker Compose stop returned a non-zero exit code.'
+    }
+}
 
 $pidFiles = @(
     Join-Path $runRoot 'bot.pid',
@@ -45,5 +64,7 @@ if (Test-Path $runRoot) {
         Remove-Item -LiteralPath $runRoot -Force -ErrorAction SilentlyContinue
     }
 }
+
+Stop-DockerComposeServices
 
 Write-Host 'Shutdown complete.'

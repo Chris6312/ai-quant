@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from app.config.constants import (
     MAX_WATCHLIST_SIZE,
     WATCHLIST_AUTO_ADD_THRESHOLD,
+    WATCHLIST_DEMOTION_DAYS,
     WATCHLIST_DEMOTION_THRESHOLD,
     WATCHLIST_PROMOTION_THRESHOLD,
 )
@@ -84,13 +85,23 @@ class WatchlistManager:
         """Demote symbols whose score has stayed weak for the configured window."""
 
         demoted: list[str] = []
+        now: datetime = datetime.now(tz=UTC)
         for symbol in symbols:
             existing = await self.repository.get_by_symbol(symbol)
             if existing is None:
                 continue
-            if float(existing.research_score or 0.0) >= WATCHLIST_DEMOTION_THRESHOLD:
+            research_score = float(existing.research_score or 0.0)
+            if research_score >= WATCHLIST_DEMOTION_THRESHOLD:
+                if existing.low_score_since is not None:
+                    existing.low_score_since = None
+                    await self.repository.upsert(existing)
                 continue
-            if await self.demote_symbol(symbol):
+            if existing.low_score_since is None:
+                existing.low_score_since = now
+                await self.repository.upsert(existing)
+                continue
+            days_low = (now - existing.low_score_since).days
+            if days_low >= WATCHLIST_DEMOTION_DAYS and await self.demote_symbol(symbol):
                 demoted.append(symbol)
         return demoted
 
