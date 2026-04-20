@@ -20,3 +20,4 @@ htmlcov/
 coverage.xml
 crypto-history/
 backend/ml_trading_bot_backend.egg-info/
+backend/.runtime/

@@ -112,16 +112,32 @@ export type TrainingStatus = {
   total_candles: number; crypto_candles: number; stock_candles: number;
   crypto_symbols: number; stock_symbols: number; symbols_with_data: number;
   crypto_detail: TrainingDetail[]; stock_detail: TrainingDetail[];
+  generated_at?: string; cache_state?: string;
 };
 export type TrainingDetail = {
   symbol: string; asset_class: string; timeframe: string;
   candle_count: number; earliest: string | null; latest: string | null;
 };
+
+export type MlPersistenceResponse = {
+  jobs: MlJob[];
+  active_job_id: string | null;
+  has_running_job: boolean;
+  training: TrainingStatus;
+  persisted_at: string;
+};
+
+export type ActiveMlJobResponse = {
+  job: MlJob | null;
+};
+
 export type GainersResponse = {
   gainers: Record<string, unknown>[]; count: number; fetched_at: string; error?: string;
 };
 
 export const getMlJobs          = ()             => requestJson<MlJob[]>('/ml/jobs');
+export const getMlPersistence   = ()             => requestJson<MlPersistenceResponse>('/ml/persistence');
+export const getActiveMlJob     = ()             => requestJson<ActiveMlJobResponse>('/ml/jobs/active');
 export const getMlJob           = (id: string)   => requestJson<MlJob>(`/ml/jobs/${id}`);
 export const getTopGainers      = (limit = 100)  => requestJson<GainersResponse>(`/ml/gainers?limit=${limit}`);
 export const getTrainingStatus  = ()             => requestJson<TrainingStatus>('/ml/training/status');

@@ -97,7 +97,7 @@ Status legend:
 ## Crypto OHLCV ingestion (CSV-based)
 
 * [ ] define canonical crypto CSV schema
-* [ ] create CSV ingestion service
+* [ ] create CSV ingestion service (CSVs are located in the project root folder/crypto-history)
 * [ ] validate timestamp format consistency
 * [ ] validate duplicate bar handling
 * [ ] validate missing candle detection
