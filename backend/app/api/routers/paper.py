@@ -3,28 +3,47 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import TypedDict, cast
 
-from fastapi import APIRouter, Depends, Query
-
-from app.api.dependencies import get_candle_repository, get_session
-from app.config.constants import APP_NAME
-from app.db.models import CandleRow
-from app.repositories.candles import CandleRepository
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Query
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 
-# In-process ledger state — survives for the life of the process.
-# A real implementation would persist to the trades / portfolio_snapshots tables.
-_ledger: dict[str, object] = {
+
+class PaperOrder(TypedDict):
+    """Typed paper-order record stored in the in-process ledger."""
+
+    id: str
+    symbol: str
+    asset_class: str
+    side: str
+    size: float
+    price: float
+    gross: float
+    commission: float
+    strategy_id: str | None
+    source: str
+    created_at: str
+
+
+class PaperLedger(TypedDict):
+    """Typed in-process paper ledger."""
+
+    stock_balance: float
+    crypto_balance: float
+    stock_default: float
+    crypto_default: float
+    realized_pnl: float
+    orders: list[PaperOrder]
+
+
+_ledger: PaperLedger = {
     "stock_balance": 100_000.0,
     "crypto_balance": 100_000.0,
     "stock_default": 100_000.0,
     "crypto_default": 100_000.0,
     "realized_pnl": 0.0,
-    "orders": [],          # list[dict] — appended by submit_paper_order
+    "orders": [],
 }
 
 
@@ -33,12 +52,12 @@ async def get_paper_balance() -> dict[str, object]:
     """Return current paper ledger balances."""
 
     return {
-        "stock_balance":  _ledger["stock_balance"],
+        "stock_balance": _ledger["stock_balance"],
         "crypto_balance": _ledger["crypto_balance"],
-        "stock_default":  _ledger["stock_default"],
+        "stock_default": _ledger["stock_default"],
         "crypto_default": _ledger["crypto_default"],
-        "realized_pnl":   _ledger["realized_pnl"],
-        "nav": float(_ledger["stock_balance"]) + float(_ledger["crypto_balance"]),  # type: ignore[arg-type]
+        "realized_pnl": _ledger["realized_pnl"],
+        "nav": _ledger["stock_balance"] + _ledger["crypto_balance"],
     }
 
 
@@ -83,18 +102,23 @@ async def list_paper_orders(
 ) -> list[dict[str, object]]:
     """Return paper order log, optionally filtered."""
 
-    orders: list[dict[str, object]] = list(_ledger["orders"])  # type: ignore[arg-type]
+    orders = list(_ledger["orders"])
 
     if side:
         orders = [o for o in orders if o.get("side") == side]
     if symbol:
-        orders = [o for o in orders if o.get("symbol", "").upper() == symbol.upper()]
+        normalized_symbol = symbol.upper()
+        orders = [o for o in orders if o.get("symbol", "").upper() == normalized_symbol]
     if date_from:
         orders = [o for o in orders if str(o.get("created_at", "")) >= date_from]
     if date_to:
         orders = [o for o in orders if str(o.get("created_at", "")) <= date_to + "T23:59:59"]
 
-    return sorted(orders, key=lambda o: str(o.get("created_at", "")), reverse=True)
+    return cast(list[dict[str, object]], sorted(
+        orders,
+        key=lambda o: str(o.get("created_at", "")),
+        reverse=True,
+    ))
 
 
 @router.post("/orders/add")
@@ -111,16 +135,21 @@ async def add_paper_order(
     gross = size * price
     commission = gross * 0.0016 if asset_class == "crypto" else 0.0
 
-    if side == "buy":
-        key = "crypto_balance" if asset_class == "crypto" else "stock_balance"
-        _ledger[key] = float(_ledger[key]) - gross - commission  # type: ignore[arg-type]
+    if asset_class == "crypto":
+        if side == "buy":
+            _ledger["crypto_balance"] = _ledger["crypto_balance"] - gross - commission
+        else:
+            _ledger["crypto_balance"] = _ledger["crypto_balance"] + gross - commission
+            _ledger["realized_pnl"] = _ledger["realized_pnl"] + gross - commission
     else:
-        key = "crypto_balance" if asset_class == "crypto" else "stock_balance"
-        _ledger[key] = float(_ledger[key]) + gross - commission  # type: ignore[arg-type]
-        _ledger["realized_pnl"] = float(_ledger["realized_pnl"]) + gross - commission  # type: ignore[arg-type]
+        if side == "buy":
+            _ledger["stock_balance"] = _ledger["stock_balance"] - gross - commission
+        else:
+            _ledger["stock_balance"] = _ledger["stock_balance"] + gross - commission
+            _ledger["realized_pnl"] = _ledger["realized_pnl"] + gross - commission
 
-    order: dict[str, object] = {
-        "id": f"paper-{len(_ledger['orders']) + 1:06d}",  # type: ignore[arg-type]
+    order: PaperOrder = {
+        "id": f"paper-{len(_ledger['orders']) + 1:06d}",
         "symbol": symbol.upper(),
         "asset_class": asset_class,
         "side": side,
@@ -132,5 +161,5 @@ async def add_paper_order(
         "source": "paper",
         "created_at": datetime.now(tz=UTC).isoformat(),
     }
-    _ledger["orders"].append(order)  # type: ignore[union-attr]
-    return order
+    _ledger["orders"].append(order)
+    return cast(dict[str, object], order)

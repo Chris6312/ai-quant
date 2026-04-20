@@ -5,15 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from random import Random
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
 from uuid import uuid4
 
-from app.brokers.base import BaseBroker, Order, OrderStatus
+from app.brokers.base import BaseBroker, Order, OrderSide, OrderStatus, OrderType
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
 from app.models.domain import Position
 from app.portfolio.sizer import PositionSizer
 from app.repositories.positions import PositionRepository
 from app.services.direction_gate import DirectionGate
+
+if TYPE_CHECKING:
+    from app.db.models import PositionRow
+
 
 LIQUID_STOCK_SLIPPAGE: Final[float] = 0.0005
 ILLIQUID_STOCK_SLIPPAGE: Final[float] = 0.0015
@@ -121,7 +125,13 @@ class PaperBroker(BaseBroker):
                 "size must be positive",
             )
 
-        order = Order.create(symbol, side, size, order_type, limit_price)
+        order = Order.create(
+            symbol,
+            cast(OrderSide, side),
+            size,
+            cast(OrderType, order_type),
+            limit_price,
+        )
         order = self._transition(order, "submitted")
         last_price = self._last_price(symbol)
         fill_price = self._simulated_fill_price(symbol, asset_class, order, last_price)
@@ -459,7 +469,7 @@ class PaperBroker(BaseBroker):
     ) -> Order:
         """Return a new order state after a fill."""
 
-        status = "partial" if partial else "filled"
+        status: OrderStatus = "partial" if partial else "filled"
         return Order(
             id=order.id,
             symbol=order.symbol,
@@ -502,7 +512,13 @@ class PaperBroker(BaseBroker):
     ) -> Order:
         """Return a rejected order."""
 
-        order = Order.create(symbol, side, size, order_type, limit_price)
+        order = Order.create(
+            symbol,
+            cast(OrderSide, side),
+            size,
+            cast(OrderType, order_type),
+            limit_price,
+        )
         return self._transition(order, "rejected")
 
     async def _persist_position(
@@ -520,7 +536,7 @@ class PaperBroker(BaseBroker):
         row = self._to_row(position)
         await self.position_repository.upsert_position(row)
 
-    def _to_row(self, position: Position) -> object:
+    def _to_row(self, position: Position) -> PositionRow:
         """Convert a domain position to a persistence row."""
 
         from app.db.models import PositionRow

@@ -54,7 +54,7 @@ class NewsSentimentPipeline:
 
         text = f"{article.title}. {article.summary}"[:512]
         label_scores = await self.classifier.classify(text)
-        direction = max(label_scores, key=label_scores.get)
+        direction = max(label_scores, key=lambda label: label_scores[label])
         confidence = label_scores[direction]
         numeric = label_scores["positive"] - label_scores["negative"]
         if confidence < NEWS_MIN_CONFIDENCE:
@@ -85,7 +85,7 @@ class NewsSentimentPipeline:
         weighted_sum = sum(
             score.numeric * weight for score, weight in zip(articles, weights, strict=True)
         )
-        return weighted_sum / sum(weights)
+        return float(weighted_sum / sum(weights))
 
 
 class BenzingaNewsClient:

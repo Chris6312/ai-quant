@@ -1,7 +1,10 @@
 """Base repository abstractions."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any, TypeVar, cast
 
 from sqlalchemy import select
 from sqlalchemy.engine import Result
@@ -11,6 +14,8 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.base import Base
 from app.exceptions import RepositoryError
+
+ModelT = TypeVar("ModelT", bound=Base)
 
 
 class BaseRepository:
@@ -39,7 +44,7 @@ class BaseRepository:
             await self.session.rollback()
             raise RepositoryError("Unable to add rows") from exc
 
-    async def execute(self, statement: Executable) -> Result[tuple[object]]:
+    async def execute(self, statement: Executable) -> Result[Any]:
         """Execute a SQLAlchemy statement and return the result."""
 
         try:
@@ -53,11 +58,11 @@ class BaseRepository:
         result = await self.execute(statement)
         return result.scalar_one_or_none()
 
-    async def list_all(self, model: type[Base]) -> list[Base]:
+    async def list_all(self, model: type[ModelT]) -> list[ModelT]:
         """Load all rows for a model."""
 
-        result = await self.execute(select(model))
-        return list(result.scalars().all())
+        result = await self.session.scalars(select(model))
+        return list(result)
 
     async def get_latest_timestamp(
         self,
@@ -66,5 +71,6 @@ class BaseRepository:
     ) -> datetime | None:
         """Return the latest timestamp from a model column."""
 
+        del model
         result = await self.execute(select(column).order_by(column.desc()).limit(1))
-        return result.scalar_one_or_none()
+        return cast(datetime | None, result.scalar_one_or_none())

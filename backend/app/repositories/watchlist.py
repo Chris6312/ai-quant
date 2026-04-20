@@ -21,8 +21,15 @@ class WatchlistRepository(BaseRepository):
             .where(WatchlistRow.is_active.is_(True))
             .order_by(WatchlistRow.symbol)
         )
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
+
+    async def get_by_symbol(self, symbol: str) -> WatchlistRow | None:
+        """Return a watchlist row by symbol."""
+
+        statement = select(WatchlistRow).where(WatchlistRow.symbol == symbol.upper())
+        result = await self.session.scalars(statement)
+        return result.one_or_none()
 
     async def upsert(self, row: WatchlistRow) -> None:
         """Insert or update a watchlist row."""
@@ -36,4 +43,5 @@ class WatchlistRepository(BaseRepository):
             existing.research_score = row.research_score
             existing.is_active = row.is_active
             existing.notes = row.notes
+            existing.low_score_since = row.low_score_since
         await self.session.commit()

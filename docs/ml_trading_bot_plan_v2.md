@@ -59,7 +59,7 @@ def can_go_short(asset_class: str, stock_balance: float) -> bool:
 - **Candle fetch delay: ~15–20s after close** — default 17s, configurable per symbol, prevents dirty data
 - **Tradier supplies watchlist candles** — only active watchlist symbols get live candle workers
 - **Alpaca is batch-only, offline** — used exclusively for ML training data pulls, never for live signals
-- **Max 5 concurrent positions** — hard limit in `PortfolioManager` before any order submission
+- **Max 5 concurrent positions per asset** — hard limit in `PortfolioManager` before any order submission
 - **Paper trading gate** — 30-day minimum with quantitative thresholds before live capital
 
 ---
@@ -390,7 +390,7 @@ SCREENER_CRITERIA = {
 
 - [ ] **Technical pre-filter:** symbol must be above its 50-day EMA on daily chart (trending up)
 - [ ] **Earnings exclusion:** remove any symbol with earnings within next 5 trading days
-- [ ] Daily screener run at 6:30 AM ET (30 min before open), results scored and ranked
+- [ ] Daily screener run at 8:30 AM ET (1 hour before open), results scored and ranked
 
 ### 2F — Analyst Upgrades & Price Target Changes
 

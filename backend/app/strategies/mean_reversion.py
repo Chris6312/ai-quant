@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from app.indicators.library import IndicatorLib
 from app.models.domain import Candle
@@ -34,12 +35,16 @@ class MeanReversionStrategy(BaseStrategy):
     def from_config(cls, params: Mapping[str, object]) -> MeanReversionStrategy:
         """Build a strategy from a config mapping."""
 
+        rsi_period = cast(int | str, params.get("rsi_period", 14))
+        rsi_oversold = cast(float | int | str, params.get("rsi_oversold", 30.0))
+        bollinger_period = cast(int | str, params.get("bollinger_period", 20))
+        strength = cast(float | int | str, params.get("strength", 0.65))
         return cls(
             MeanReversionParams(
-                rsi_period=int(params.get("rsi_period", 14)),
-                rsi_oversold=float(params.get("rsi_oversold", 30.0)),
-                bollinger_period=int(params.get("bollinger_period", 20)),
-                strength=float(params.get("strength", 0.65)),
+                rsi_period=int(rsi_period),
+                rsi_oversold=float(rsi_oversold),
+                bollinger_period=int(bollinger_period),
+                strength=float(strength),
             )
         )
 

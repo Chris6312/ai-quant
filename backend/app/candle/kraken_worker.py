@@ -33,7 +33,7 @@ KRAKEN_UNIVERSE: Final[tuple[str, ...]] = (
 class KrakenMarketDataClient(Protocol):
     """Define the Kraken market-data contract."""
 
-    async def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
+    def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
         """Yield Kraken candle close timestamps."""
 
     async def fetch_confirmed_candle(

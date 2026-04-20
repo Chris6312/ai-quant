@@ -9,7 +9,7 @@ from app.config.constants import APP_NAME
 from app.config.settings import get_settings
 
 try:
-    import structlog  # type: ignore[import-not-found]  # optional dependency in some environments.
+    import structlog
 
     _LOGGER = structlog.get_logger(__name__)
 

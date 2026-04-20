@@ -18,7 +18,7 @@ from app.repositories.candles import CandleRepository
 class TradierMarketDataClient(Protocol):
     """Define the Tradier market-data contract."""
 
-    async def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
+    def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
         """Yield Tradier candle close timestamps."""
 
     async def fetch_confirmed_candle(

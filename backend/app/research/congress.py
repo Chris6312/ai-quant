@@ -115,7 +115,10 @@ class CongressTradingService:
         committee_value = str(committee) if committee is not None else None
         amount_range = item.get("amount_range")
         amount_value = str(amount_range) if amount_range is not None else None
-        days_to_disclose = int(item.get("days_to_disclose", 45))
+        days_to_disclose_raw = item.get("days_to_disclose", 45)
+        if not isinstance(days_to_disclose_raw, (int, str)):
+            raise ResearchParseError("Invalid congress days_to_disclose")
+        days_to_disclose = int(days_to_disclose_raw)
         trade_date = self._parse_date(item.get("trade_date"))
         disclosure_date = self._parse_date(item.get("disclosure_date"))
         return CongressTrade(

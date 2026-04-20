@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from app.ml.features import RESEARCH_FEATURES
 
 try:
-    import structlog  # type: ignore[import-not-found]  # optional dependency in some environments.
+    import structlog
 
     _LOGGER = structlog.get_logger(__name__)
 

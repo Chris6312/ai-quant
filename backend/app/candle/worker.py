@@ -47,7 +47,7 @@ class RedisClient(Protocol):
 class CandleSourceClient(Protocol):
     """Define the live candle data contract for workers."""
 
-    async def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
+    def stream_candle_closes(self, symbol: str, timeframe: str) -> AsyncIterator[datetime]:
         """Yield candle-close timestamps for a symbol/timeframe pair."""
 
     async def fetch_confirmed_candle(
@@ -175,7 +175,7 @@ class CandleWorker(ABC):
         return json.dumps(payload, separators=(",", ":"))
 
     @abstractmethod
-    async def _stream_candle_closes(self) -> AsyncIterator[datetime]:
+    def _stream_candle_closes(self) -> AsyncIterator[datetime]:
         """Stream candle close timestamps from the underlying market feed."""
 
     @abstractmethod

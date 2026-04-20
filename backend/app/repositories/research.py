@@ -17,22 +17,22 @@ class ResearchRepository(BaseRepository):
         """Return research signals for a symbol."""
 
         statement = select(ResearchSignalRow).where(ResearchSignalRow.symbol == symbol)
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
 
     async def list_congress_trades(self, symbol: str) -> list[CongressTradeRow]:
         """Return congress trades for a symbol."""
 
         statement = select(CongressTradeRow).where(CongressTradeRow.symbol == symbol)
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
 
     async def list_insider_trades(self, symbol: str) -> list[InsiderTradeRow]:
         """Return insider trades for a symbol."""
 
         statement = select(InsiderTradeRow).where(InsiderTradeRow.symbol == symbol)
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
 
     async def add_signal(self, row: ResearchSignalRow) -> None:
         """Persist a research signal."""

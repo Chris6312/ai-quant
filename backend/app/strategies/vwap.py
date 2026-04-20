@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from app.indicators.library import IndicatorLib
 from app.models.domain import Candle
@@ -32,10 +33,12 @@ class VWAPStrategy(BaseStrategy):
     def from_config(cls, params: Mapping[str, object]) -> VWAPStrategy:
         """Build a strategy from a config mapping."""
 
+        deviation_stdevs = cast(float | int | str, params.get("deviation_stdevs", 1.5))
+        strength = cast(float | int | str, params.get("strength", 0.6))
         return cls(
             VWAPParams(
-                deviation_stdevs=float(params.get("deviation_stdevs", 1.5)),
-                strength=float(params.get("strength", 0.6)),
+                deviation_stdevs=float(deviation_stdevs),
+                strength=float(strength),
             )
         )
 

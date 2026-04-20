@@ -2,34 +2,43 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from sqlalchemy import func, select
 
-from app.api.dependencies import get_candle_repository
+from app.api.dependencies import get_candle_repository, get_watchlist_repository
 from app.brokers.alpaca import AlpacaTrainingFetcher
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
 from app.config.constants import ALPACA_DEFAULT_SOURCE
 from app.config.settings import get_settings
 from app.db.models import CandleRow
+from app.db.session import build_engine, build_session_factory
 from app.repositories.candles import CandleRepository
 from app.repositories.watchlist import WatchlistRepository
-from app.api.dependencies import get_watchlist_repository
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
 # In-process job store — keyed by job_id
-_jobs: dict[str, dict[str, object]] = {}
+_jobs: dict[str, dict[str, Any]] = {}
 
 
-def _new_job(job_type: str, symbols: list[str]) -> dict[str, object]:
+def _resolve_asset_class(job_type: str) -> str:
+    if "crypto" in job_type:
+        return "crypto"
+    if "stock" in job_type:
+        return "stock"
+    return "mixed"
+
+
+def _new_job(job_type: str, symbols: list[str]) -> dict[str, Any]:
     job_id = f"{job_type}-{datetime.now(tz=UTC).strftime('%Y%m%d-%H%M%S')}"
-    job: dict[str, object] = {
+    job: dict[str, Any] = {
         "job_id":          job_id,
         "type":            job_type,
-        "asset_class":     "crypto" if "crypto" in job_type else "stock" if "stock" in job_type else "mixed",
+        "asset_class":     _resolve_asset_class(job_type),
         "symbols":         symbols,
         "status":          "running",
         "started_at":      datetime.now(tz=UTC).isoformat(),
@@ -80,8 +89,8 @@ async def get_top_gainers(limit: int = Query(default=100, ge=1, le=500)) -> dict
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                "https://data.alpaca.markets/v1beta1/screener/stocks/movers",
-                params={"top": limit, "by": "percent_change"},
+                "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives",
+                params={"top": limit, "by": "volume"},
                 headers=headers,
             )
             if resp.status_code == 401:
@@ -91,7 +100,7 @@ async def get_top_gainers(limit: int = Query(default=100, ge=1, le=500)) -> dict
     except httpx.HTTPError as exc:
         return {"error": f"Alpaca request failed: {exc}", "gainers": []}
 
-    gainers = data.get("gainers", data.get("movers", []))
+    gainers = data.get("most-actives", data.get("actives", data.get("data",[])))
     return {
         "gainers":    gainers[:limit],
         "count":      len(gainers[:limit]),
@@ -134,12 +143,17 @@ async def _run_backfill_with_progress(
                 _jobs[job_id]["current_symbol"] = f"{batch[0]}…" if len(batch) > 1 else batch[0]
                 _jobs[job_id]["done_symbols"]   = batch_start
                 _jobs[job_id]["done_batches"]   = done_work
-                _jobs[job_id]["progress_pct"]   = int(done_work / total_work * 100) if total_work else 0
+                progress_pct = int(done_work / total_work * 100) if total_work else 0
+                _jobs[job_id]["progress_pct"] = progress_pct
 
-                latest_times = await candle_repo.get_latest_candle_times(batch, timeframe, source=ALPACA_DEFAULT_SOURCE)
+                latest_times = await candle_repo.get_latest_candle_times(
+                    batch,
+                    timeframe,
+                    source=ALPACA_DEFAULT_SOURCE,
+                )
                 start = fetcher._calculate_start(batch, latest_times)
                 fetched = await fetcher.fetch_batch(batch, timeframe, start=start, end=end)
-                rows = fetcher._rows_from_batch(fetched, timeframe, latest_times)
+                rows = fetcher._rows_from_batch(fetched, timeframe)
                 if rows:
                     await candle_repo.bulk_upsert(rows)
                     total_rows += len(rows)
@@ -148,7 +162,8 @@ async def _run_backfill_with_progress(
                 _jobs[job_id]["rows_fetched"]  = total_rows
                 _jobs[job_id]["done_batches"]  = done_work
                 _jobs[job_id]["done_symbols"]  = min(batch_start + batch_size, len(symbols))
-                _jobs[job_id]["progress_pct"]  = int(done_work / total_work * 100) if total_work else 0
+                progress_pct = int(done_work / total_work * 100) if total_work else 0
+                _jobs[job_id]["progress_pct"] = progress_pct
 
         _jobs[job_id]["status"]         = "done"
         _jobs[job_id]["current_symbol"] = None
@@ -159,7 +174,7 @@ async def _run_backfill_with_progress(
             "timeframes":        timeframes,
             "rows_written":      total_rows,
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"]  = str(exc)
     finally:
@@ -184,7 +199,12 @@ async def backfill_crypto(
     job = _new_job("backfill_crypto", alpaca_symbols)
     job["asset_class"] = "crypto"
     background_tasks.add_task(
-        _run_backfill_with_progress, job["job_id"], alpaca_symbols, tfs, lookback_days, candle_repo
+        _run_backfill_with_progress,
+        cast(str, job["job_id"]),
+        alpaca_symbols,
+        tfs,
+        lookback_days,
+        candle_repo,
     )
     return job
 
@@ -207,7 +227,12 @@ async def backfill_stocks(
     job = _new_job("backfill_stocks", sym_list)
     job["asset_class"] = "stock"
     background_tasks.add_task(
-        _run_backfill_with_progress, job["job_id"], sym_list, tfs, lookback_days, candle_repo
+        _run_backfill_with_progress,
+        cast(str, job["job_id"]),
+        sym_list,
+        tfs,
+        lookback_days,
+        candle_repo,
     )
     return job
 
@@ -229,7 +254,7 @@ async def backfill_gainers(
     if "error" in gainers_resp:
         return gainers_resp
 
-    gainers = gainers_resp.get("gainers", [])
+    gainers = cast(list[dict[str, object]], gainers_resp.get("gainers", []))
     syms = [str(g.get("symbol") or g.get("S") or "") for g in gainers]
     syms = [s for s in syms if s][:limit]
     if not syms:
@@ -240,7 +265,12 @@ async def backfill_gainers(
     job["asset_class"] = "stock"
     job["gainers_snapshot"] = gainers[:limit]
     background_tasks.add_task(
-        _run_backfill_with_progress, job["job_id"], syms, tfs, lookback_days, candle_repo
+        _run_backfill_with_progress,
+        cast(str, job["job_id"]),
+        syms,
+        tfs,
+        lookback_days,
+        candle_repo,
     )
     return job
 
@@ -254,12 +284,13 @@ async def trigger_watchlist_research(
     rows = await watchlist_repo.list_active()
     symbols = [r.symbol for r in rows]
     job = _new_job("watchlist_research", symbols)
+    job_id = cast(str, job["job_id"])
 
     async def _run() -> None:
-        _jobs[job["job_id"]]["status"]      = "done"
-        _jobs[job["job_id"]]["progress_pct"] = 100
-        _jobs[job["job_id"]]["finished_at"] = datetime.now(tz=UTC).isoformat()
-        _jobs[job["job_id"]]["result"] = {
+        _jobs[job_id]["status"] = "done"
+        _jobs[job_id]["progress_pct"] = 100
+        _jobs[job_id]["finished_at"] = datetime.now(tz=UTC).isoformat()
+        _jobs[job_id]["result"] = {
             "note": "Research pipeline stub — implement app/ml/ session 9",
             "symbols_queued": symbols,
         }
@@ -271,9 +302,6 @@ async def trigger_watchlist_research(
 @router.get("/training/status")
 async def training_status() -> dict[str, object]:
     """Return candle counts from alpaca_training source, split by asset class."""
-    from sqlalchemy import func, select
-    from app.db.session import build_engine, build_session_factory
-
     settings = get_settings()
     engine = build_engine(settings)
     factory = build_session_factory(engine)

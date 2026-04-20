@@ -114,7 +114,10 @@ class AnalystRatingsService:
         firm = str(item.get("firm", ""))
         action = str(item.get("action", ""))
         rating = str(item.get("rating", ""))
-        current_price = float(item.get("current_price", 0.0))
+        current_price_raw = item.get("current_price", 0.0)
+        if not isinstance(current_price_raw, (int, float, str)):
+            raise ResearchParseError("Invalid analyst current_price")
+        current_price = float(current_price_raw)
         old_price_target = self._parse_float(item.get("old_price_target"))
         new_price_target = self._parse_float(item.get("new_price_target"))
         published_at = self._parse_datetime(item.get("published_at"))
@@ -134,6 +137,8 @@ class AnalystRatingsService:
 
         if value is None:
             return None
+        if not isinstance(value, (int, float, str)):
+            raise ResearchParseError("Invalid analyst numeric value")
         return float(value)
 
     def _parse_datetime(self, value: object) -> datetime:

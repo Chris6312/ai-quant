@@ -129,7 +129,10 @@ class InsiderTradingService:
         title_raw = item.get("title")
         title = str(title_raw) if title_raw is not None else None
         transaction_type = str(item.get("transaction_type", "")).upper()
-        total_value = float(item.get("total_value", 0.0))
+        total_value_raw = item.get("total_value", 0.0)
+        if not isinstance(total_value_raw, (int, float, str)):
+            raise ResearchParseError("Invalid insider total_value")
+        total_value = float(total_value_raw)
         filing_date = self._parse_date(item.get("filing_date"))
         transaction_date = self._parse_date(item.get("transaction_date"))
         return InsiderTrade(

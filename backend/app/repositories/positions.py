@@ -21,14 +21,16 @@ class PositionRepository(BaseRepository):
             .where(PositionRow.status == "open")
             .order_by(PositionRow.opened_at.desc())
         )
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
 
     async def count_open(self) -> int:
         """Return the number of open positions."""
 
-        result = await self.execute(select(PositionRow.id).where(PositionRow.status == "open"))
-        return len(list(result.scalars().all()))
+        result = await self.session.scalars(
+            select(PositionRow.id).where(PositionRow.status == "open")
+        )
+        return len(list(result))
 
     async def get_by_symbol(self, symbol: str) -> PositionRow | None:
         """Return the first open position for a symbol."""
@@ -36,8 +38,8 @@ class PositionRepository(BaseRepository):
         statement = select(PositionRow).where(
             and_(PositionRow.symbol == symbol, PositionRow.status == "open")
         )
-        result = await self.execute(statement)
-        return result.scalar_one_or_none()
+        result = await self.session.scalars(statement)
+        return result.one_or_none()
 
     async def add_position(self, row: PositionRow) -> None:
         """Persist a new position row."""
@@ -50,8 +52,13 @@ class PositionRepository(BaseRepository):
         await self.session.merge(row)
         await self.session.commit()
 
-    async def list_all(self) -> list[PositionRow]:
+    async def list_all(  # type: ignore[override]
+        self,
+        model: type[PositionRow] | None = None,
+    ) -> list[PositionRow]:
         """Return all position rows."""
 
-        result = await self.execute(select(PositionRow).order_by(PositionRow.opened_at.desc()))
-        return list(result.scalars().all())
+        del model
+        statement = select(PositionRow).order_by(PositionRow.opened_at.desc())
+        result = await self.session.scalars(statement)
+        return list(result)

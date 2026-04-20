@@ -1,9 +1,13 @@
 """Repository for candle persistence and reads."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import and_, delete, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CandleRow
@@ -30,7 +34,7 @@ class CandleRepository(BaseRepository):
 
         statement = select(func.max(CandleRow.time)).where(*conditions)
         result = await self.execute(statement)
-        return result.scalar_one_or_none()
+        return cast(datetime | None, result.scalar_one_or_none())
 
     async def get_latest_candle_times(
         self,
@@ -53,7 +57,7 @@ class CandleRepository(BaseRepository):
         result = await self.execute(statement)
         latest_by_symbol: dict[str, datetime | None] = dict.fromkeys(symbols, None)
         for symbol, latest_time in result.all():
-            latest_by_symbol[str(symbol)] = latest_time
+            latest_by_symbol[str(symbol)] = cast(datetime | None, latest_time)
         return latest_by_symbol
 
     async def bulk_upsert(self, rows: Sequence[CandleRow]) -> None:
@@ -72,12 +76,13 @@ class CandleRepository(BaseRepository):
             .order_by(CandleRow.time.desc())
             .limit(limit)
         )
-        result = await self.execute(statement)
-        return list(result.scalars().all())
+        result = await self.session.scalars(statement)
+        return list(result)
 
     async def delete_symbol(self, symbol: str) -> int:
         """Delete candles for a symbol and return row count."""
 
         result = await self.session.execute(delete(CandleRow).where(CandleRow.symbol == symbol))
         await self.session.commit()
-        return int(result.rowcount or 0)
+        cursor_result = cast(CursorResult[object], result)
+        return int(cursor_result.rowcount or 0)
