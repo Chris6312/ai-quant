@@ -19,4 +19,4 @@ backups/
 htmlcov/
 coverage.xml
 crypto-history/
-.egg-info
+backend/ml_trading_bot_backend.egg-info/
