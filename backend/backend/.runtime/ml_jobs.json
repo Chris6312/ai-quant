@@ -1,0 +1,2243 @@
+{
+  "crypto_csv_backfill-20260420-223432": {
+    "job_id": "crypto_csv_backfill-20260420-223432",
+    "type": "crypto_csv_backfill",
+    "asset_class": "crypto",
+    "symbols": [
+      "ADA/USD",
+      "ALGO/USD",
+      "ATOM/USD",
+      "AVAX/USD",
+      "BTC/USD",
+      "DOT/USD",
+      "ETH/USD",
+      "FIL/USD",
+      "LINK/USD",
+      "LTC/USD",
+      "MATIC/USD",
+      "NEAR/USD",
+      "SOL/USD",
+      "UNI/USD",
+      "XRP/USD"
+    ],
+    "status": "done",
+    "started_at": "2026-04-20T22:34:32.618815+00:00",
+    "finished_at": "2026-04-20T22:36:55.986140+00:00",
+    "total_symbols": 136,
+    "done_symbols": 17,
+    "current_symbol": null,
+    "current_timeframe": null,
+    "total_batches": 136,
+    "done_batches": 17,
+    "rows_fetched": 41166,
+    "progress_pct": 100,
+    "status_message": "completed",
+    "error": null,
+    "result": {
+      "rows_written": 41166,
+      "symbols": [
+        "ADA/USD",
+        "ALGO/USD",
+        "ATOM/USD",
+        "AVAX/USD",
+        "DOT/USD",
+        "ETH/USD",
+        "FIL/USD",
+        "LINK/USD",
+        "LTC/USD",
+        "MATIC/USD",
+        "NEAR/USD",
+        "SOL/USD",
+        "TRX/USD",
+        "UNI/USD",
+        "BTC/USD",
+        "XDG/USD",
+        "XRP/USD"
+      ],
+      "source_dir": "C:\\dev\\AI-Quant\\crypto-history"
+    },
+    "created_at": "2026-04-20T22:34:32.618815+00:00",
+    "updated_at": "2026-04-20T22:36:56.000034+00:00"
+  },
+  "gainers_backfill-20260420-224039": {
+    "job_id": "gainers_backfill-20260420-224039",
+    "type": "gainers_backfill",
+    "asset_class": "stock",
+    "symbols": [
+      "TOVX",
+      "FCHL",
+      "CTNT",
+      "CMND",
+      "BYND",
+      "ENVB",
+      "BMNU",
+      "WLDS",
+      "TZA",
+      "LZMH",
+      "NVDA",
+      "PLUG",
+      "BITO",
+      "TSLL",
+      "INTC",
+      "ONDS",
+      "NOK",
+      "SOXS",
+      "BMNG",
+      "HIMS",
+      "TQQQ",
+      "TSLA",
+      "NFLX",
+      "AAL",
+      "FRMI",
+      "SLNH",
+      "BB",
+      "QXO",
+      "NVD",
+      "SOFI",
+      "TSLG",
+      "SOXL",
+      "SPDN",
+      "GRAB",
+      "IONQ",
+      "SNAP",
+      "SQQQ",
+      "ATAI",
+      "SIDU",
+      "MSTU",
+      "POET",
+      "BAC",
+      "SPY",
+      "USAR",
+      "PLTD",
+      "PBM",
+      "MARA",
+      "DRIP",
+      "ASTS",
+      "CMPS",
+      "MRVL",
+      "ZSPC",
+      "AMZN",
+      "QBTS",
+      "BTG",
+      "SRXH",
+      "RGTI",
+      "IBIT",
+      "BMNR",
+      "UVIX",
+      "AMC",
+      "QQQ",
+      "SCO",
+      "AAPL",
+      "IREN",
+      "BNBX",
+      "SILO",
+      "HOOD",
+      "IGC",
+      "XLE",
+      "SMR",
+      "AMD",
+      "WULF",
+      "PLTR",
+      "LCID",
+      "ARTL",
+      "MU",
+      "JBLU",
+      "NVTS",
+      "T",
+      "NU",
+      "INFQ",
+      "CRWV",
+      "ISPC",
+      "NCLH",
+      "RKLB",
+      "ETHA",
+      "MSTZ",
+      "HTZ",
+      "MSFT",
+      "RIG",
+      "XLF",
+      "QID",
+      "F",
+      "HIVE",
+      "BBAI",
+      "CRML",
+      "BBD",
+      "SOUN",
+      "OPEN"
+    ],
+    "status": "error",
+    "started_at": "2026-04-20T22:40:39.732882+00:00",
+    "finished_at": "2026-04-20T22:40:41.202562+00:00",
+    "total_symbols": 100,
+    "done_symbols": 0,
+    "current_symbol": "TOVX",
+    "current_timeframe": "1Day",
+    "total_batches": 100,
+    "done_batches": 0,
+    "rows_fetched": 0,
+    "progress_pct": 0,
+    "status_message": "failed",
+    "error": "(raised as a result of Query-invoked autoflush; consider using a session.no_autoflush block if this flush is occurring prematurely)\n(sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.NotNullViolationError'>: null value in column \"asset_class\" of relation \"_hyper_1_343_chunk\" violates not-null constraint\nDETAIL:  Failing row contains (2025-04-21 04:00:00+00, TOVX, null, 1Day, 1.3300000000000000710542735760100185871124267578125, 1.3300000000000000710542735760100185871124267578125, 1.3300000000000000710542735760100185871124267578125, 1.3300000000000000710542735760100185871124267578125, 123, alpaca_training).\n[SQL: INSERT INTO candles (time, symbol, asset_class, timeframe, open, high, low, close, volume, source) VALUES ($1::TIMESTAMP WITH TIME ZONE, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::NUMERIC, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, $9::NUMERIC, $10::VARCHAR)]\n[parameters: (datetime.datetime(2025, 4, 21, 4, 0, tzinfo=datetime.timezone.utc), 'TOVX', None, '1Day', 1.33, 1.33, 1.33, 1.33, 123.0, 'alpaca_training')]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)",
+    "result": null,
+    "created_at": "2026-04-20T22:40:39.732882+00:00",
+    "updated_at": "2026-04-20T22:40:41.227718+00:00",
+    "gainers_snapshot": [
+      {
+        "symbol": "TOVX"
+      },
+      {
+        "symbol": "FCHL"
+      },
+      {
+        "symbol": "CTNT"
+      },
+      {
+        "symbol": "CMND"
+      },
+      {
+        "symbol": "BYND"
+      },
+      {
+        "symbol": "ENVB"
+      },
+      {
+        "symbol": "BMNU"
+      },
+      {
+        "symbol": "WLDS"
+      },
+      {
+        "symbol": "TZA"
+      },
+      {
+        "symbol": "LZMH"
+      },
+      {
+        "symbol": "NVDA"
+      },
+      {
+        "symbol": "PLUG"
+      },
+      {
+        "symbol": "BITO"
+      },
+      {
+        "symbol": "TSLL"
+      },
+      {
+        "symbol": "INTC"
+      },
+      {
+        "symbol": "ONDS"
+      },
+      {
+        "symbol": "NOK"
+      },
+      {
+        "symbol": "SOXS"
+      },
+      {
+        "symbol": "BMNG"
+      },
+      {
+        "symbol": "HIMS"
+      },
+      {
+        "symbol": "TQQQ"
+      },
+      {
+        "symbol": "TSLA"
+      },
+      {
+        "symbol": "NFLX"
+      },
+      {
+        "symbol": "AAL"
+      },
+      {
+        "symbol": "FRMI"
+      },
+      {
+        "symbol": "SLNH"
+      },
+      {
+        "symbol": "BB"
+      },
+      {
+        "symbol": "QXO"
+      },
+      {
+        "symbol": "NVD"
+      },
+      {
+        "symbol": "SOFI"
+      },
+      {
+        "symbol": "TSLG"
+      },
+      {
+        "symbol": "SOXL"
+      },
+      {
+        "symbol": "SPDN"
+      },
+      {
+        "symbol": "GRAB"
+      },
+      {
+        "symbol": "IONQ"
+      },
+      {
+        "symbol": "SNAP"
+      },
+      {
+        "symbol": "SQQQ"
+      },
+      {
+        "symbol": "ATAI"
+      },
+      {
+        "symbol": "SIDU"
+      },
+      {
+        "symbol": "MSTU"
+      },
+      {
+        "symbol": "POET"
+      },
+      {
+        "symbol": "BAC"
+      },
+      {
+        "symbol": "SPY"
+      },
+      {
+        "symbol": "USAR"
+      },
+      {
+        "symbol": "PLTD"
+      },
+      {
+        "symbol": "PBM"
+      },
+      {
+        "symbol": "MARA"
+      },
+      {
+        "symbol": "DRIP"
+      },
+      {
+        "symbol": "ASTS"
+      },
+      {
+        "symbol": "CMPS"
+      },
+      {
+        "symbol": "MRVL"
+      },
+      {
+        "symbol": "ZSPC"
+      },
+      {
+        "symbol": "AMZN"
+      },
+      {
+        "symbol": "QBTS"
+      },
+      {
+        "symbol": "BTG"
+      },
+      {
+        "symbol": "SRXH"
+      },
+      {
+        "symbol": "RGTI"
+      },
+      {
+        "symbol": "IBIT"
+      },
+      {
+        "symbol": "BMNR"
+      },
+      {
+        "symbol": "UVIX"
+      },
+      {
+        "symbol": "AMC"
+      },
+      {
+        "symbol": "QQQ"
+      },
+      {
+        "symbol": "SCO"
+      },
+      {
+        "symbol": "AAPL"
+      },
+      {
+        "symbol": "IREN"
+      },
+      {
+        "symbol": "BNBX"
+      },
+      {
+        "symbol": "SILO"
+      },
+      {
+        "symbol": "HOOD"
+      },
+      {
+        "symbol": "IGC"
+      },
+      {
+        "symbol": "XLE"
+      },
+      {
+        "symbol": "SMR"
+      },
+      {
+        "symbol": "AMD"
+      },
+      {
+        "symbol": "WULF"
+      },
+      {
+        "symbol": "PLTR"
+      },
+      {
+        "symbol": "LCID"
+      },
+      {
+        "symbol": "ARTL"
+      },
+      {
+        "symbol": "MU"
+      },
+      {
+        "symbol": "JBLU"
+      },
+      {
+        "symbol": "NVTS"
+      },
+      {
+        "symbol": "T"
+      },
+      {
+        "symbol": "NU"
+      },
+      {
+        "symbol": "INFQ"
+      },
+      {
+        "symbol": "CRWV"
+      },
+      {
+        "symbol": "ISPC"
+      },
+      {
+        "symbol": "NCLH"
+      },
+      {
+        "symbol": "RKLB"
+      },
+      {
+        "symbol": "ETHA"
+      },
+      {
+        "symbol": "MSTZ"
+      },
+      {
+        "symbol": "HTZ"
+      },
+      {
+        "symbol": "MSFT"
+      },
+      {
+        "symbol": "RIG"
+      },
+      {
+        "symbol": "XLF"
+      },
+      {
+        "symbol": "QID"
+      },
+      {
+        "symbol": "F"
+      },
+      {
+        "symbol": "HIVE"
+      },
+      {
+        "symbol": "BBAI"
+      },
+      {
+        "symbol": "CRML"
+      },
+      {
+        "symbol": "BBD"
+      },
+      {
+        "symbol": "SOUN"
+      },
+      {
+        "symbol": "OPEN"
+      }
+    ]
+  },
+  "gainers_backfill-20260420-225012": {
+    "job_id": "gainers_backfill-20260420-225012",
+    "type": "gainers_backfill",
+    "asset_class": "stock",
+    "symbols": [
+      "{'SYMBOL': 'TOVX', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 645077975}",
+      "{'SYMBOL': 'FCHL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 437259943}",
+      "{'SYMBOL': 'CTNT', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 351629570}",
+      "{'SYMBOL': 'CMND', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 224599431}",
+      "{'SYMBOL': 'BYND', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 205649171}",
+      "{'SYMBOL': 'ENVB', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 158375779}",
+      "{'SYMBOL': 'BMNU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 144135721}",
+      "{'SYMBOL': 'WLDS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 144080859}",
+      "{'SYMBOL': 'TZA', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 142338206}",
+      "{'SYMBOL': 'LZMH', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 139437764}",
+      "{'SYMBOL': 'NVDA', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 119330171}",
+      "{'SYMBOL': 'PLUG', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 111824293}",
+      "{'SYMBOL': 'BITO', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 107160382}",
+      "{'SYMBOL': 'TSLL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 104235403}",
+      "{'SYMBOL': 'INTC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 96665613}",
+      "{'SYMBOL': 'ONDS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 94270474}",
+      "{'SYMBOL': 'NOK', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 88662625}",
+      "{'SYMBOL': 'SOXS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 78897807}",
+      "{'SYMBOL': 'BMNG', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 71782716}",
+      "{'SYMBOL': 'HIMS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 69224202}",
+      "{'SYMBOL': 'TQQQ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 67303311}",
+      "{'SYMBOL': 'TSLA', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 64592016}",
+      "{'SYMBOL': 'NFLX', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 63236671}",
+      "{'SYMBOL': 'AAL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 62711642}",
+      "{'SYMBOL': 'FRMI', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 61230792}",
+      "{'SYMBOL': 'SLNH', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 57425482}",
+      "{'SYMBOL': 'BB', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 56498479}",
+      "{'SYMBOL': 'QXO', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 56086869}",
+      "{'SYMBOL': 'NVD', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 55031346}",
+      "{'SYMBOL': 'SOFI', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 52454000}",
+      "{'SYMBOL': 'TSLG', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 50257801}",
+      "{'SYMBOL': 'SOXL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 49096719}",
+      "{'SYMBOL': 'SPDN', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 49004467}",
+      "{'SYMBOL': 'GRAB', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 48313171}",
+      "{'SYMBOL': 'IONQ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 47803732}",
+      "{'SYMBOL': 'SNAP', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 47411866}",
+      "{'SYMBOL': 'SQQQ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 47368332}",
+      "{'SYMBOL': 'ATAI', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 47013479}",
+      "{'SYMBOL': 'SIDU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 45346913}",
+      "{'SYMBOL': 'MSTU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 45302994}",
+      "{'SYMBOL': 'POET', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 45005089}",
+      "{'SYMBOL': 'BAC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 44000110}",
+      "{'SYMBOL': 'SPY', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 43546330}",
+      "{'SYMBOL': 'USAR', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 43306396}",
+      "{'SYMBOL': 'PLTD', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 43049098}",
+      "{'SYMBOL': 'PBM', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 42074933}",
+      "{'SYMBOL': 'MARA', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 41872107}",
+      "{'SYMBOL': 'DRIP', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 40713264}",
+      "{'SYMBOL': 'ASTS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39836628}",
+      "{'SYMBOL': 'CMPS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39682890}",
+      "{'SYMBOL': 'ZSPC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39520216}",
+      "{'SYMBOL': 'MRVL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39432216}",
+      "{'SYMBOL': 'AMZN', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39303149}",
+      "{'SYMBOL': 'QBTS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 39206206}",
+      "{'SYMBOL': 'BTG', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 38490804}",
+      "{'SYMBOL': 'SRXH', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 38488250}",
+      "{'SYMBOL': 'RGTI', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37743444}",
+      "{'SYMBOL': 'IBIT', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37667604}",
+      "{'SYMBOL': 'BMNR', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37567936}",
+      "{'SYMBOL': 'UVIX', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37526165}",
+      "{'SYMBOL': 'AMC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37504480}",
+      "{'SYMBOL': 'QQQ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 37340310}",
+      "{'SYMBOL': 'SCO', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 36985279}",
+      "{'SYMBOL': 'AAPL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 36564341}",
+      "{'SYMBOL': 'IREN', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35906393}",
+      "{'SYMBOL': 'BNBX', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35790892}",
+      "{'SYMBOL': 'SILO', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35628746}",
+      "{'SYMBOL': 'IGC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35499073}",
+      "{'SYMBOL': 'HOOD', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35482248}",
+      "{'SYMBOL': 'XLE', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35136849}",
+      "{'SYMBOL': 'SMR', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 35121345}",
+      "{'SYMBOL': 'AMD', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 34789291}",
+      "{'SYMBOL': 'WULF', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 34561421}",
+      "{'SYMBOL': 'PLTR', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 33439874}",
+      "{'SYMBOL': 'LCID', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 33015072}",
+      "{'SYMBOL': 'ARTL', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 32796219}",
+      "{'SYMBOL': 'MU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 31970535}",
+      "{'SYMBOL': 'JBLU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 31537802}",
+      "{'SYMBOL': 'NVTS', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 31377994}",
+      "{'SYMBOL': 'T', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 30507598}",
+      "{'SYMBOL': 'NU', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 30434106}",
+      "{'SYMBOL': 'INFQ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 29755784}",
+      "{'SYMBOL': 'ISPC', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 29514104}",
+      "{'SYMBOL': 'CRWV', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 29503426}",
+      "{'SYMBOL': 'NCLH', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 28832127}",
+      "{'SYMBOL': 'RKLB', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 28798805}",
+      "{'SYMBOL': 'ETHA', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 28515461}",
+      "{'SYMBOL': 'MSTZ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 27862422}",
+      "{'SYMBOL': 'HTZ', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 27611906}",
+      "{'SYMBOL': 'MSFT', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 27607966}",
+      "{'SYMBOL': 'RIG', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 27472816}",
+      "{'SYMBOL': 'XLF', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 26135128}",
+      "{'SYMBOL': 'QID', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 26100165}",
+      "{'SYMBOL': 'F', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25993778}",
+      "{'SYMBOL': 'HIVE', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25936483}",
+      "{'SYMBOL': 'BBAI', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25916461}",
+      "{'SYMBOL': 'CRML', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25604147}",
+      "{'SYMBOL': 'BBD', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25410074}",
+      "{'SYMBOL': 'SOUN', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25375734}",
+      "{'SYMBOL': 'OPEN', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 25183354}"
+    ],
+    "status": "error",
+    "started_at": "2026-04-20T22:50:12.849309+00:00",
+    "finished_at": "2026-04-20T22:50:14.340950+00:00",
+    "total_symbols": 100,
+    "done_symbols": 0,
+    "current_symbol": "{'SYMBOL': 'TOVX', 'PRICE': NONE, 'PERCENT_CHANGE': NONE, 'VOLUME': 645077975}",
+    "current_timeframe": "1Day",
+    "total_batches": 100,
+    "done_batches": 0,
+    "rows_fetched": 0,
+    "progress_pct": 0,
+    "status_message": "failed",
+    "error": "Client error '400 Bad Request' for url 'https://data.alpaca.markets/v2/stocks/bars?symbols=%7B%27SYMBOL%27%3A+%27TOVX%27%2C+%27PRICE%27%3A+NONE%2C+%27PERCENT_CHANGE%27%3A+NONE%2C+%27VOLUME%27%3A+645077975%7D&timeframe=1Day&start=2025-04-20T22%3A50%3A13.599519%2B00%3A00&end=2026-04-20T22%3A50%3A13.599519%2B00%3A00&limit=10000&adjustment=raw&feed=iex&sort=asc'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+    "result": null,
+    "created_at": "2026-04-20T22:50:12.849309+00:00",
+    "updated_at": "2026-04-20T22:50:14.371445+00:00",
+    "gainers_snapshot": [
+      {
+        "symbol": {
+          "symbol": "TOVX",
+          "price": null,
+          "percent_change": null,
+          "volume": 645077975
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "FCHL",
+          "price": null,
+          "percent_change": null,
+          "volume": 437259943
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "CTNT",
+          "price": null,
+          "percent_change": null,
+          "volume": 351629570
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "CMND",
+          "price": null,
+          "percent_change": null,
+          "volume": 224599431
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BYND",
+          "price": null,
+          "percent_change": null,
+          "volume": 205649171
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ENVB",
+          "price": null,
+          "percent_change": null,
+          "volume": 158375779
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BMNU",
+          "price": null,
+          "percent_change": null,
+          "volume": 144135721
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "WLDS",
+          "price": null,
+          "percent_change": null,
+          "volume": 144080859
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "TZA",
+          "price": null,
+          "percent_change": null,
+          "volume": 142338206
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "LZMH",
+          "price": null,
+          "percent_change": null,
+          "volume": 139437764
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NVDA",
+          "price": null,
+          "percent_change": null,
+          "volume": 119330171
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "PLUG",
+          "price": null,
+          "percent_change": null,
+          "volume": 111824293
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BITO",
+          "price": null,
+          "percent_change": null,
+          "volume": 107160382
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "TSLL",
+          "price": null,
+          "percent_change": null,
+          "volume": 104235403
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "INTC",
+          "price": null,
+          "percent_change": null,
+          "volume": 96665613
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ONDS",
+          "price": null,
+          "percent_change": null,
+          "volume": 94270474
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NOK",
+          "price": null,
+          "percent_change": null,
+          "volume": 88662625
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SOXS",
+          "price": null,
+          "percent_change": null,
+          "volume": 78897807
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BMNG",
+          "price": null,
+          "percent_change": null,
+          "volume": 71782716
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "HIMS",
+          "price": null,
+          "percent_change": null,
+          "volume": 69224202
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "TQQQ",
+          "price": null,
+          "percent_change": null,
+          "volume": 67303311
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "TSLA",
+          "price": null,
+          "percent_change": null,
+          "volume": 64592016
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NFLX",
+          "price": null,
+          "percent_change": null,
+          "volume": 63236671
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "AAL",
+          "price": null,
+          "percent_change": null,
+          "volume": 62711642
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "FRMI",
+          "price": null,
+          "percent_change": null,
+          "volume": 61230792
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SLNH",
+          "price": null,
+          "percent_change": null,
+          "volume": 57425482
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BB",
+          "price": null,
+          "percent_change": null,
+          "volume": 56498479
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "QXO",
+          "price": null,
+          "percent_change": null,
+          "volume": 56086869
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NVD",
+          "price": null,
+          "percent_change": null,
+          "volume": 55031346
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SOFI",
+          "price": null,
+          "percent_change": null,
+          "volume": 52454000
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "TSLG",
+          "price": null,
+          "percent_change": null,
+          "volume": 50257801
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SOXL",
+          "price": null,
+          "percent_change": null,
+          "volume": 49096719
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SPDN",
+          "price": null,
+          "percent_change": null,
+          "volume": 49004467
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "GRAB",
+          "price": null,
+          "percent_change": null,
+          "volume": 48313171
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "IONQ",
+          "price": null,
+          "percent_change": null,
+          "volume": 47803732
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SNAP",
+          "price": null,
+          "percent_change": null,
+          "volume": 47411866
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SQQQ",
+          "price": null,
+          "percent_change": null,
+          "volume": 47368332
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ATAI",
+          "price": null,
+          "percent_change": null,
+          "volume": 47013479
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SIDU",
+          "price": null,
+          "percent_change": null,
+          "volume": 45346913
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MSTU",
+          "price": null,
+          "percent_change": null,
+          "volume": 45302994
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "POET",
+          "price": null,
+          "percent_change": null,
+          "volume": 45005089
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BAC",
+          "price": null,
+          "percent_change": null,
+          "volume": 44000110
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SPY",
+          "price": null,
+          "percent_change": null,
+          "volume": 43546330
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "USAR",
+          "price": null,
+          "percent_change": null,
+          "volume": 43306396
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "PLTD",
+          "price": null,
+          "percent_change": null,
+          "volume": 43049098
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "PBM",
+          "price": null,
+          "percent_change": null,
+          "volume": 42074933
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MARA",
+          "price": null,
+          "percent_change": null,
+          "volume": 41872107
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "DRIP",
+          "price": null,
+          "percent_change": null,
+          "volume": 40713264
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ASTS",
+          "price": null,
+          "percent_change": null,
+          "volume": 39836628
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "CMPS",
+          "price": null,
+          "percent_change": null,
+          "volume": 39682890
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ZSPC",
+          "price": null,
+          "percent_change": null,
+          "volume": 39520216
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MRVL",
+          "price": null,
+          "percent_change": null,
+          "volume": 39432216
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "AMZN",
+          "price": null,
+          "percent_change": null,
+          "volume": 39303149
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "QBTS",
+          "price": null,
+          "percent_change": null,
+          "volume": 39206206
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BTG",
+          "price": null,
+          "percent_change": null,
+          "volume": 38490804
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SRXH",
+          "price": null,
+          "percent_change": null,
+          "volume": 38488250
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "RGTI",
+          "price": null,
+          "percent_change": null,
+          "volume": 37743444
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "IBIT",
+          "price": null,
+          "percent_change": null,
+          "volume": 37667604
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BMNR",
+          "price": null,
+          "percent_change": null,
+          "volume": 37567936
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "UVIX",
+          "price": null,
+          "percent_change": null,
+          "volume": 37526165
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "AMC",
+          "price": null,
+          "percent_change": null,
+          "volume": 37504480
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "QQQ",
+          "price": null,
+          "percent_change": null,
+          "volume": 37340310
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SCO",
+          "price": null,
+          "percent_change": null,
+          "volume": 36985279
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "AAPL",
+          "price": null,
+          "percent_change": null,
+          "volume": 36564341
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "IREN",
+          "price": null,
+          "percent_change": null,
+          "volume": 35906393
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BNBX",
+          "price": null,
+          "percent_change": null,
+          "volume": 35790892
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SILO",
+          "price": null,
+          "percent_change": null,
+          "volume": 35628746
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "IGC",
+          "price": null,
+          "percent_change": null,
+          "volume": 35499073
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "HOOD",
+          "price": null,
+          "percent_change": null,
+          "volume": 35482248
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "XLE",
+          "price": null,
+          "percent_change": null,
+          "volume": 35136849
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SMR",
+          "price": null,
+          "percent_change": null,
+          "volume": 35121345
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "AMD",
+          "price": null,
+          "percent_change": null,
+          "volume": 34789291
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "WULF",
+          "price": null,
+          "percent_change": null,
+          "volume": 34561421
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "PLTR",
+          "price": null,
+          "percent_change": null,
+          "volume": 33439874
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "LCID",
+          "price": null,
+          "percent_change": null,
+          "volume": 33015072
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ARTL",
+          "price": null,
+          "percent_change": null,
+          "volume": 32796219
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MU",
+          "price": null,
+          "percent_change": null,
+          "volume": 31970535
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "JBLU",
+          "price": null,
+          "percent_change": null,
+          "volume": 31537802
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NVTS",
+          "price": null,
+          "percent_change": null,
+          "volume": 31377994
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "T",
+          "price": null,
+          "percent_change": null,
+          "volume": 30507598
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NU",
+          "price": null,
+          "percent_change": null,
+          "volume": 30434106
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "INFQ",
+          "price": null,
+          "percent_change": null,
+          "volume": 29755784
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ISPC",
+          "price": null,
+          "percent_change": null,
+          "volume": 29514104
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "CRWV",
+          "price": null,
+          "percent_change": null,
+          "volume": 29503426
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "NCLH",
+          "price": null,
+          "percent_change": null,
+          "volume": 28832127
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "RKLB",
+          "price": null,
+          "percent_change": null,
+          "volume": 28798805
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "ETHA",
+          "price": null,
+          "percent_change": null,
+          "volume": 28515461
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MSTZ",
+          "price": null,
+          "percent_change": null,
+          "volume": 27862422
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "HTZ",
+          "price": null,
+          "percent_change": null,
+          "volume": 27611906
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "MSFT",
+          "price": null,
+          "percent_change": null,
+          "volume": 27607966
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "RIG",
+          "price": null,
+          "percent_change": null,
+          "volume": 27472816
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "XLF",
+          "price": null,
+          "percent_change": null,
+          "volume": 26135128
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "QID",
+          "price": null,
+          "percent_change": null,
+          "volume": 26100165
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "F",
+          "price": null,
+          "percent_change": null,
+          "volume": 25993778
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "HIVE",
+          "price": null,
+          "percent_change": null,
+          "volume": 25936483
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BBAI",
+          "price": null,
+          "percent_change": null,
+          "volume": 25916461
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "CRML",
+          "price": null,
+          "percent_change": null,
+          "volume": 25604147
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "BBD",
+          "price": null,
+          "percent_change": null,
+          "volume": 25410074
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "SOUN",
+          "price": null,
+          "percent_change": null,
+          "volume": 25375734
+        }
+      },
+      {
+        "symbol": {
+          "symbol": "OPEN",
+          "price": null,
+          "percent_change": null,
+          "volume": 25183354
+        }
+      }
+    ]
+  },
+  "gainers_backfill-20260420-233055": {
+    "job_id": "gainers_backfill-20260420-233055",
+    "type": "gainers_backfill",
+    "asset_class": "stock",
+    "symbols": [
+      "TOVX",
+      "FCHL",
+      "CTNT",
+      "CMND",
+      "BYND",
+      "ENVB",
+      "BMNU",
+      "WLDS",
+      "TZA",
+      "LZMH",
+      "NVDA",
+      "PLUG",
+      "BITO",
+      "TSLL",
+      "INTC",
+      "ONDS",
+      "NOK",
+      "SOXS",
+      "BMNG",
+      "HIMS",
+      "TQQQ",
+      "TSLA",
+      "NFLX",
+      "AAL",
+      "FRMI",
+      "SLNH",
+      "BB",
+      "QXO",
+      "NVD",
+      "SOFI",
+      "TSLG",
+      "SOXL",
+      "SPDN",
+      "GRAB",
+      "IONQ",
+      "SQQQ",
+      "SNAP",
+      "ATAI",
+      "MSTU",
+      "SIDU",
+      "POET",
+      "BAC",
+      "SPY",
+      "USAR",
+      "PLTD",
+      "PBM",
+      "MARA",
+      "DRIP",
+      "ZSPC",
+      "ASTS",
+      "CMPS",
+      "MRVL",
+      "AMZN",
+      "QBTS",
+      "SRXH",
+      "BTG",
+      "IBIT",
+      "RGTI",
+      "UVIX",
+      "BMNR",
+      "AMC",
+      "QQQ",
+      "SCO",
+      "AAPL",
+      "HOOD",
+      "IREN",
+      "IGC",
+      "BNBX",
+      "SILO",
+      "SMR",
+      "XLE",
+      "AMD",
+      "WULF",
+      "PLTR",
+      "LCID",
+      "ARTL",
+      "MU",
+      "JBLU",
+      "NVTS",
+      "T",
+      "NU",
+      "INFQ",
+      "ISPC",
+      "CRWV",
+      "NCLH",
+      "RKLB",
+      "ETHA",
+      "MSTZ",
+      "HTZ",
+      "MSFT",
+      "RIG",
+      "XLF",
+      "QID",
+      "F",
+      "BBAI",
+      "HIVE",
+      "CRML",
+      "SOUN",
+      "BBD",
+      "OPEN"
+    ],
+    "status": "done",
+    "started_at": "2026-04-20T23:30:55.248405+00:00",
+    "finished_at": "2026-04-20T23:33:09.999317+00:00",
+    "total_symbols": 100,
+    "done_symbols": 100,
+    "current_symbol": null,
+    "current_timeframe": null,
+    "total_batches": 100,
+    "done_batches": 100,
+    "rows_fetched": 24566,
+    "progress_pct": 100,
+    "status_message": "completed",
+    "error": null,
+    "result": {
+      "rows_written": 24566,
+      "symbols": [
+        "TOVX",
+        "FCHL",
+        "CTNT",
+        "CMND",
+        "BYND",
+        "ENVB",
+        "BMNU",
+        "WLDS",
+        "TZA",
+        "LZMH",
+        "NVDA",
+        "PLUG",
+        "BITO",
+        "TSLL",
+        "INTC",
+        "ONDS",
+        "NOK",
+        "SOXS",
+        "BMNG",
+        "HIMS",
+        "TQQQ",
+        "TSLA",
+        "NFLX",
+        "AAL",
+        "FRMI",
+        "SLNH",
+        "BB",
+        "QXO",
+        "NVD",
+        "SOFI",
+        "TSLG",
+        "SOXL",
+        "SPDN",
+        "GRAB",
+        "IONQ",
+        "SQQQ",
+        "SNAP",
+        "ATAI",
+        "MSTU",
+        "SIDU",
+        "POET",
+        "BAC",
+        "SPY",
+        "USAR",
+        "PLTD",
+        "PBM",
+        "MARA",
+        "DRIP",
+        "ZSPC",
+        "ASTS",
+        "CMPS",
+        "MRVL",
+        "AMZN",
+        "QBTS",
+        "SRXH",
+        "BTG",
+        "IBIT",
+        "RGTI",
+        "UVIX",
+        "BMNR",
+        "AMC",
+        "QQQ",
+        "SCO",
+        "AAPL",
+        "HOOD",
+        "IREN",
+        "IGC",
+        "BNBX",
+        "SILO",
+        "SMR",
+        "XLE",
+        "AMD",
+        "WULF",
+        "PLTR",
+        "LCID",
+        "ARTL",
+        "MU",
+        "JBLU",
+        "NVTS",
+        "T",
+        "NU",
+        "INFQ",
+        "ISPC",
+        "CRWV",
+        "NCLH",
+        "RKLB",
+        "ETHA",
+        "MSTZ",
+        "HTZ",
+        "MSFT",
+        "RIG",
+        "XLF",
+        "QID",
+        "F",
+        "BBAI",
+        "HIVE",
+        "CRML",
+        "SOUN",
+        "BBD",
+        "OPEN"
+      ],
+      "timeframe": "1Day",
+      "lookback_days": 365
+    },
+    "created_at": "2026-04-20T23:30:55.248405+00:00",
+    "updated_at": "2026-04-20T23:33:10.016017+00:00",
+    "gainers_snapshot": [
+      {
+        "symbol": "TOVX",
+        "price": null,
+        "percent_change": null,
+        "volume": 647212882.0
+      },
+      {
+        "symbol": "FCHL",
+        "price": null,
+        "percent_change": null,
+        "volume": 438253408.0
+      },
+      {
+        "symbol": "CTNT",
+        "price": null,
+        "percent_change": null,
+        "volume": 356852582.0
+      },
+      {
+        "symbol": "CMND",
+        "price": null,
+        "percent_change": null,
+        "volume": 224988378.0
+      },
+      {
+        "symbol": "BYND",
+        "price": null,
+        "percent_change": null,
+        "volume": 215920975.0
+      },
+      {
+        "symbol": "ENVB",
+        "price": null,
+        "percent_change": null,
+        "volume": 158532797.0
+      },
+      {
+        "symbol": "BMNU",
+        "price": null,
+        "percent_change": null,
+        "volume": 144239931.0
+      },
+      {
+        "symbol": "WLDS",
+        "price": null,
+        "percent_change": null,
+        "volume": 144129794.0
+      },
+      {
+        "symbol": "TZA",
+        "price": null,
+        "percent_change": null,
+        "volume": 142460104.0
+      },
+      {
+        "symbol": "LZMH",
+        "price": null,
+        "percent_change": null,
+        "volume": 139749671.0
+      },
+      {
+        "symbol": "NVDA",
+        "price": null,
+        "percent_change": null,
+        "volume": 119454446.0
+      },
+      {
+        "symbol": "PLUG",
+        "price": null,
+        "percent_change": null,
+        "volume": 112111357.0
+      },
+      {
+        "symbol": "BITO",
+        "price": null,
+        "percent_change": null,
+        "volume": 107166528.0
+      },
+      {
+        "symbol": "TSLL",
+        "price": null,
+        "percent_change": null,
+        "volume": 104465508.0
+      },
+      {
+        "symbol": "INTC",
+        "price": null,
+        "percent_change": null,
+        "volume": 96783371.0
+      },
+      {
+        "symbol": "ONDS",
+        "price": null,
+        "percent_change": null,
+        "volume": 94379816.0
+      },
+      {
+        "symbol": "NOK",
+        "price": null,
+        "percent_change": null,
+        "volume": 88677841.0
+      },
+      {
+        "symbol": "SOXS",
+        "price": null,
+        "percent_change": null,
+        "volume": 79271255.0
+      },
+      {
+        "symbol": "BMNG",
+        "price": null,
+        "percent_change": null,
+        "volume": 71810301.0
+      },
+      {
+        "symbol": "HIMS",
+        "price": null,
+        "percent_change": null,
+        "volume": 69254002.0
+      },
+      {
+        "symbol": "TQQQ",
+        "price": null,
+        "percent_change": null,
+        "volume": 67548682.0
+      },
+      {
+        "symbol": "TSLA",
+        "price": null,
+        "percent_change": null,
+        "volume": 64635302.0
+      },
+      {
+        "symbol": "NFLX",
+        "price": null,
+        "percent_change": null,
+        "volume": 63276096.0
+      },
+      {
+        "symbol": "AAL",
+        "price": null,
+        "percent_change": null,
+        "volume": 62744783.0
+      },
+      {
+        "symbol": "FRMI",
+        "price": null,
+        "percent_change": null,
+        "volume": 61351371.0
+      },
+      {
+        "symbol": "SLNH",
+        "price": null,
+        "percent_change": null,
+        "volume": 58090742.0
+      },
+      {
+        "symbol": "BB",
+        "price": null,
+        "percent_change": null,
+        "volume": 56712996.0
+      },
+      {
+        "symbol": "QXO",
+        "price": null,
+        "percent_change": null,
+        "volume": 56118284.0
+      },
+      {
+        "symbol": "NVD",
+        "price": null,
+        "percent_change": null,
+        "volume": 55037099.0
+      },
+      {
+        "symbol": "SOFI",
+        "price": null,
+        "percent_change": null,
+        "volume": 52522138.0
+      },
+      {
+        "symbol": "TSLG",
+        "price": null,
+        "percent_change": null,
+        "volume": 50258978.0
+      },
+      {
+        "symbol": "SOXL",
+        "price": null,
+        "percent_change": null,
+        "volume": 49283964.0
+      },
+      {
+        "symbol": "SPDN",
+        "price": null,
+        "percent_change": null,
+        "volume": 49005677.0
+      },
+      {
+        "symbol": "GRAB",
+        "price": null,
+        "percent_change": null,
+        "volume": 48413586.0
+      },
+      {
+        "symbol": "IONQ",
+        "price": null,
+        "percent_change": null,
+        "volume": 47848176.0
+      },
+      {
+        "symbol": "SQQQ",
+        "price": null,
+        "percent_change": null,
+        "volume": 47589351.0
+      },
+      {
+        "symbol": "SNAP",
+        "price": null,
+        "percent_change": null,
+        "volume": 47431319.0
+      },
+      {
+        "symbol": "ATAI",
+        "price": null,
+        "percent_change": null,
+        "volume": 47044717.0
+      },
+      {
+        "symbol": "MSTU",
+        "price": null,
+        "percent_change": null,
+        "volume": 45444768.0
+      },
+      {
+        "symbol": "SIDU",
+        "price": null,
+        "percent_change": null,
+        "volume": 45405535.0
+      },
+      {
+        "symbol": "POET",
+        "price": null,
+        "percent_change": null,
+        "volume": 45030700.0
+      },
+      {
+        "symbol": "BAC",
+        "price": null,
+        "percent_change": null,
+        "volume": 44001698.0
+      },
+      {
+        "symbol": "SPY",
+        "price": null,
+        "percent_change": null,
+        "volume": 43561945.0
+      },
+      {
+        "symbol": "USAR",
+        "price": null,
+        "percent_change": null,
+        "volume": 43360042.0
+      },
+      {
+        "symbol": "PLTD",
+        "price": null,
+        "percent_change": null,
+        "volume": 43052562.0
+      },
+      {
+        "symbol": "PBM",
+        "price": null,
+        "percent_change": null,
+        "volume": 42214138.0
+      },
+      {
+        "symbol": "MARA",
+        "price": null,
+        "percent_change": null,
+        "volume": 41894087.0
+      },
+      {
+        "symbol": "DRIP",
+        "price": null,
+        "percent_change": null,
+        "volume": 40713570.0
+      },
+      {
+        "symbol": "ZSPC",
+        "price": null,
+        "percent_change": null,
+        "volume": 39889332.0
+      },
+      {
+        "symbol": "ASTS",
+        "price": null,
+        "percent_change": null,
+        "volume": 39861840.0
+      },
+      {
+        "symbol": "CMPS",
+        "price": null,
+        "percent_change": null,
+        "volume": 39714806.0
+      },
+      {
+        "symbol": "MRVL",
+        "price": null,
+        "percent_change": null,
+        "volume": 39497491.0
+      },
+      {
+        "symbol": "AMZN",
+        "price": null,
+        "percent_change": null,
+        "volume": 39416650.0
+      },
+      {
+        "symbol": "QBTS",
+        "price": null,
+        "percent_change": null,
+        "volume": 39233306.0
+      },
+      {
+        "symbol": "SRXH",
+        "price": null,
+        "percent_change": null,
+        "volume": 38624703.0
+      },
+      {
+        "symbol": "BTG",
+        "price": null,
+        "percent_change": null,
+        "volume": 38492611.0
+      },
+      {
+        "symbol": "IBIT",
+        "price": null,
+        "percent_change": null,
+        "volume": 37795116.0
+      },
+      {
+        "symbol": "RGTI",
+        "price": null,
+        "percent_change": null,
+        "volume": 37764264.0
+      },
+      {
+        "symbol": "UVIX",
+        "price": null,
+        "percent_change": null,
+        "volume": 37673302.0
+      },
+      {
+        "symbol": "BMNR",
+        "price": null,
+        "percent_change": null,
+        "volume": 37608901.0
+      },
+      {
+        "symbol": "AMC",
+        "price": null,
+        "percent_change": null,
+        "volume": 37540257.0
+      },
+      {
+        "symbol": "QQQ",
+        "price": null,
+        "percent_change": null,
+        "volume": 37364718.0
+      },
+      {
+        "symbol": "SCO",
+        "price": null,
+        "percent_change": null,
+        "volume": 37108918.0
+      },
+      {
+        "symbol": "AAPL",
+        "price": null,
+        "percent_change": null,
+        "volume": 36614162.0
+      },
+      {
+        "symbol": "HOOD",
+        "price": null,
+        "percent_change": null,
+        "volume": 35936147.0
+      },
+      {
+        "symbol": "IREN",
+        "price": null,
+        "percent_change": null,
+        "volume": 35935463.0
+      },
+      {
+        "symbol": "IGC",
+        "price": null,
+        "percent_change": null,
+        "volume": 35847585.0
+      },
+      {
+        "symbol": "BNBX",
+        "price": null,
+        "percent_change": null,
+        "volume": 35810357.0
+      },
+      {
+        "symbol": "SILO",
+        "price": null,
+        "percent_change": null,
+        "volume": 35659455.0
+      },
+      {
+        "symbol": "SMR",
+        "price": null,
+        "percent_change": null,
+        "volume": 35177162.0
+      },
+      {
+        "symbol": "XLE",
+        "price": null,
+        "percent_change": null,
+        "volume": 35144440.0
+      },
+      {
+        "symbol": "AMD",
+        "price": null,
+        "percent_change": null,
+        "volume": 34834450.0
+      },
+      {
+        "symbol": "WULF",
+        "price": null,
+        "percent_change": null,
+        "volume": 34566472.0
+      },
+      {
+        "symbol": "PLTR",
+        "price": null,
+        "percent_change": null,
+        "volume": 33487204.0
+      },
+      {
+        "symbol": "LCID",
+        "price": null,
+        "percent_change": null,
+        "volume": 33202004.0
+      },
+      {
+        "symbol": "ARTL",
+        "price": null,
+        "percent_change": null,
+        "volume": 32822279.0
+      },
+      {
+        "symbol": "MU",
+        "price": null,
+        "percent_change": null,
+        "volume": 32007462.0
+      },
+      {
+        "symbol": "JBLU",
+        "price": null,
+        "percent_change": null,
+        "volume": 31541747.0
+      },
+      {
+        "symbol": "NVTS",
+        "price": null,
+        "percent_change": null,
+        "volume": 31421837.0
+      },
+      {
+        "symbol": "T",
+        "price": null,
+        "percent_change": null,
+        "volume": 30510410.0
+      },
+      {
+        "symbol": "NU",
+        "price": null,
+        "percent_change": null,
+        "volume": 30494077.0
+      },
+      {
+        "symbol": "INFQ",
+        "price": null,
+        "percent_change": null,
+        "volume": 29775616.0
+      },
+      {
+        "symbol": "ISPC",
+        "price": null,
+        "percent_change": null,
+        "volume": 29595604.0
+      },
+      {
+        "symbol": "CRWV",
+        "price": null,
+        "percent_change": null,
+        "volume": 29525936.0
+      },
+      {
+        "symbol": "NCLH",
+        "price": null,
+        "percent_change": null,
+        "volume": 28850748.0
+      },
+      {
+        "symbol": "RKLB",
+        "price": null,
+        "percent_change": null,
+        "volume": 28817983.0
+      },
+      {
+        "symbol": "ETHA",
+        "price": null,
+        "percent_change": null,
+        "volume": 28583379.0
+      },
+      {
+        "symbol": "MSTZ",
+        "price": null,
+        "percent_change": null,
+        "volume": 27962248.0
+      },
+      {
+        "symbol": "HTZ",
+        "price": null,
+        "percent_change": null,
+        "volume": 27633503.0
+      },
+      {
+        "symbol": "MSFT",
+        "price": null,
+        "percent_change": null,
+        "volume": 27629973.0
+      },
+      {
+        "symbol": "RIG",
+        "price": null,
+        "percent_change": null,
+        "volume": 27472893.0
+      },
+      {
+        "symbol": "XLF",
+        "price": null,
+        "percent_change": null,
+        "volume": 26150717.0
+      },
+      {
+        "symbol": "QID",
+        "price": null,
+        "percent_change": null,
+        "volume": 26105672.0
+      },
+      {
+        "symbol": "F",
+        "price": null,
+        "percent_change": null,
+        "volume": 25999927.0
+      },
+      {
+        "symbol": "BBAI",
+        "price": null,
+        "percent_change": null,
+        "volume": 25978998.0
+      },
+      {
+        "symbol": "HIVE",
+        "price": null,
+        "percent_change": null,
+        "volume": 25954857.0
+      },
+      {
+        "symbol": "CRML",
+        "price": null,
+        "percent_change": null,
+        "volume": 25633860.0
+      },
+      {
+        "symbol": "SOUN",
+        "price": null,
+        "percent_change": null,
+        "volume": 25415034.0
+      },
+      {
+        "symbol": "BBD",
+        "price": null,
+        "percent_change": null,
+        "volume": 25410076.0
+      },
+      {
+        "symbol": "OPEN",
+        "price": null,
+        "percent_change": null,
+        "volume": 25283164.0
+      }
+    ]
+  }
+}

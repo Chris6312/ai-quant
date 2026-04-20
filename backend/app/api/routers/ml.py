@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, NamedTuple, Protocol, cast
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -18,6 +19,7 @@ from app.config.constants import ALPACA_DEFAULT_SOURCE, CRYPTO_CSV_TRAINING_SOUR
 from app.config.settings import get_settings
 from app.db.models import CandleRow
 from app.db.session import build_engine, build_session_factory
+from app.ml.crypto_csv_ingestion import CryptoCsvTrainingIngestor
 from app.ml.job_store import create_job, finish_job, update_job
 from app.ml.job_store import get_job as load_job
 from app.ml.job_store import list_jobs as load_jobs
@@ -31,6 +33,8 @@ from app.repositories.candles import CandleRepository
 router = APIRouter(prefix="/ml", tags=["ml"])
 
 _TRAINING_SOURCES = (ALPACA_DEFAULT_SOURCE, CRYPTO_CSV_TRAINING_SOURCE)
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_CRYPTO_HISTORY_DIR = _PROJECT_ROOT / "crypto-history"
 
 
 class TrainingStatusRow(NamedTuple):
@@ -50,10 +54,42 @@ class TrainingStatusResult(Protocol):
         """Return grouped training status rows."""
 
 
+class StockBackfillRequest(BaseModel):
+    symbols: list[str]
+    timeframe: str = "1Day"
+    lookback_days: int = 365
+
+
+class CryptoBackfillRequest(BaseModel):
+    lookback_days: int = 0
+
+
+class MlPersistenceResponse(BaseModel):
+    jobs: list[dict[str, object]]
+    active_job_id: str | None
+    has_running_job: bool
+    training: dict[str, object]
+    persisted_at: str
+
+
+class GainersResponse(BaseModel):
+    gainers: list[dict[str, object]]
+    count: int
+    fetched_at: str
+    error: str | None = None
+
+
+class GainersSnapshotRow(NamedTuple):
+    symbol: str
+    price: float | None
+    percent_change: float | None
+    volume: float | None
+
+
 def _resolve_asset_class(job_type: str) -> str:
     if "crypto" in job_type:
         return "crypto"
-    if "stock" in job_type:
+    if "stock" in job_type or "gainers" in job_type:
         return "stock"
     return "mixed"
 
@@ -91,6 +127,50 @@ def _sorted_jobs() -> list[dict[str, object]]:
 
 def _active_job() -> dict[str, object] | None:
     return next((job for job in _sorted_jobs() if job.get("status") == "running"), None)
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_gainer_item(item: object) -> dict[str, object] | None:
+    if isinstance(item, str):
+        symbol = item.strip().upper()
+        if not symbol:
+            return None
+        return {
+            "symbol": symbol,
+            "price": None,
+            "percent_change": None,
+            "volume": None,
+        }
+
+    if isinstance(item, Mapping):
+        symbol_raw = item.get("symbol")
+        symbol = str(symbol_raw).strip().upper() if symbol_raw is not None else ""
+        if not symbol:
+            return None
+
+        return {
+            "symbol": symbol,
+            "price": _coerce_optional_float(item.get("price")),
+            "percent_change": _coerce_optional_float(item.get("percent_change")),
+            "volume": _coerce_optional_float(item.get("volume")),
+        }
+
+    return None
 
 
 async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
@@ -194,37 +274,35 @@ async def _build_training_status() -> dict[str, object]:
     }
 
 
-@router.get("/training/status")
-async def training_status() -> dict[str, object]:
-    status = await get_or_build_training_status(
-        _build_training_status,
-        allow_stale=_active_job() is not None,
+async def _load_gainers(limit: int) -> GainersResponse:
+    settings = get_settings()
+
+    if not settings.alpaca_api_key:
+        return GainersResponse(
+            gainers=[],
+            count=0,
+            fetched_at=datetime.now(tz=UTC).isoformat(),
+            error="alpaca key missing",
+        )
+
+    fetcher = AlpacaTrainingFetcher(
+        api_key=settings.alpaca_api_key,
+        api_secret=settings.alpaca_api_secret,
     )
-    return cast(dict[str, object], status)
+    raw_items = await fetcher.fetch_most_active(top=limit)
 
+    gainers: list[dict[str, object]] = []
 
-@router.get("/jobs")
-async def list_jobs() -> list[dict[str, object]]:
-    return _sorted_jobs()
+    for item in raw_items:
+        normalized = _normalize_gainer_item(item)
+        if normalized is not None:
+            gainers.append(normalized)
 
-
-@router.get("/jobs/active")
-async def active_job() -> dict[str, object]:
-    return {"job": _active_job()}
-
-
-@router.get("/jobs/{job_id}")
-async def get_job(job_id: str) -> dict[str, object]:
-    job = load_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    return cast(dict[str, object], job)
-
-
-class StockBackfillRequest(BaseModel):
-    symbols: list[str]
-    timeframe: str = "1Day"
-    lookback_days: int = 365
+    return GainersResponse(
+        gainers=gainers,
+        count=len(gainers),
+        fetched_at=datetime.now(tz=UTC).isoformat(),
+    )
 
 
 async def _run_stock_backfill(
@@ -233,9 +311,12 @@ async def _run_stock_backfill(
     timeframe: str,
     lookback_days: int,
     candle_repo: CandleRepository,
+    *,
+    status_prefix: str = "stock",
+    gainers_snapshot: list[dict[str, object]] | None = None,
 ) -> None:
     settings = get_settings()
-    mark_training_status_stale("stock_backfill_started")
+    mark_training_status_stale(f"{status_prefix}_backfill_started")
 
     fetcher = AlpacaTrainingFetcher(
         repository=candle_repo,
@@ -248,6 +329,9 @@ async def _run_stock_backfill(
     rows_written = 0
 
     try:
+        if gainers_snapshot is not None:
+            update_job(job_id, gainers_snapshot=gainers_snapshot)
+
         for i, symbol in enumerate(symbols, start=1):
             update_job(
                 job_id,
@@ -281,12 +365,186 @@ async def _run_stock_backfill(
         finish_job(
             job_id,
             status="done",
-            result={"rows_written": rows_written},
+            result={
+                "rows_written": rows_written,
+                "symbols": symbols,
+                "timeframe": timeframe,
+                "lookback_days": lookback_days,
+            },
         )
-        update_job(job_id, progress_pct=100, status_message="completed")
+        update_job(
+            job_id,
+            progress_pct=100,
+            status_message="completed",
+            current_symbol=None,
+            current_timeframe=None,
+        )
     except Exception as exc:
         finish_job(job_id, status="error", error=str(exc))
         update_job(job_id, status_message="failed")
+
+
+async def _run_crypto_csv_backfill(
+    job_id: str,
+    candle_repo: CandleRepository,
+) -> None:
+    mark_training_status_stale("crypto_csv_backfill_started")
+
+    if not _CRYPTO_HISTORY_DIR.exists():
+        finish_job(
+            job_id,
+            status="error",
+            error=f"crypto CSV folder not found: {_CRYPTO_HISTORY_DIR}",
+        )
+        update_job(job_id, status_message="crypto-history folder missing")
+        return
+
+    ingestor = CryptoCsvTrainingIngestor(
+        repository=candle_repo,
+        csv_dir=_CRYPTO_HISTORY_DIR,
+    )
+
+    try:
+        csv_files = sorted(_CRYPTO_HISTORY_DIR.glob("*.csv"))
+        total = max(len(csv_files), 1)
+
+        update_job(
+            job_id,
+            total_symbols=total,
+            total_batches=total,
+            done_symbols=0,
+            done_batches=0,
+            rows_fetched=0,
+            progress_pct=0,
+            status_message="reading crypto CSV files",
+        )
+
+        summaries = await ingestor.ingest_all()
+        rows_written = 0
+
+        for i, summary in enumerate(summaries, start=1):
+            rows_written += summary.rows_written
+            update_job(
+                job_id,
+                current_symbol=summary.symbol,
+                current_timeframe="1Day",
+                done_symbols=i,
+                total_batches=total,
+                done_batches=i,
+                rows_fetched=rows_written,
+                progress_pct=int((i / total) * 100),
+                status_message=f"imported {summary.symbol} CSV",
+            )
+
+        await rebuild_training_status(_build_training_status)
+        finish_job(
+            job_id,
+            status="done",
+            result={
+                "rows_written": rows_written,
+                "symbols": [summary.symbol for summary in summaries],
+                "source_dir": str(_CRYPTO_HISTORY_DIR),
+            },
+        )
+        update_job(
+            job_id,
+            progress_pct=100,
+            status_message="completed",
+            current_symbol=None,
+            current_timeframe=None,
+        )
+    except Exception as exc:
+        finish_job(job_id, status="error", error=str(exc))
+        update_job(job_id, status_message="failed")
+
+
+@router.get("/training/status")
+async def training_status() -> dict[str, object]:
+    status = await get_or_build_training_status(
+        _build_training_status,
+        allow_stale=_active_job() is not None,
+    )
+    return cast(dict[str, object], status)
+
+
+@router.get("/persistence")
+async def ml_persistence() -> MlPersistenceResponse:
+    jobs = _sorted_jobs()
+    active_job = _active_job()
+    training = await get_or_build_training_status(
+        _build_training_status,
+        allow_stale=active_job is not None,
+    )
+    return MlPersistenceResponse(
+        jobs=jobs,
+        active_job_id=cast(str | None, active_job.get("job_id") if active_job else None),
+        has_running_job=active_job is not None,
+        training=cast(dict[str, object], training),
+        persisted_at=datetime.now(tz=UTC).isoformat(),
+    )
+
+
+@router.get("/jobs")
+async def list_jobs() -> list[dict[str, object]]:
+    return _sorted_jobs()
+
+
+@router.get("/jobs/active")
+async def active_job() -> dict[str, object]:
+    return {"job": _active_job()}
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> dict[str, object]:
+    job = load_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return cast(dict[str, object], job)
+
+
+@router.get("/gainers")
+async def get_top_gainers(
+    limit: int = Query(default=100, ge=1, le=100),
+) -> dict[str, object]:
+    response = await _load_gainers(limit)
+    return response.model_dump()
+
+
+@router.post("/backfill/gainers")
+async def backfill_gainers(
+    background_tasks: BackgroundTasks,
+    candle_repo: Annotated[CandleRepository, Depends(get_candle_repository)],
+    limit: int = Query(default=100, ge=1, le=100),
+    lookback_days: int = Query(default=365, ge=1, le=730),
+) -> dict[str, object]:
+    gainers = await _load_gainers(limit)
+    if gainers.error:
+        raise HTTPException(status_code=400, detail=gainers.error)
+
+    symbols: list[str] = []
+
+    for row in gainers.gainers:
+        symbol = row.get("symbol")
+        if isinstance(symbol, str) and symbol:
+            symbols.append(symbol)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="no gainers returned")
+
+    job = _new_job("gainers_backfill", symbols)
+    update_job(str(job["job_id"]), gainers_snapshot=gainers.gainers)
+
+    background_tasks.add_task(
+        _run_stock_backfill,
+        str(job["job_id"]),
+        symbols,
+        "1Day",
+        lookback_days,
+        candle_repo,
+        status_prefix="gainers",
+        gainers_snapshot=gainers.gainers,
+    )
+
+    return job
 
 
 @router.post("/backfill/stocks")
@@ -313,36 +571,28 @@ async def backfill_stocks(
     return job
 
 
-@router.get("/gainers")
-async def get_top_gainers(
-    limit: int = Query(default=100, ge=1, le=100),
+@router.post("/backfill/crypto")
+async def backfill_crypto(
+    payload: CryptoBackfillRequest,
+    background_tasks: BackgroundTasks,
+    candle_repo: Annotated[CandleRepository, Depends(get_candle_repository)],
 ) -> dict[str, object]:
-    settings = get_settings()
+    del payload
+    symbols = sorted(KRAKEN_UNIVERSE)
+    job = _new_job("crypto_csv_backfill", symbols)
+    update_job(
+        str(job["job_id"]),
+        current_timeframe="1Day",
+        status_message="queued crypto CSV import",
+    )
 
-    if not settings.alpaca_api_key:
-        return {"error": "alpaca key missing", "gainers": []}
+    background_tasks.add_task(
+        _run_crypto_csv_backfill,
+        str(job["job_id"]),
+        candle_repo,
+    )
 
-    headers = {
-        "APCA-API-KEY-ID": settings.alpaca_api_key,
-        "APCA-API-SECRET-KEY": settings.alpaca_api_secret or "",
-    }
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives",
-            params={"top": limit, "by": "volume"},
-            headers=headers,
-        )
-        response.raise_for_status()
-        data = cast(dict[str, object], response.json())
-
-    gainers = cast(list[dict[str, object]], data.get("most-actives", []))
-
-    return {
-        "count": len(gainers),
-        "gainers": gainers,
-        "fetched_at": datetime.now(tz=UTC).isoformat(),
-    }
+    return job
 
 
 @router.get("/crypto/universe")
@@ -350,4 +600,5 @@ async def crypto_universe() -> dict[str, object]:
     return {
         "symbols": sorted(KRAKEN_UNIVERSE),
         "count": len(KRAKEN_UNIVERSE),
+        "source_dir": str(_CRYPTO_HISTORY_DIR),
     }

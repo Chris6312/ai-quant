@@ -50,94 +50,97 @@ class CryptoCsvTrainingIngestor:
         field_name: str,
         file_name: str,
     ) -> float:
-
         try:
             return float(raw_value.strip())
-
         except ValueError as exc:
-
             raise ResearchParseError(
                 f"invalid {field_name} value '{raw_value}' in {file_name}"
             ) from exc
 
-    def _read_csv(
+    def _parse_timestamp(
         self,
-        csv_path: Path,
-    ) -> tuple[str, list[CandleRow]]:
+        raw_value: str,
+        *,
+        file_name: str,
+    ) -> datetime:
+        try:
+            unix_seconds = int(raw_value.strip())
+        except ValueError as exc:
+            raise ResearchParseError(
+                f"invalid timestamp value '{raw_value}' in {file_name}"
+            ) from exc
 
+        return datetime.fromtimestamp(unix_seconds, tz=UTC)
+
+    def _symbol_from_filename(self, csv_path: Path) -> str:
+        stem = csv_path.stem
+        if stem.endswith("_1440"):
+            stem = stem[:-5]
+        return self._normalize_symbol(stem)
+
+    def _read_csv(self, csv_path: Path) -> tuple[str, list[CandleRow], int]:
         dedup: dict[datetime, CandleRow] = {}
+        rows_seen = 0
 
         with csv_path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            symbol = self._symbol_from_filename(csv_path)
 
-            reader = csv.DictReader(handle)
+            for line_number, row in enumerate(reader, start=1):
+                if not row or not any(cell.strip() for cell in row):
+                    continue
 
-            required = {
-                "timestamp",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-            }
+                if len(row) < 7:
+                    raise ResearchParseError(
+                        f"{csv_path.name} row {line_number} has fewer than 7 columns"
+                    )
 
-            if not required.issubset(reader.fieldnames or set()):
-
-                raise ResearchParseError(
-                    f"{csv_path.name} missing required columns"
-                )
-
-            symbol = self._normalize_symbol(csv_path.stem)
-
-            for row in reader:
-
-                ts = datetime.fromisoformat(
-                    row["timestamp"].replace("Z", "+00:00")
-                ).astimezone(UTC)
-
-                dedup[ts] = CandleRow(
+                timestamp = self._parse_timestamp(row[0], file_name=csv_path.name)
+                rows_seen += 1
+                dedup[timestamp] = CandleRow(
                     symbol=symbol,
                     asset_class="crypto",
                     timeframe="1Day",
                     source=CRYPTO_CSV_TRAINING_SOURCE,
-                    time=ts,
+                    time=timestamp,
                     open=self._parse_float(
-                        row["open"],
+                        row[1],
                         field_name="open",
                         file_name=csv_path.name,
                     ),
                     high=self._parse_float(
-                        row["high"],
+                        row[2],
                         field_name="high",
                         file_name=csv_path.name,
                     ),
                     low=self._parse_float(
-                        row["low"],
+                        row[3],
                         field_name="low",
                         file_name=csv_path.name,
                     ),
                     close=self._parse_float(
-                        row["close"],
+                        row[4],
                         field_name="close",
                         file_name=csv_path.name,
                     ),
                     volume=self._parse_float(
-                        row["volume"],
+                        row[6],
                         field_name="volume",
                         file_name=csv_path.name,
                     ),
                 )
 
-        return symbol, list(dedup.values())
+        return symbol, list(dedup.values()), rows_seen
 
     async def ingest_all(self) -> list[IngestSummary]:
-
         summaries: list[IngestSummary] = []
 
-        for csv_file in sorted(self.csv_dir.glob("*.csv")):
+        for csv_file in sorted(self.csv_dir.glob("*_1440.csv")):
+            symbol, rows, rows_seen = self._read_csv(csv_file)
 
-            symbol, rows = self._read_csv(csv_file)
-
-            if hasattr(self.repository, "upsert_candles"):
+            if hasattr(self.repository, "bulk_upsert"):
+                await self.repository.bulk_upsert(rows)
+            elif hasattr(self.repository, "upsert_candles"):
                 await self.repository.upsert_candles(rows)
             elif hasattr(self.repository, "save_candles"):
                 await self.repository.save_candles(rows)
@@ -148,7 +151,7 @@ class CryptoCsvTrainingIngestor:
             summaries.append(
                 IngestSummary(
                     symbol=symbol,
-                    rows_read=len(rows),
+                    rows_read=rows_seen,
                     rows_written=len(rows),
                 )
             )

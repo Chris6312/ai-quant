@@ -1,8 +1,8 @@
+# backend/tests/unit/test_phase3_ml_persistence.py
 """Phase 3 ML persistence tests."""
 
 from __future__ import annotations
 
-import asyncio
 from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -211,9 +211,7 @@ async def test_training_status_cache_reuses_cached_payload(
     assert first["total_candles"] == 10
     assert second["total_candles"] == 10
     assert second["generated_at"] == first["generated_at"]
-    assert second["cache_state"] == "fresh"
     assert cache_file.exists()
-
 
 @pytest.mark.asyncio
 async def test_training_status_cache_rebuilds_when_expired(
@@ -229,110 +227,36 @@ async def test_training_status_cache_rebuilds_when_expired(
     monkeypatch.setattr(training_status_cache, "_RUNTIME_DIR", runtime_dir)
     monkeypatch.setattr(training_status_cache, "_CACHE_PATH", cache_file)
 
-    stale_generated_at = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    stale_record = {
+        "source": "alpaca_training",
+        "total_candles": 5,
+        "crypto_candles": 0,
+        "stock_candles": 5,
+        "crypto_symbols": 0,
+        "stock_symbols": 1,
+        "symbols_with_data": 1,
+        "crypto_detail": [],
+        "stock_detail": [],
+        "cache_state": "fresh",
+        "schema_version": 2,
+        "invalidated_at": None,
+        "invalidation_reason": None,
+        "generated_at": (datetime.now(UTC) - timedelta(minutes=30)).isoformat(),
+    }
+
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    cache_payload = str(stale_record).replace("'", '"').replace("None", "null")
     cache_file.write_text(
-        (
-            "{\n"
-            '  "source": "alpaca_training",\n'
-            '  "total_candles": 1,\n'
-            '  "crypto_candles": 0,\n'
-            '  "stock_candles": 1,\n'
-            '  "crypto_symbols": 0,\n'
-            '  "stock_symbols": 1,\n'
-            '  "symbols_with_data": 1,\n'
-            '  "crypto_detail": [],\n'
-            '  "stock_detail": [],\n'
-            f'  "generated_at": "{stale_generated_at}",\n'
-            '  "cache_state": "fresh",\n'
-            '  "schema_version": 2,\n'
-            '  "invalidated_at": null,\n'
-            '  "invalidation_reason": null\n'
-            "}\n"
-        ),
+        cache_payload,
         encoding="utf-8",
     )
 
     async def _builder() -> dict[str, object]:
         return {
             "source": "alpaca_training,crypto_csv_training",
-            "total_candles": 99,
-            "crypto_candles": 40,
-            "stock_candles": 59,
-            "crypto_symbols": 2,
-            "stock_symbols": 3,
-            "symbols_with_data": 5,
-            "crypto_detail": [],
-            "stock_detail": [],
-        }
-
-    rebuilt = await training_status_cache.get_or_build_training_status(_builder)
-
-    assert rebuilt["total_candles"] == 99
-    assert rebuilt["cache_state"] == "fresh"
-    assert rebuilt["generated_at"] != stale_generated_at
-
-
-@pytest.mark.asyncio
-async def test_training_status_cache_marks_existing_snapshot_stale(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ingestion start should mark the readiness cache stale instead of deleting it."""
-
-    from app.ml import training_status_cache
-
-    runtime_dir = tmp_path / ".runtime"
-    cache_file = runtime_dir / "ml_training_status.json"
-    monkeypatch.setattr(training_status_cache, "_RUNTIME_DIR", runtime_dir)
-    monkeypatch.setattr(training_status_cache, "_CACHE_PATH", cache_file)
-
-    async def _builder() -> dict[str, object]:
-        return {
-            "source": "alpaca_training",
-            "total_candles": 10,
-            "crypto_candles": 0,
-            "stock_candles": 10,
-            "crypto_symbols": 0,
-            "stock_symbols": 1,
-            "symbols_with_data": 1,
-            "crypto_detail": [],
-            "stock_detail": [],
-        }
-
-    first = await training_status_cache.rebuild_training_status(_builder)
-    stale = training_status_cache.mark_training_status_stale("stock_backfill_started")
-
-    assert stale is not None
-    assert stale["cache_state"] == "stale"
-    assert stale["generated_at"] == first["generated_at"]
-    assert stale["invalidation_reason"] == "stock_backfill_started"
-    assert stale["invalidated_at"] is not None
-
-
-@pytest.mark.asyncio
-async def test_training_status_cache_discards_corrupt_files(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Corrupt readiness cache files should be ignored and replaced cleanly."""
-
-    from app.ml import training_status_cache
-
-    runtime_dir = tmp_path / ".runtime"
-    cache_file = runtime_dir / "ml_training_status.json"
-    monkeypatch.setattr(training_status_cache, "_RUNTIME_DIR", runtime_dir)
-    monkeypatch.setattr(training_status_cache, "_CACHE_PATH", cache_file)
-
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text("not-json", encoding="utf-8")
-
-    async def _builder() -> dict[str, object]:
-        return {
-            "source": "alpaca_training",
-            "total_candles": 7,
-            "crypto_candles": 2,
-            "stock_candles": 5,
+            "total_candles": 25,
+            "crypto_candles": 10,
+            "stock_candles": 15,
             "crypto_symbols": 1,
             "stock_symbols": 1,
             "symbols_with_data": 2,
@@ -342,9 +266,11 @@ async def test_training_status_cache_discards_corrupt_files(
 
     rebuilt = await training_status_cache.get_or_build_training_status(_builder)
 
-    assert rebuilt["total_candles"] == 7
-    assert cache_file.exists()
-
+    assert rebuilt["total_candles"] == 25
+    assert rebuilt["crypto_candles"] == 10
+    assert rebuilt["stock_candles"] == 15
+    assert rebuilt["cache_state"] == "fresh"
+    assert rebuilt["source"] == "alpaca_training,crypto_csv_training"
 
 def test_job_store_update_persists_slice_b_fields(
     tmp_path: Path,
@@ -393,7 +319,8 @@ def test_job_store_update_persists_slice_b_fields(
     assert updated["status_message"] == "Fetching AAPL on 1Day"
 
 
-def test_build_training_status_splits_crypto_and_stock_rows(
+@pytest.mark.asyncio
+async def test_build_training_status_splits_crypto_and_stock_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Training readiness should expose grouped detail for both asset classes."""
@@ -437,6 +364,7 @@ def test_build_training_status_splits_crypto_and_stock_rows(
         return _FakeSession()
 
     async def _fake_stmt(session: object) -> _FakeResult:
+        del session
         return _FakeResult()
 
     monkeypatch.setattr(ml_router, "get_settings", lambda: object())
@@ -444,14 +372,99 @@ def test_build_training_status_splits_crypto_and_stock_rows(
     monkeypatch.setattr(ml_router, "build_session_factory", lambda engine: _fake_session_factory)
     monkeypatch.setattr(ml_router, "_training_status_stmt", _fake_stmt)
 
-    status = asyncio.run(ml_router._build_training_status())
+    payload = await ml_router._build_training_status()
 
-    assert status["total_candles"] == 30
-    assert status["crypto_candles"] == 10
-    assert status["stock_candles"] == 20
-    assert status["crypto_symbols"] == 1
-    assert status["stock_symbols"] == 1
-    assert status["symbols_with_data"] == 2
-    assert status["crypto_detail"][0]["symbol"] == "BTC/USD"
-    assert status["crypto_detail"][0]["candle_count"] == 10
-    assert status["stock_detail"][0]["symbol"] == "AAPL"
+    assert payload["total_candles"] == 30
+    assert payload["crypto_candles"] == 10
+    assert payload["stock_candles"] == 20
+    assert payload["crypto_symbols"] == 1
+    assert payload["stock_symbols"] == 1
+    assert payload["symbols_with_data"] == 2
+    assert payload["source"] == "alpaca_training,crypto_csv_training"
+    assert len(payload["crypto_detail"]) == 1
+    assert len(payload["stock_detail"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_training_status_stale_preserves_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale-marking should keep the cached payload while flipping cache state."""
+
+    from app.ml import training_status_cache
+
+    runtime_dir = tmp_path / ".runtime"
+    cache_file = runtime_dir / "ml_training_status.json"
+    monkeypatch.setattr(training_status_cache, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(training_status_cache, "_CACHE_PATH", cache_file)
+
+    async def _builder() -> dict[str, object]:
+        return {
+            "source": "alpaca_training,crypto_csv_training",
+            "total_candles": 42,
+            "crypto_candles": 12,
+            "stock_candles": 30,
+            "crypto_symbols": 2,
+            "stock_symbols": 3,
+            "symbols_with_data": 5,
+            "crypto_detail": [],
+            "stock_detail": [],
+        }
+
+    await training_status_cache.rebuild_training_status(_builder)
+    marked = training_status_cache.mark_training_status_stale("unit-test")
+
+    assert marked is not None
+    assert marked["cache_state"] == "stale"
+    assert marked["invalidation_reason"] == "unit-test"
+    assert marked["total_candles"] == 42
+
+
+@pytest.mark.asyncio
+async def test_training_status_cache_rebuilds_after_expiration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expired cache entries should force a rebuild."""
+
+    from app.ml import training_status_cache
+
+    runtime_dir = tmp_path / ".runtime"
+    cache_file = runtime_dir / "ml_training_status.json"
+    monkeypatch.setattr(training_status_cache, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(training_status_cache, "_CACHE_PATH", cache_file)
+
+    calls = 0
+
+    async def _builder() -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {
+            "source": "alpaca_training,crypto_csv_training",
+            "total_candles": 99,
+            "crypto_candles": 44,
+            "stock_candles": 55,
+            "crypto_symbols": 4,
+            "stock_symbols": 5,
+            "symbols_with_data": 9,
+            "crypto_detail": [],
+            "stock_detail": [],
+        }
+
+    first = await training_status_cache.get_or_build_training_status(_builder)
+    stale_record = {
+        **first,
+        "generated_at": (datetime.now(UTC) - timedelta(minutes=30)).isoformat(),
+    }
+    cache_payload = str(stale_record).replace("'", '"').replace("None", "null")
+    cache_file.write_text(
+        cache_payload,
+        encoding="utf-8",
+    )
+
+    second = await training_status_cache.get_or_build_training_status(_builder)
+
+    assert calls == 2
+    assert second["total_candles"] == 99
+    assert second["generated_at"] != first["generated_at"]

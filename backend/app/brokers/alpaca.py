@@ -34,34 +34,35 @@ def _as_float(value: object | None) -> float:
     raise ResearchParseError("invalid numeric value in Alpaca response")
 
 
-def _as_str(v: object | None) -> str:
-    if v is None:
+def _as_str(value: object | None) -> str:
+    if value is None:
         return ""
-    return str(v)
+    return str(value)
 
 
 def _coerce_params(params: Mapping[str, object]) -> dict[str, HttpValue]:
     result: dict[str, HttpValue] = {}
 
-    for k, v in params.items():
-
-        if v is None or isinstance(v, (str, int, float, bool)):
-            result[k] = v
-
-        elif isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)):
-            result[k] = [
-                str(x) if not isinstance(x, (str, int, float, bool, type(None))) else x
-                for x in v
+    for key, value in params.items():
+        if value is None or isinstance(value, (str, int, float, bool)):
+            result[key] = value
+        elif isinstance(value, Sequence) and not isinstance(
+            value,
+            (str, bytes, bytearray),
+        ):
+            result[key] = [
+                str(item)
+                if not isinstance(item, (str, int, float, bool, type(None)))
+                else item
+                for item in value
             ]
-
         else:
-            result[k] = str(v)
+            result[key] = str(value)
 
     return result
 
 
 class AlpacaTrainingFetcher:
-
     max_symbols_per_request: int = ALPACA_BATCH_MAX_SYMBOLS
 
     def __init__(
@@ -72,15 +73,12 @@ class AlpacaTrainingFetcher:
         api_secret: str | None = None,
         lookback_days: int = ALPACA_SYNC_LOOKBACK_DAYS,
     ) -> None:
-
         self.repository = repository
         self.client = client
         self.lookback_days = lookback_days
-
         self.headers: dict[str, str] | None = None
 
         if api_key and api_secret:
-
             self.headers = {
                 "APCA-API-KEY-ID": api_key,
                 "APCA-API-SECRET-KEY": api_secret,
@@ -92,7 +90,6 @@ class AlpacaTrainingFetcher:
         *,
         params: HttpParams | None = None,
     ) -> Mapping[str, object]:
-
         client = self.client or httpx.AsyncClient()
 
         response = await client.get(
@@ -100,13 +97,10 @@ class AlpacaTrainingFetcher:
             params=params,
             headers=self.headers,
         )
-
         response.raise_for_status()
 
         data = response.json()
-
         if not isinstance(data, Mapping):
-
             raise ResearchParseError("invalid alpaca response")
 
         return data
@@ -117,11 +111,8 @@ class AlpacaTrainingFetcher:
         timeframe: str,
         raw: RawBar,
     ) -> Candle:
-
         ts_raw = raw.get("t")
-
         if not isinstance(ts_raw, str):
-
             raise ResearchParseError("missing timestamp")
 
         ts = datetime.fromisoformat(
@@ -146,24 +137,15 @@ class AlpacaTrainingFetcher:
         symbols: Sequence[str],
         latest_times: Mapping[str, datetime | None],
     ) -> datetime:
-
         starts: list[datetime] = []
 
-        for sym in symbols:
+        for symbol in symbols:
+            latest_time = latest_times.get(symbol)
 
-            ts = latest_times.get(sym)
-
-            if ts is None:
-
-                starts.append(
-                    datetime.now(UTC) - timedelta(days=self.lookback_days),
-                )
-
+            if latest_time is None:
+                starts.append(datetime.now(UTC) - timedelta(days=self.lookback_days))
             else:
-
-                starts.append(
-                    ts + timedelta(minutes=1),
-                )
+                starts.append(latest_time + timedelta(minutes=1))
 
         return min(starts)
 
@@ -172,25 +154,23 @@ class AlpacaTrainingFetcher:
         batch: dict[str, list[Candle]],
         timeframe: str,
     ) -> list[CandleRow]:
-
         rows: list[CandleRow] = []
 
         for symbol, candles in batch.items():
-
-            for c in candles:
-
+            for candle in candles:
                 rows.append(
                     CandleRow(
                         symbol=symbol,
+                        asset_class=candle.asset_class,
                         timeframe=timeframe,
-                        time=c.time,
-                        open=c.open,
-                        high=c.high,
-                        low=c.low,
-                        close=c.close,
-                        volume=c.volume,
-                        source=c.source,
-                    ),
+                        time=candle.time,
+                        open=candle.open,
+                        high=candle.high,
+                        low=candle.low,
+                        close=candle.close,
+                        volume=candle.volume,
+                        source=candle.source,
+                    )
                 )
 
         return rows
@@ -203,7 +183,6 @@ class AlpacaTrainingFetcher:
         start: datetime,
         end: datetime,
     ) -> dict[str, list[Candle]]:
-
         params = _coerce_params(
             {
                 "symbols": ",".join(symbols),
@@ -214,7 +193,7 @@ class AlpacaTrainingFetcher:
                 "adjustment": "raw",
                 "feed": "iex",
                 "sort": "asc",
-            },
+            }
         )
 
         payload = await self._get(
@@ -223,26 +202,18 @@ class AlpacaTrainingFetcher:
         )
 
         bars = payload.get("bars")
-
         if not isinstance(bars, Mapping):
-
             raise ResearchParseError("missing bars")
 
         result: dict[str, list[Candle]] = {}
 
         for symbol in symbols:
-
             raw_list = bars.get(symbol, [])
-
             candles: list[Candle] = []
 
             for raw in raw_list:
-
                 if isinstance(raw, Mapping):
-
-                    candles.append(
-                        self._parse_bar(symbol, timeframe, raw),
-                    )
+                    candles.append(self._parse_bar(symbol, timeframe, raw))
 
             result[symbol] = candles
 
@@ -253,85 +224,81 @@ class AlpacaTrainingFetcher:
         symbols: Sequence[str],
         timeframes: Sequence[str],
     ) -> int:
-
         if self.repository is None:
-
             raise RuntimeError("repository required")
 
         total_rows = 0
 
         for timeframe in timeframes:
-
-            for chunk in batched(
+            latest_times = await self.repository.get_latest_candle_times(
                 symbols,
-                self.max_symbols_per_request,
-            ):
+                timeframe,
+                source=ALPACA_DEFAULT_SOURCE,
+            )
+            start = self._calculate_start(symbols, latest_times)
+            end = datetime.now(UTC)
 
-                latest_times = await self.repository.get_latest_candle_times(
-                    list(chunk),
-                    timeframe,
-                    source=ALPACA_DEFAULT_SOURCE,
-                )
+            for batch_symbols in batched(symbols, self.max_symbols_per_request):
+                batch_tuple = tuple(batch_symbols)
+                if not batch_tuple:
+                    continue
 
-                start = self._calculate_start(
-                    chunk,
-                    latest_times,
-                )
-
-                batch = await self.fetch_batch(
-                    list(chunk),
+                candles_by_symbol = await self.fetch_batch(
+                    batch_tuple,
                     timeframe,
                     start=start,
-                    end=datetime.now(UTC),
+                    end=end,
                 )
+                rows = self._rows_from_batch(candles_by_symbol, timeframe)
 
-                rows = self._rows_from_batch(
-                    batch,
-                    timeframe,
-                )
+                if not rows:
+                    continue
 
-                if rows:
-
-                    await self.repository.bulk_upsert(rows)
-                    total_rows += len(rows)
+                await self.repository.bulk_upsert(rows)
+                total_rows += len(rows)
 
         return total_rows
 
-    async def fetch_most_active(
+    async def get_top_gainers(
         self,
-        *,
-        top: int = 100,
-    ) -> list[str]:
-
-        if top < 1 or top > 100:
-
-            raise ResearchAPIError("top must be 1-100")
-
-        params = _coerce_params({"top": top})
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        params = _coerce_params({"top": limit})
 
         payload = await self._get(
             "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives",
             params=params,
         )
 
-        items = payload.get("most_actives")
+        raw_gainers = payload.get("most_actives")
+        if not isinstance(raw_gainers, Sequence):
+            raise ResearchAPIError("invalid screener response")
 
-        if not isinstance(items, list):
+        gainers: list[dict[str, object]] = []
 
-            raise ResearchParseError("missing most_actives")
+        for item in raw_gainers:
+            if not isinstance(item, Mapping):
+                continue
 
-        symbols: list[str] = []
+            symbol = _as_str(item.get("symbol")).upper()
+            if not symbol:
+                continue
 
-        for item in items:
+            gainers.append(
+                {
+                    "symbol": symbol,
+                    "price": item.get("price"),
+                    "percent_change": item.get("percent_change"),
+                    "volume": item.get("volume"),
+                }
+            )
 
-            if isinstance(item, Mapping):
+        return gainers[:limit]
 
-                sym = _as_str(
-                    item.get("symbol"),
-                ).upper().strip()
+    async def fetch_most_active(
+        self,
+        top: int = 20,
+    ) -> list[dict[str, object]]:
+        """Backward-compatible alias used by ML routes."""
 
-                if sym:
-
-                    symbols.append(sym)
-
-        return symbols
+        return await self.get_top_gainers(limit=top)

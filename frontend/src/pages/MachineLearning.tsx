@@ -2,31 +2,24 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   backfillCrypto,
   backfillGainers,
-  backfillStocks,
   getActiveMlJob,
+  getMlJob,
   getMlJobs,
   getMlPersistence,
-  getTopGainers,
   getTrainingStatus,
-  triggerWatchlistResearch,
-  type GainersResponse,
   type MlJob,
   type TrainingStatus,
 } from '../api';
 import { KRAKEN_UNIVERSE } from '../constants';
 
-const STORAGE_KEY = 'ml-page-state-v1';
+const STORAGE_KEY = 'ml-page-state-v2';
 
 type PersistedMlViewState = {
-  stockSyms: string;
   activeJobId: string | null;
-  gainers: GainersResponse | null;
 };
 
 const DEFAULT_VIEW_STATE: PersistedMlViewState = {
-  stockSyms: '',
   activeJobId: null,
-  gainers: null,
 };
 
 const loadPersistedViewState = (): PersistedMlViewState => {
@@ -52,15 +45,14 @@ const fmtDuration = (start: string, end: string | null): string => {
 
 function ProgressBar({ job }: { job: MlJob }): React.ReactElement {
   if (job.status === 'done') {
-    return <div style={{ fontSize: 10, color: 'var(--green)' }}>Done — {job.rows_fetched.toLocaleString()} rows written</div>;
+    return <div style={{ fontSize: 10, color: 'var(--green)' }}>Done · {job.rows_fetched.toLocaleString()} rows written</div>;
   }
   if (job.status === 'error') {
     return <div style={{ fontSize: 10, color: 'var(--red)' }}>Error: {job.error}</div>;
   }
 
   const pct = job.progress_pct ?? 0;
-  const statusLine = job.status_message
-    ?? (job.current_symbol ? `Fetching ${job.current_symbol}` : 'Starting…');
+  const statusLine = job.status_message ?? (job.current_symbol ? `Processing ${job.current_symbol}` : 'Starting…');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, gap: 12 }}>
@@ -214,7 +206,7 @@ function TrainingSection({ training }: { training: TrainingStatus | null }): Rea
     if (rows.length === 0) {
       return (
         <div style={{ padding: '10px 16px', fontSize: 11, color: 'var(--text3)' }}>
-          No {label} training data yet — run backfill above.
+          No {label} training data yet.
         </div>
       );
     }
@@ -261,33 +253,29 @@ function TrainingSection({ training }: { training: TrainingStatus | null }): Rea
 
   return (
     <>
-      {training.crypto_candles > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Crypto training data</span>
-            <span className="card-badge cb-blue">
-              {training.crypto_candles.toLocaleString()} candles · {training.crypto_symbols} symbols
-            </span>
-          </div>
-          {training.generated_at && (
-            <div style={{ padding: '0 16px 10px', fontSize: 10, color: 'var(--text3)' }}>
-              Readiness cache: {training.cache_state ?? 'fresh'} · generated {new Date(training.generated_at).toLocaleString()}
-            </div>
-          )}
-          <div className="card-flush">{renderDetail(training.crypto_detail, 'crypto')}</div>
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Crypto CSV training coverage</span>
+          <span className="card-badge cb-blue">
+            {training.crypto_candles.toLocaleString()} candles · {training.crypto_symbols} symbols
+          </span>
         </div>
-      )}
-      {training.stock_candles > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Stock training data</span>
-            <span className="card-badge cb-amber">
-              {training.stock_candles.toLocaleString()} candles · {training.stock_symbols} symbols
-            </span>
+        {training.generated_at && (
+          <div style={{ padding: '0 16px 10px', fontSize: 10, color: 'var(--text3)' }}>
+            Readiness cache: {training.cache_state ?? 'fresh'} · generated {new Date(training.generated_at).toLocaleString()}
           </div>
-          <div className="card-flush">{renderDetail(training.stock_detail, 'stock')}</div>
+        )}
+        <div className="card-flush">{renderDetail(training.crypto_detail, 'crypto')}</div>
+      </div>
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Stock training coverage</span>
+          <span className="card-badge cb-amber">
+            {training.stock_candles.toLocaleString()} candles · {training.stock_symbols} symbols
+          </span>
         </div>
-      )}
+        <div className="card-flush">{renderDetail(training.stock_detail, 'stock')}</div>
+      </div>
     </>
   );
 }
@@ -296,11 +284,8 @@ const MachineLearning: React.FC = () => {
   const initialState = useMemo(loadPersistedViewState, []);
   const [jobs, setJobs] = useState<MlJob[]>([]);
   const [training, setTraining] = useState<TrainingStatus | null>(null);
-  const [gainers, setGainers] = useState<GainersResponse | null>(initialState.gainers);
   const [loading, setLoading] = useState(true);
-  const [stockSyms, setStockSyms] = useState(initialState.stockSyms);
   const [activeJobId, setActiveJobId] = useState<string | null>(initialState.activeJobId);
-  const [gainersLoading, setGainersLoading] = useState(false);
 
   const activeJob = useMemo(
     () => jobs.find((job) => job.job_id === activeJobId) ?? null,
@@ -315,9 +300,9 @@ const MachineLearning: React.FC = () => {
   useEffect(() => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ stockSyms, activeJobId, gainers } satisfies PersistedMlViewState),
+      JSON.stringify({ activeJobId } satisfies PersistedMlViewState),
     );
-  }, [activeJobId, gainers, stockSyms]);
+  }, [activeJobId]);
 
   const refreshTraining = useCallback(async () => {
     const nextTraining = await getTrainingStatus().catch(() => null);
@@ -395,80 +380,62 @@ const MachineLearning: React.FC = () => {
   const runJob = useCallback(async (fn: () => Promise<MlJob>, label: string) => {
     try {
       const job = await fn();
-      if ('error' in job) {
-        alert(`${label}: ${String((job as { error?: string }).error ?? 'unknown error')}`);
+
+      if (!job) {
+        alert(`${label} failed: no job returned`);
         return;
       }
+
+      if (job.status === 'error') {
+        alert(`${label} failed: ${job.error ?? 'unknown error'}`);
+        return;
+      }
+
       setJobs((current) => [job, ...current.filter((item) => item.job_id !== job.job_id)]);
       setActiveJobId(job.job_id);
     } catch (error) {
-      alert(`${label} failed: ${String(error)}`);
+      alert(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, []);
+  }, []);;
 
   const handleCryptoBackfill = useCallback(() => {
-    void runJob(backfillCrypto, 'Crypto backfill');
+    void runJob(backfillCrypto, 'Crypto CSV import');
   }, [runJob]);
 
-  const handleStockBackfill = useCallback(() => {
-    if (!stockSyms.trim()) {
-      alert('Enter at least one symbol');
-      return;
-    }
-    void runJob(() => backfillStocks(stockSyms), 'Stock backfill');
-  }, [runJob, stockSyms]);
-
-  const handleGainersBackfill = useCallback(() => {
-    void runJob(() => backfillGainers(100, 365), 'Gainers backfill');
+  const handleUniverseTraining = useCallback(() => {
+    void runJob(() => backfillGainers(100, 365), 'Top stocks training refresh');
   }, [runJob]);
-
-  const handleWatchlistResearch = useCallback(() => {
-    void runJob(triggerWatchlistResearch, 'Watchlist research');
-  }, [runJob]);
-
-  const handleFetchGainers = useCallback(async () => {
-    setGainersLoading(true);
-    setGainers(null);
-    const response = await getTopGainers(100).catch(
-      (error) => ({
-        error: String(error),
-        gainers: [],
-        count: 0,
-        fetched_at: '',
-      }) satisfies GainersResponse,
-    );
-    setGainers(response);
-    setGainersLoading(false);
-  }, []);
 
   return (
     <div className="page active">
       <div className="metrics-row">
         <div className="metric-tile">
-          <div className="metric-eyebrow">Crypto training candles</div>
+          <div className="metric-eyebrow">Crypto CSV coverage</div>
           <div className="metric-value" style={{ color: 'var(--blue)' }}>
-            {loading ? '—' : (training?.crypto_candles ?? 0).toLocaleString()}
+            {loading ? '—' : (training?.crypto_symbols ?? 0).toLocaleString()}
           </div>
-          <div className="metric-sub">{training?.crypto_symbols ?? 0} symbols</div>
+          <div className="metric-sub">{training?.crypto_candles.toLocaleString() ?? '0'} candles</div>
         </div>
         <div className="metric-tile">
-          <div className="metric-eyebrow">Stock training candles</div>
+          <div className="metric-eyebrow">Top stock coverage</div>
           <div className="metric-value" style={{ color: 'var(--amber)' }}>
-            {loading ? '—' : (training?.stock_candles ?? 0).toLocaleString()}
+            {loading ? '—' : (training?.stock_symbols ?? 0).toLocaleString()}
           </div>
-          <div className="metric-sub">{training?.stock_symbols ?? 0} symbols</div>
+          <div className="metric-sub">{training?.stock_candles.toLocaleString() ?? '0'} candles</div>
         </div>
         <div className="metric-tile">
           <div className="metric-eyebrow">Jobs run</div>
           <div className="metric-value">{jobs.length}</div>
           <div className="metric-sub" style={{ color: isRunning ? 'var(--amber)' : 'var(--text3)' }}>
-            {isRunning ? 'Recovered from persisted state' : 'None active'}
+            {isRunning ? 'One active now' : 'None active'}
           </div>
         </div>
         <div className="metric-tile">
-          <div className="metric-eyebrow">ML module</div>
-          <div className="metric-value" style={{ fontSize: 14, color: 'var(--amber)' }}>Not built</div>
-          <div className="metric-sub">Session 9 pending</div>
+          <div className="metric-eyebrow">Training readiness</div>
+          <div className="metric-value" style={{ fontSize: 14, color: training?.cache_state === 'stale' ? 'var(--amber)' : 'var(--green)' }}>
+            {training?.cache_state === 'stale' ? 'Refreshing' : 'Ready'}
+          </div>
+          <div className="metric-sub">{training?.symbols_with_data ?? 0} symbols with data</div>
         </div>
       </div>
 
@@ -482,7 +449,7 @@ const MachineLearning: React.FC = () => {
           }}
         >
           <div style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8, fontWeight: 500 }}>
-            {activeJob.type.replace(/_/g, ' ')} in progress — state survives refresh and navigation
+            {activeJob.type.replace(/_/g, ' ')} in progress · state survives refresh and navigation
           </div>
           {activeJob.current_symbol && (
             <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 8 }}>
@@ -499,14 +466,13 @@ const MachineLearning: React.FC = () => {
       <div className="grid-2">
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Crypto · Kraken universe · 15 pairs</span>
-            <span className="card-badge cb-blue">Alpaca batch · 2yr</span>
+            <span className="card-title">Crypto training · CSV import · 1Day</span>
+            <span className="card-badge cb-blue">crypto-history folder</span>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              Fetches daily + 1-hour OHLCV for all 15 Kraken pairs via Alpaca. Stored as{' '}
-              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>source=alpaca_training</code>{' '}
-              — never mixed with live candles.
+              Imports daily crypto OHLCV from the repo-level <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>crypto-history</code> CSV folder.
+              Stored as <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>source=crypto_csv_training</code>.
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
               {KRAKEN_UNIVERSE.map((symbol) => (
@@ -525,115 +491,22 @@ const MachineLearning: React.FC = () => {
                 </span>
               ))}
             </div>
-            <ActionBtn label="Backfill all crypto (2yr)" onClick={handleCryptoBackfill} disabled={isRunning} />
+            <ActionBtn label="Import crypto CSVs" onClick={handleCryptoBackfill} disabled={isRunning} />
           </div>
         </div>
 
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Stocks · custom symbols</span>
-            <span className="card-badge cb-amber">Alpaca batch · 2yr</span>
+            <span className="card-title">Stock training · Alpaca most active · 100 names</span>
+            <span className="card-badge cb-amber">one button refresh</span>
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              Comma-separated tickers. Input persists in local storage and the backend keeps the job ledger alive.
+              Pulls the current top 100 most-active stocks from Alpaca, then backfills the 1Day training history for that set.
+              The screener preview and backfill now move as one train instead of two separate cabooses.
             </div>
-            <input
-              type="text"
-              className="num-input"
-              placeholder="NVDA,MSFT,AAPL,JPM,META"
-              value={stockSyms}
-              onChange={(event) => setStockSyms(event.target.value)}
-              style={{ width: '100%', textAlign: 'left', fontSize: 11 }}
-            />
-            <ActionBtn label="Backfill stocks (2yr)" onClick={handleStockBackfill} color="amber" disabled={isRunning} />
+            <ActionBtn label="Refresh top 100 stocks + backfill (1yr)" onClick={handleUniverseTraining} color="amber" disabled={isRunning} />
           </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">Recommend — Alpaca top 100 gainers</span>
-          <span className="card-badge cb-green">Live screener</span>
-        </div>
-        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <ActionBtn
-              label={gainersLoading ? 'Fetching…' : 'Fetch top 100 gainers'}
-              onClick={() => void handleFetchGainers()}
-              disabled={gainersLoading}
-            />
-            <ActionBtn label="Fetch gainers + backfill (1yr)" onClick={handleGainersBackfill} color="teal" disabled={isRunning} />
-          </div>
-          {gainers?.error && (
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--red)',
-                padding: '8px 10px',
-                background: 'var(--red-bg)',
-                borderRadius: 'var(--radius-md)',
-                border: '0.5px solid var(--red3)',
-              }}
-            >
-              {gainers.error}
-            </div>
-          )}
-          {gainers && !gainers.error && gainers.gainers.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>
-                {gainers.count} gainers · {gainers.fetched_at.slice(0, 16).replace('T', ' ')} UTC
-              </div>
-              <table className="wl-table">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th>Price</th>
-                    <th>Change %</th>
-                    <th>Volume</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gainers.gainers.slice(0, 30).map((row, index) => {
-                    const symbol = String(row.symbol ?? row.S ?? '');
-                    const pct = Number(row.percent_change ?? row.percent ?? 0);
-                    const price = Number(row.price ?? row.c ?? 0);
-                    const volume = Number(row.volume ?? row.v ?? 0);
-                    return (
-                      <tr key={index}>
-                        <td style={{ fontWeight: 500 }}>{symbol}</td>
-                        <td>{price > 0 ? `$${price.toFixed(2)}` : '—'}</td>
-                        <td style={{ color: pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {pct >= 0 ? '+' : ''}
-                          {pct.toFixed(2)}%
-                        </td>
-                        <td style={{ color: 'var(--text3)' }}>{volume > 0 ? volume.toLocaleString() : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {gainers.gainers.length > 30 && (
-                <div style={{ fontSize: 10, color: 'var(--text3)', padding: '6px 14px' }}>
-                  +{gainers.gainers.length - 30} more
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">Watchlist research</span>
-          <span className="card-badge cb-muted">Stub — Session 9 required</span>
-        </div>
-        <div className="card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-            Congress, insider, news, screener scoring for all watchlist symbols. Requires{' '}
-            <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>app/ml/</code> (Session 9).
-          </div>
-          <ActionBtn label="Run watchlist research" onClick={handleWatchlistResearch} color="purple" disabled={isRunning} />
         </div>
       </div>
 
