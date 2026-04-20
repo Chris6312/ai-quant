@@ -19,3 +19,4 @@ backups/
 htmlcov/
 coverage.xml
 crypto-history/
+.egg-info
