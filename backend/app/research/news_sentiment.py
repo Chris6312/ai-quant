@@ -5,11 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol
+from uuid import uuid4
 
-import httpx  # NEW DEP: httpx — reason: async research API clients for Phase 2
+import httpx
 
 from app.config.constants import NEWS_MIN_CONFIDENCE
+from app.db.models import ResearchSignalRow
 from app.exceptions import ResearchAPIError, ResearchParseError
+from app.repositories.research import ResearchRepository
 from app.research.models import NewsArticle, SentimentScore, utc_now
 
 
@@ -72,6 +75,44 @@ class NewsSentimentPipeline:
 
         return [await self.score_article(article) for article in articles]
 
+    async def persist_articles(
+        self,
+        repository: ResearchRepository,
+        articles: Sequence[NewsArticle],
+    ) -> list[ResearchSignalRow]:
+        """Score and persist a batch of news articles as research signals."""
+
+        persisted: list[ResearchSignalRow] = []
+        for article in articles:
+            sentiment = await self.score_article(article)
+            row = self.build_signal_row(article, sentiment)
+            await repository.add_signal(row)
+            persisted.append(row)
+        return persisted
+
+    def build_signal_row(
+        self,
+        article: NewsArticle,
+        sentiment: SentimentScore,
+    ) -> ResearchSignalRow:
+        """Build a research signal row for one article."""
+
+        return ResearchSignalRow(
+            id=str(uuid4()),
+            symbol=article.symbol.upper(),
+            signal_type="news_sentiment",
+            score=sentiment.numeric,
+            direction=sentiment.direction,
+            source=article.source,
+            raw_data={
+                "title": article.title,
+                "summary": article.summary,
+                "published_at": article.published_at.isoformat(),
+                "confidence": sentiment.confidence,
+            },
+            created_at=sentiment.created_at,
+        )
+
     def rolling_score(
         self,
         articles: Sequence[SentimentScore],
@@ -125,7 +166,7 @@ class BenzingaNewsClient:
         published_at = datetime.fromisoformat(published_raw)
         if published_at.tzinfo is None:
             published_at = published_at.replace(tzinfo=UTC)
-        symbol = str(item.get("symbol", ""))
+        symbol = str(item.get("symbol", "")).upper()
         return NewsArticle(
             symbol=symbol,
             title=title,

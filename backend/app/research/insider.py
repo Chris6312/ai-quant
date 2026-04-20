@@ -67,23 +67,28 @@ class InsiderTradingService:
         rows: list[InsiderTradeRow] = []
         for item in payload:
             filing = self._parse_trade(item)
-            row = InsiderTradeRow(
-                id=str(uuid4()),
-                symbol=filing.symbol,
-                insider_name=filing.insider_name,
-                title=filing.title,
-                transaction_type=filing.transaction_type,
-                shares=None,
-                price_per_share=None,
-                total_value=filing.total_value,
-                filing_date=filing.filing_date,
-                transaction_date=filing.transaction_date,
-                created_at=utc_now(),
-            )
+            row = self._row_from_trade(filing)
             await self.repository.add_insider_trade(row)
             rows.append(row)
             await self.repository.add_signal(self._build_signal_row(filing))
         return rows
+
+    def _row_from_trade(self, trade: InsiderTrade) -> InsiderTradeRow:
+        """Build an ORM row from a parsed insider trade."""
+
+        return InsiderTradeRow(
+            id=str(uuid4()),
+            symbol=trade.symbol,
+            insider_name=trade.insider_name,
+            title=trade.title,
+            transaction_type=trade.transaction_type,
+            shares=None,
+            price_per_share=None,
+            total_value=trade.total_value,
+            filing_date=trade.filing_date,
+            transaction_date=trade.transaction_date,
+            created_at=utc_now(),
+        )
 
     def score_trade(self, trade: InsiderTrade) -> float:
         """Return a normalized insider buy score."""

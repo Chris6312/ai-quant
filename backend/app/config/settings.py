@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     kraken_api_key: str | None = Field(default=None)
     kraken_api_secret: str | None = Field(default=None)
 
+    research_news_base_url: str = Field(default="https://api.benzinga.com/api/v2")
+    research_news_api_key: str | None = Field(default=None)
+    research_finbert_model_name: str = Field(default="ProsusAI/finbert")
+    research_house_base_url: str = Field(default="https://housestockwatcher.com")
+    research_senate_base_url: str = Field(default="https://senatestockwatcher.com")
+    research_insider_base_url: str = Field(default="https://api.secfilingdata.com")
+    research_insider_api_key: str | None = Field(default=None)
+    research_analyst_base_url: str = Field(default="https://api.benzinga.com/api/v2")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -34,6 +34,24 @@ RESEARCH_SCORE_BONUS_THRESHOLD_1: float = 70.0
 RESEARCH_SCORE_BONUS_THRESHOLD_2: float = 85.0
 RESEARCH_SCORE_BONUS_1: float = 1.15
 RESEARCH_SCORE_BONUS_2: float = 1.25
+SCREENER_MIN_AVG_VOLUME: float = 1_000_000.0
+SCREENER_MIN_PRICE: float = 5.0
+SCREENER_MAX_PRICE: float = 500.0
+SCREENER_MIN_MARKET_CAP: float = 2_000_000_000.0
+SCREENER_MAX_PE_RATIO: float = 60.0
+SCREENER_MIN_RELATIVE_VOLUME: float = 1.5
+SCREENER_MIN_FLOAT_SHARES: float = 10_000_000.0
+SCREENER_ALLOWED_SECTORS: tuple[str, ...] = (
+    "Technology",
+    "Healthcare",
+    "Financials",
+    "Consumer Discretionary",
+    "Industrials",
+    "Energy",
+    "Communication Services",
+    "Materials",
+)
+
 DEFAULT_SIGNAL_WEIGHTS: dict[str, float] = {
     "news_sentiment_7d": 0.20,
     "congress_buy": 0.30,

@@ -16,6 +16,7 @@ from app.api.routers.health import router as health_router
 from app.api.routers.ml import router as ml_router
 from app.api.routers.orders import router as orders_router
 from app.api.routers.paper import router as paper_router
+from app.api.routers.research import router as research_router
 from app.api.routers.watchlist import router as watchlist_router
 from app.config.constants import APP_NAME, APP_VERSION
 from app.config.settings import get_settings
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(watchlist_router)
     app.include_router(paper_router)
+    app.include_router(research_router)
     app.include_router(ml_router)
     app.include_router(orders_router)
     app.include_router(config_router)

@@ -77,22 +77,27 @@ class CongressTradingService:
         rows: list[CongressTradeRow] = []
         for item in payload:
             trade = self._parse_trade(item, chamber)
-            row = CongressTradeRow(
-                id=str(uuid4()),
-                politician=trade.politician,
-                chamber=trade.chamber,
-                symbol=trade.symbol,
-                trade_type=trade.trade_type,
-                amount_range=trade.amount_range,
-                trade_date=trade.trade_date,
-                disclosure_date=trade.disclosure_date,
-                days_to_disclose=trade.days_to_disclose,
-                created_at=utc_now(),
-            )
+            row = self._row_from_trade(trade)
             await self.repository.add_congress_trade(row)
             rows.append(row)
             await self.repository.add_signal(self._build_signal_row(trade))
         return rows
+
+    def _row_from_trade(self, trade: CongressTrade) -> CongressTradeRow:
+        """Build an ORM row from a parsed congressional trade."""
+
+        return CongressTradeRow(
+            id=str(uuid4()),
+            politician=trade.politician,
+            chamber=trade.chamber,
+            symbol=trade.symbol,
+            trade_type=trade.trade_type,
+            amount_range=trade.amount_range,
+            trade_date=trade.trade_date,
+            disclosure_date=trade.disclosure_date,
+            days_to_disclose=trade.days_to_disclose,
+            created_at=utc_now(),
+        )
 
     def score_trade(self, trade: CongressTrade, politician_committees: Sequence[str]) -> float:
         """Score one congressional trade."""

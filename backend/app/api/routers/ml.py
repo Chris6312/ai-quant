@@ -7,9 +7,14 @@ from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from app.api.dependencies import get_candle_repository, get_watchlist_repository
+from app.api.dependencies import (
+    get_candle_repository,
+    get_research_repository,
+    get_watchlist_repository,
+)
 from app.brokers.alpaca import AlpacaTrainingFetcher
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
 from app.config.constants import ALPACA_DEFAULT_SOURCE
@@ -17,7 +22,24 @@ from app.config.settings import get_settings
 from app.db.models import CandleRow
 from app.db.session import build_engine, build_session_factory
 from app.repositories.candles import CandleRepository
+from app.repositories.research import ResearchRepository
 from app.repositories.watchlist import WatchlistRepository
+from app.research.models import (
+    AnalystRating,
+    AnalystRatingPayload,
+    CongressTrade,
+    CongressTradePayload,
+    InsiderTrade,
+    InsiderTradePayload,
+    NewsArticle,
+    NewsArticlePayload,
+    ScreeningMetrics,
+    ScreeningMetricsPayload,
+)
+from app.research.news_sentiment import NewsSentimentPipeline
+from app.research.orchestrator import ResearchOrchestrator
+from app.research.scorer import WatchlistScorer
+from app.research.screener import StockScreenerService
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
@@ -275,27 +297,132 @@ async def backfill_gainers(
     return job
 
 
+class ResearchTriggerRequest(BaseModel):
+    """Optional manual payloads for a Phase 2 research run."""
+
+    news: list[NewsArticlePayload] = []
+    congress: list[CongressTradePayload] = []
+    insider: list[InsiderTradePayload] = []
+    screener: list[ScreeningMetricsPayload] = []
+    analyst: list[AnalystRatingPayload] = []
+    seed_symbols: list[str] = []
+
+
 @router.post("/research/watchlist")
 async def trigger_watchlist_research(
-    background_tasks: BackgroundTasks,
+    payload: ResearchTriggerRequest,
     watchlist_repo: Annotated[WatchlistRepository, Depends(get_watchlist_repository)],
+    research_repo: Annotated[ResearchRepository, Depends(get_research_repository)],
 ) -> dict[str, object]:
-    """Trigger research scoring for all active watchlist symbols."""
+    """Trigger research scoring using persisted data plus optional manual payloads."""
+
     rows = await watchlist_repo.list_active()
-    symbols = [r.symbol for r in rows]
+    symbols = sorted({r.symbol for r in rows} | {symbol.upper() for symbol in payload.seed_symbols})
     job = _new_job("watchlist_research", symbols)
     job_id = cast(str, job["job_id"])
 
-    async def _run() -> None:
+    news_articles = [
+        NewsArticle(
+            symbol=item.symbol.upper(),
+            title=item.title,
+            summary=item.summary,
+            published_at=item.published_at,
+            source=item.source,
+        )
+        for item in payload.news
+    ]
+    congress_trades = [
+        CongressTrade(
+            symbol=item.symbol.upper(),
+            trade_type=item.trade_type.lower(),
+            chamber=item.chamber,
+            days_to_disclose=item.days_to_disclose,
+            politician=item.politician,
+            committee=item.committee,
+            amount_range=item.amount_range,
+            trade_date=item.trade_date,
+            disclosure_date=item.disclosure_date,
+        )
+        for item in payload.congress
+    ]
+    insider_trades = [
+        InsiderTrade(
+            symbol=item.symbol.upper(),
+            insider_name=item.insider_name,
+            title=item.title,
+            transaction_type=item.transaction_type.upper(),
+            total_value=item.total_value,
+            filing_date=item.filing_date,
+            transaction_date=item.transaction_date,
+        )
+        for item in payload.insider
+    ]
+    screener_metrics = [
+        ScreeningMetrics(
+            symbol=item.symbol.upper(),
+            avg_volume=item.avg_volume,
+            price=item.price,
+            market_cap=item.market_cap,
+            pe_ratio=item.pe_ratio,
+            relative_volume=item.relative_volume,
+            float_shares=item.float_shares,
+            sector=item.sector,
+            above_50d_ema=item.above_50d_ema,
+            earnings_blocked=item.earnings_blocked,
+        )
+        for item in payload.screener
+    ]
+    analyst_ratings = [
+        AnalystRating(
+            symbol=item.symbol.upper(),
+            firm=item.firm,
+            action=item.action,
+            current_price=item.current_price,
+            old_price_target=item.old_price_target,
+            new_price_target=item.new_price_target,
+            rating=item.rating,
+            published_at=item.published_at,
+        )
+        for item in payload.analyst
+    ]
+
+    try:
+        orchestrator = ResearchOrchestrator(
+            research_repository=research_repo,
+            watchlist_repository=watchlist_repo,
+            news_pipeline=NewsSentimentPipeline(),
+            screener_service=StockScreenerService(),
+            scorer=WatchlistScorer(),
+        )
+        result = await orchestrator.run_manual_research(
+            news_articles=news_articles,
+            congress_trades=congress_trades,
+            insider_trades=insider_trades,
+            screener_metrics=screener_metrics,
+            analyst_ratings=analyst_ratings,
+            seed_symbols=payload.seed_symbols,
+        )
         _jobs[job_id]["status"] = "done"
         _jobs[job_id]["progress_pct"] = 100
+        _jobs[job_id]["done_symbols"] = len(result.symbols_scored)
         _jobs[job_id]["finished_at"] = datetime.now(tz=UTC).isoformat()
         _jobs[job_id]["result"] = {
-            "note": "Research pipeline stub — implement app/ml/ session 9",
-            "symbols_queued": symbols,
+            "symbols_scored": result.symbols_scored,
+            "promoted_symbols": result.promoted_symbols,
+            "demoted_symbols": result.demoted_symbols,
+            "persisted_signal_count": result.persisted_signal_count,
+            "top_breakdowns": [
+                {
+                    "symbol": breakdown.symbol,
+                    "composite_score": breakdown.composite_score,
+                }
+                for breakdown in result.breakdowns[:10]
+            ],
         }
-
-    background_tasks.add_task(_run)
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["finished_at"] = datetime.now(tz=UTC).isoformat()
     return job
 
 

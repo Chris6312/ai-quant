@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
 
-import httpx  # NEW DEP: httpx — reason: async research API clients for Phase 2
+import httpx
 
 from app.db.models import ResearchSignalRow
 from app.exceptions import ResearchAPIError, ResearchParseError
@@ -33,9 +33,17 @@ class AnalystRatingsService:
         """Fetch and persist analyst ratings."""
 
         payload = await self._fetch_payload()
+        ratings = [self._parse_rating(item) for item in payload]
+        return await self.persist_ratings(ratings)
+
+    async def persist_ratings(
+        self,
+        ratings: Sequence[AnalystRating],
+    ) -> list[ResearchSignalRow]:
+        """Persist already-parsed analyst ratings."""
+
         signals: list[ResearchSignalRow] = []
-        for item in payload:
-            rating = self._parse_rating(item)
+        for rating in ratings:
             signal = self._build_signal_row(rating)
             await self.repository.add_signal(signal)
             signals.append(signal)
