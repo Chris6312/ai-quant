@@ -10,19 +10,15 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptRoot
-
 $BackendRoot = Join-Path $RepoRoot 'backend'
 $FrontendRoot = Join-Path $RepoRoot 'frontend'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
-$RunRoot = Join-Path $RepoRoot '.run'
-
 $BackendVenvPython = Join-Path $BackendRoot '.venv\Scripts\python.exe'
+
 $NpmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 if (-not $NpmCmd) {
     $NpmCmd = (Get-Command npm -ErrorAction SilentlyContinue).Source
 }
-
-New-Item -ItemType Directory -Path $RunRoot -Force | Out-Null
 
 function Write-Step {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -32,11 +28,6 @@ function Write-Step {
 function Write-Ok {
     param([Parameter(Mandatory = $true)][string]$Message)
     Write-Host "    OK: $Message" -ForegroundColor Green
-}
-
-function Write-Warn {
-    param([Parameter(Mandatory = $true)][string]$Message)
-    Write-Host "    WARN: $Message" -ForegroundColor Yellow
 }
 
 function Throw-IfMissingPath {
@@ -58,7 +49,7 @@ function Test-TcpPort {
 
     $client = $null
     try {
-        $client = New-Object System.Net.Sockets.TcpClient
+        $client = [System.Net.Sockets.TcpClient]::new()
         $asyncResult = $client.BeginConnect($HostName, $Port, $null, $null)
         $connected = $asyncResult.AsyncWaitHandle.WaitOne(1500, $false)
 
@@ -73,51 +64,10 @@ function Test-TcpPort {
         return $false
     }
     finally {
-        if ($client) {
+        if ($null -ne $client) {
             $client.Dispose()
         }
     }
-}
-
-function Wait-ForDocker {
-    param([int]$TimeoutSeconds = 120)
-
-    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
-    if (-not $dockerCmd) {
-        throw 'docker was not found on PATH.'
-    }
-
-    docker info *> $null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Ok 'Docker is already running.'
-        return
-    }
-
-    Write-Warn 'Docker is not ready. Attempting to start Docker Desktop...'
-
-    $dockerDesktopCandidates = @(
-        (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Docker\Docker\Docker Desktop.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-
-    if ($dockerDesktopCandidates.Count -gt 0) {
-        Start-Process -FilePath $dockerDesktopCandidates[0] | Out-Null
-    }
-    else {
-        Write-Warn 'Docker Desktop executable was not found automatically. Start Docker Desktop manually if needed.'
-    }
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 3
-        docker info *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Ok 'Docker is ready.'
-            return
-        }
-    }
-
-    throw 'Docker did not become ready in time.'
 }
 
 function Wait-ForPort {
@@ -147,17 +97,6 @@ function Get-EncodedPwshCommand {
     return [Convert]::ToBase64String($bytes)
 }
 
-function New-TabDefinition {
-    param(
-        [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [Parameter(Mandatory = $true)][string]$CommandText
-    )
-
-    $encoded = Get-EncodedPwshCommand -CommandText $CommandText
-    return "new-tab --title `"$Title`" --startingDirectory `"$WorkingDirectory`" pwsh.exe -NoLogo -NoExit -ExecutionPolicy Bypass -EncodedCommand $encoded"
-}
-
 Throw-IfMissingPath -Path $RepoRoot -Label 'Repo root'
 Throw-IfMissingPath -Path $BackendRoot -Label 'Backend folder'
 Throw-IfMissingPath -Path $FrontendRoot -Label 'Frontend folder'
@@ -171,9 +110,6 @@ if (-not $NpmCmd) {
 if (-not (Get-Command wt.exe -ErrorAction SilentlyContinue)) {
     throw 'wt.exe was not found on PATH. Install Windows Terminal and retry.'
 }
-
-Write-Step 'Checking Docker'
-Wait-ForDocker
 
 Write-Step 'Starting database and Redis containers'
 Set-Location -LiteralPath $RepoRoot
@@ -223,28 +159,14 @@ if (-not $SkipFrontendInstall) {
     }
 }
 
-Write-Step 'Opening Windows Terminal tabs'
-
-$CeleryPidFile = Join-Path $RunRoot 'celery.pid'
-$BackendPidFile = Join-Path $RunRoot 'backend.pid'
-$FrontendPidFile = Join-Path $RunRoot 'frontend.pid'
-
 $CeleryCommand = @"
 Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$BackendRoot'
 `$env:PYTHONPATH = '$BackendRoot'
 Write-Host 'Starting Celery worker...' -ForegroundColor Cyan
-`$child = Start-Process -FilePath '$BackendVenvPython' `
-    -ArgumentList @('-m', 'celery', '-A', 'app.tasks.worker', 'worker', '--loglevel=INFO', '--pool=solo') `
-    -WorkingDirectory '$BackendRoot' `
-    -NoNewWindow `
-    -PassThru
-Set-Content -LiteralPath '$CeleryPidFile' -Value `$child.Id -Encoding ascii
-Write-Host ('Celery PID: ' + `$child.Id) -ForegroundColor DarkGray
-`$null = `$child.WaitForExit()
-Remove-Item -LiteralPath '$CeleryPidFile' -ErrorAction SilentlyContinue
-exit `$child.ExitCode
+& '$BackendVenvPython' -m celery -A app.tasks.worker worker --loglevel=INFO --pool=solo
+exit `$LASTEXITCODE
 "@
 
 $BackendCommand = @"
@@ -253,16 +175,8 @@ Set-StrictMode -Version Latest
 Set-Location -LiteralPath '$BackendRoot'
 `$env:PYTHONPATH = '$BackendRoot'
 Write-Host 'Starting FastAPI backend...' -ForegroundColor Cyan
-`$child = Start-Process -FilePath '$BackendVenvPython' `
-    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--reload', '--host', '0.0.0.0', '--port', '8000') `
-    -WorkingDirectory '$BackendRoot' `
-    -NoNewWindow `
-    -PassThru
-Set-Content -LiteralPath '$BackendPidFile' -Value `$child.Id -Encoding ascii
-Write-Host ('Backend PID: ' + `$child.Id) -ForegroundColor DarkGray
-`$null = `$child.WaitForExit()
-Remove-Item -LiteralPath '$BackendPidFile' -ErrorAction SilentlyContinue
-exit `$child.ExitCode
+& '$BackendVenvPython' -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+exit `$LASTEXITCODE
 "@
 
 $FrontendCommand = @"
@@ -270,33 +184,37 @@ Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$FrontendRoot'
 Write-Host 'Starting Vite frontend...' -ForegroundColor Cyan
-`$child = Start-Process -FilePath '$NpmCmd' `
-    -ArgumentList @('run', 'dev', '--', '--host', '0.0.0.0') `
-    -WorkingDirectory '$FrontendRoot' `
-    -NoNewWindow `
-    -PassThru
-Set-Content -LiteralPath '$FrontendPidFile' -Value `$child.Id -Encoding ascii
-Write-Host ('Frontend PID: ' + `$child.Id) -ForegroundColor DarkGray
-`$null = `$child.WaitForExit()
-Remove-Item -LiteralPath '$FrontendPidFile' -ErrorAction SilentlyContinue
-exit `$child.ExitCode
+& '$NpmCmd' run dev -- --host 0.0.0.0
+exit `$LASTEXITCODE
 "@
 
-$TabDefinitions = @(
-    (New-TabDefinition -Title 'Celery'   -WorkingDirectory $BackendRoot  -CommandText $CeleryCommand)
-    (New-TabDefinition -Title 'Backend'  -WorkingDirectory $BackendRoot  -CommandText $BackendCommand)
-    (New-TabDefinition -Title 'Frontend' -WorkingDirectory $FrontendRoot -CommandText $FrontendCommand)
+$CeleryEncoded = Get-EncodedPwshCommand -CommandText $CeleryCommand
+$BackendEncoded = Get-EncodedPwshCommand -CommandText $BackendCommand
+$FrontendEncoded = Get-EncodedPwshCommand -CommandText $FrontendCommand
+
+Write-Step 'Opening tabs in the current Windows Terminal window'
+
+$wtArgs = @(
+    '-w', '0',
+    'new-tab',
+    '--title', 'Celery',
+    '--startingDirectory', $BackendRoot,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $CeleryEncoded,
+    ';',
+    'new-tab',
+    '--title', 'Backend',
+    '--startingDirectory', $BackendRoot,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $BackendEncoded,
+    ';',
+    'new-tab',
+    '--title', 'Frontend',
+    '--startingDirectory', $FrontendRoot,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $FrontendEncoded
 )
 
-Start-Process -FilePath 'wt.exe' -ArgumentList ($TabDefinitions -join ' ; ') | Out-Null
+& wt.exe @wtArgs
 
 Write-Host ''
 Write-Host 'Supervisor started.' -ForegroundColor Green
-Write-Host "Backend  : http://127.0.0.1:8000" -ForegroundColor White
-Write-Host "Frontend : http://127.0.0.1:5173" -ForegroundColor White
-Write-Host "Run dir  : $RunRoot" -ForegroundColor DarkGray
-Write-Host ''
-Write-Host 'Examples:' -ForegroundColor Cyan
-Write-Host '  .\scripts\start-supervisor.ps1' -ForegroundColor White
-Write-Host '  .\scripts\start-supervisor.ps1 -RunMigrations' -ForegroundColor White
-Write-Host '  .\scripts\start-supervisor.ps1 -SkipFrontendInstall' -ForegroundColor White
+Write-Host 'Backend  : http://127.0.0.1:8000' -ForegroundColor White
+Write-Host 'Frontend : http://127.0.0.1:5173' -ForegroundColor White

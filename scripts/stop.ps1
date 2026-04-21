@@ -3,11 +3,10 @@
 param()
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'SilentlyContinue'
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptRoot
-$RunRoot = Join-Path $RepoRoot '.run'
 $ComposeFile = Join-Path $RepoRoot 'docker-compose.yml'
 
 function Write-Step {
@@ -25,61 +24,31 @@ function Write-Warn {
     Write-Host "    WARN: $Message" -ForegroundColor Yellow
 }
 
-function Stop-ProcessFromPidFile {
+function Stop-ProcessTreeByPattern {
     param(
-        [Parameter(Mandatory = $true)][string]$PidFile,
-        [Parameter(Mandatory = $true)][string]$Label
+        [Parameter(Mandatory = $true)][string]$Pattern,
+        [Parameter(Mandatory = $true)][string]$DisplayName
     )
 
-    if (-not (Test-Path -LiteralPath $PidFile)) {
-        Write-Warn "$Label PID file not found: $PidFile"
+    $targets = Get-CimInstance Win32_Process | Where-Object {
+        $_.CommandLine -and
+        $_.CommandLine -match $Pattern -and
+        $_.Name -notmatch 'pwsh|powershell'
+    }
+
+    if (-not $targets) {
+        Write-Warn "$DisplayName is not running."
         return
     }
 
-    $pidText = Get-Content -LiteralPath $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($pidText)) {
-        Write-Warn "$Label PID file was empty: $PidFile"
-        Remove-Item -LiteralPath $PidFile -ErrorAction SilentlyContinue
-        return
+    $targets = $targets | Sort-Object ProcessId -Unique
+
+    foreach ($proc in $targets) {
+        Write-Host "Stopping $DisplayName (PID $($proc.ProcessId))..." -ForegroundColor White
+        & taskkill.exe /PID $proc.ProcessId /T /F | Out-Null
     }
 
-    $pid = 0
-    if (-not [int]::TryParse($pidText.Trim(), [ref]$pid)) {
-        Write-Warn "$Label PID file did not contain a valid PID: $PidFile"
-        Remove-Item -LiteralPath $PidFile -ErrorAction SilentlyContinue
-        return
-    }
-
-    try {
-        $process = Get-Process -Id $pid -ErrorAction Stop
-        Write-Host "Requesting graceful shutdown for $Label (PID $pid, $($process.ProcessName))..." -ForegroundColor White
-
-        $closed = $false
-        try {
-            $closed = $process.CloseMainWindow()
-        }
-        catch {
-            $closed = $false
-        }
-
-        if ($closed) {
-            Start-Sleep -Seconds 5
-            $process.Refresh()
-        }
-
-        if (-not $process.HasExited) {
-            Write-Warn "$Label did not exit gracefully; forcing stop for PID $pid."
-            Stop-Process -Id $pid -Force -ErrorAction Stop
-        }
-
-        Write-Ok "$Label stopped."
-    }
-    catch {
-        Write-Warn "$Label PID $pid is no longer running or could not be queried."
-    }
-    finally {
-        Remove-Item -LiteralPath $PidFile -ErrorAction SilentlyContinue
-    }
+    Write-Ok "$DisplayName stopped."
 }
 
 function Stop-DockerComposeServices {
@@ -105,27 +74,16 @@ function Stop-DockerComposeServices {
 
 Write-Step 'Stopping app processes'
 
-$pidFiles = @(
-    @{ Label = 'Celery';   Path = (Join-Path $RunRoot 'celery.pid') }
-    @{ Label = 'Backend';  Path = (Join-Path $RunRoot 'backend.pid') }
-    @{ Label = 'Frontend'; Path = (Join-Path $RunRoot 'frontend.pid') }
-)
+# Frontend first
+Stop-ProcessTreeByPattern -Pattern 'vite|npm(\.cmd)? run dev' -DisplayName 'Frontend'
 
-foreach ($entry in $pidFiles) {
-    Stop-ProcessFromPidFile -PidFile $entry.Path -Label $entry.Label
-}
+# Backend next
+Stop-ProcessTreeByPattern -Pattern 'uvicorn.*app\.main:app|app\.main:app.*--reload' -DisplayName 'Backend'
 
+# Celery last
+Stop-ProcessTreeByPattern -Pattern 'celery.*app\.tasks\.worker|app\.tasks\.worker.*celery' -DisplayName 'Celery'
+
+Start-Sleep -Seconds 2
 Stop-DockerComposeServices
-
-if (Test-Path -LiteralPath $RunRoot) {
-    $remaining = Get-ChildItem -LiteralPath $RunRoot -Force -ErrorAction SilentlyContinue
-    if ($null -eq $remaining -or $remaining.Count -eq 0) {
-        Remove-Item -LiteralPath $RunRoot -Force -ErrorAction SilentlyContinue
-        Write-Ok 'Removed empty .run directory.'
-    }
-    else {
-        Write-Warn '.run directory still contains files; leaving it in place.'
-    }
-}
 
 Write-Host "`nShutdown complete." -ForegroundColor Green
