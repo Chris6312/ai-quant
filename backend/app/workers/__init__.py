@@ -21,6 +21,10 @@ from app.workers.worker_runtime_state import (
     WorkerSnapshot,
     WorkerStatus,
 )
+from app.workers.worker_supervisor import (
+    WorkerSupervisor,
+    WorkerSupervisorSnapshot,
+)
 
 __all__ = [
     "WatchlistWorkerSyncConfig",
@@ -35,5 +39,7 @@ __all__ = [
     "WorkerRegistry",
     "WorkerSnapshot",
     "WorkerStatus",
+    "WorkerSupervisor",
+    "WorkerSupervisorSnapshot",
     "WorkerSyncResult",
 ]

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, Request
 
 from app.workers.worker_health_service import WorkerHealthService
 from app.workers.worker_runtime_state import WorkerLifecycleEvent, WorkerSnapshot
+from app.workers.worker_supervisor import WorkerSupervisor
 
 router = APIRouter(prefix="/runtime", tags=["runtime"])
 
@@ -17,12 +18,20 @@ class _RuntimeAppStateProtocol(Protocol):
     """Typed view of runtime services stored on FastAPI app.state."""
 
     worker_health_service: WorkerHealthService
+    worker_supervisor: WorkerSupervisor
 
 
 def _get_worker_health_service(request: Request) -> WorkerHealthService:
     """Return the shared worker health service stored on the app state."""
     state = cast(_RuntimeAppStateProtocol, request.app.state)
     return state.worker_health_service
+
+
+def _get_worker_supervisor(request: Request) -> WorkerSupervisor:
+    """Return the shared worker supervisor stored on the app state."""
+
+    state = cast(_RuntimeAppStateProtocol, request.app.state)
+    return state.worker_supervisor
 
 
 @router.get("/workers")
@@ -33,6 +42,7 @@ def get_runtime_workers(
     """Return the current managed worker health snapshot."""
     service = _get_worker_health_service(request)
     snapshot = service.snapshot(event_limit=event_limit)
+    supervisor = _get_worker_supervisor(request).snapshot()
     return {
         "as_of": snapshot.as_of.isoformat(),
         "summary": {
@@ -44,6 +54,18 @@ def get_runtime_workers(
         },
         "workers": [_serialize_worker(worker) for worker in snapshot.workers],
         "recent_events": [_serialize_event(event) for event in snapshot.recent_events],
+        "supervisor": {
+            "name": supervisor.name,
+            "interval_seconds": supervisor.interval_seconds,
+            "enabled": supervisor.enabled,
+            "running": supervisor.running,
+            "iteration_count": supervisor.iteration_count,
+            "last_started_at": _serialize_datetime(supervisor.last_started_at),
+            "last_finished_at": _serialize_datetime(supervisor.last_finished_at),
+            "last_success_at": _serialize_datetime(supervisor.last_success_at),
+            "last_error": supervisor.last_error,
+            "last_result": _serialize_sync_result(supervisor.last_result),
+        },
     }
 
 
@@ -81,3 +103,18 @@ def _serialize_event(event: WorkerLifecycleEvent) -> dict[str, Any]:
 def _serialize_datetime(value: datetime | None) -> str | None:
     """Serialize an optional datetime to an ISO 8601 string."""
     return value.isoformat() if value is not None else None
+
+
+def _serialize_sync_result(value: object) -> dict[str, int] | None:
+    """Serialize the last sync result when present."""
+
+    if value is None:
+        return None
+    started = cast(Any, value).started
+    stopped = cast(Any, value).stopped
+    unchanged = cast(Any, value).unchanged
+    return {
+        "started": int(started),
+        "stopped": int(stopped),
+        "unchanged": int(unchanged),
+    }

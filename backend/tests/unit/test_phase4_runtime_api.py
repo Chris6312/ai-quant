@@ -8,7 +8,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.routers.runtime import router as runtime_router
-from app.workers import WorkerHealthService, WorkerKey, WorkerRegistry, WorkerStatus
+from app.workers import (
+    WorkerHealthService,
+    WorkerKey,
+    WorkerRegistry,
+    WorkerStatus,
+    WorkerSupervisor,
+    WorkerSyncResult,
+)
 
 
 def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
@@ -39,6 +46,8 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
     assert payload["workers"][0]["status"] == WorkerStatus.RUNNING.value
     assert payload["workers"][0]["health"] == "healthy"
     assert payload["recent_events"]
+    assert payload["supervisor"]["name"] == "watchlist-sync"
+    assert payload["supervisor"]["enabled"] is False
 
 
 def test_runtime_workers_endpoint_honors_event_limit() -> None:
@@ -66,5 +75,15 @@ def _build_runtime_app() -> FastAPI:
     registry = WorkerRegistry()
     app.state.worker_registry = registry
     app.state.worker_health_service = WorkerHealthService(registry)
+
+    async def _sync() -> WorkerSyncResult:
+        return WorkerSyncResult(started=0, stopped=0, unchanged=1)
+
+    app.state.worker_supervisor = WorkerSupervisor(
+        name="watchlist-sync",
+        interval_seconds=30.0,
+        sync_operation=_sync,
+        enabled=False,
+    )
     app.include_router(runtime_router)
     return app
