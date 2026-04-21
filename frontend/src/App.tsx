@@ -5,9 +5,10 @@ import Analytics       from './pages/Analytics';
 import PaperLedger     from './pages/PaperLedger';
 import MachineLearning from './pages/MachineLearning';
 import OrderLog        from './pages/OrderLog';
+import Runtime         from './pages/Runtime';
 import Settings        from './pages/Settings';
 
-type TabKey = 'dashboard' | 'research' | 'analytics' | 'paper' | 'ml' | 'orders' | 'settings';
+type TabKey = 'dashboard' | 'research' | 'analytics' | 'paper' | 'ml' | 'orders' | 'runtime' | 'settings';
 type Mode   = 'paper' | 'live';
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -17,6 +18,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'paper',     label: 'Paper'     },
   { key: 'ml',        label: 'ML'        },
   { key: 'orders',    label: 'Orders'    },
+  { key: 'runtime',   label: 'Runtime'   },
   { key: 'settings',  label: 'Settings'  },
 ];
 
@@ -72,6 +74,7 @@ const App: React.FC = () => {
         {active === 'paper'     && <PaperLedger />}
         {active === 'ml'        && <MachineLearning />}
         {active === 'orders'    && <OrderLog />}
+        {active === 'runtime'   && <Runtime />}
         {active === 'settings'  && <Settings mode={mode} onModeChange={handleModeChange} />}
       </main>
     </div>

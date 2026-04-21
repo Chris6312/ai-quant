@@ -30,6 +30,70 @@ export type ConfigKeys = {
 
 export const getConfigKeys = () => requestJson<ConfigKeys>('/config/keys');
 
+
+export type RuntimeWorkerSummary = {
+  total_workers: number;
+  healthy_workers: number;
+  stale_workers: number;
+  inactive_workers: number;
+  error_workers: number;
+};
+
+export type RuntimeWorkerRecord = {
+  worker_id: string;
+  symbol: string;
+  asset_class: string;
+  timeframe: string;
+  source: string;
+  status: string;
+  health: string;
+  started_at: string;
+  updated_at: string;
+  last_heartbeat_at: string | null;
+  last_candle_close_at: string | null;
+  last_error: string | null;
+  task_name: string | null;
+  heartbeat_ttl_s: number;
+  heartbeat_age_s: number | null;
+};
+
+export type RuntimeWorkerEvent = {
+  worker_id: string;
+  status: string;
+  recorded_at: string;
+  detail: string | null;
+};
+
+export type RuntimeSupervisorResult = {
+  started: number;
+  stopped: number;
+  unchanged: number;
+};
+
+export type RuntimeSupervisorSnapshot = {
+  name: string;
+  interval_seconds: number;
+  enabled: boolean;
+  running: boolean;
+  iteration_count: number;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  last_result: RuntimeSupervisorResult | null;
+};
+
+export type RuntimeWorkersResponse = {
+  as_of: string;
+  summary: RuntimeWorkerSummary;
+  workers: RuntimeWorkerRecord[];
+  recent_events: RuntimeWorkerEvent[];
+  supervisor: RuntimeSupervisorSnapshot;
+};
+
+export const getRuntimeWorkers = (eventLimit = 20) =>
+  requestJson<RuntimeWorkersResponse>(`/runtime/workers?event_limit=${eventLimit}`);
+
 // ── Watchlist ─────────────────────────────────────────────────────────────
 export type WatchlistItem = {
   symbol: string;
