@@ -6,7 +6,6 @@ import React from 'react';
 const Analytics: React.FC = () => {
   return (
     <div className="page active">
-      {/* Performance metrics — honest N/A until backend adds /analytics route */}
       <div className="analytics-grid">
         {[
           { label: 'Sharpe ratio', note: 'Requires 30+ days paper data' },
@@ -32,7 +31,6 @@ const Analytics: React.FC = () => {
         ))}
       </div>
 
-      {/* Go/no-go checklist — paper trading gate */}
       <div className="card">
         <div className="card-header">
           <span className="card-title">Paper trading go / no-go gate</span>
@@ -62,7 +60,6 @@ const Analytics: React.FC = () => {
         </div>
       </div>
 
-      {/* Alpaca training data status */}
       <div className="card">
         <div className="card-header">
           <span className="card-title">Alpaca training data · ML pipeline</span>
@@ -106,7 +103,7 @@ const Analytics: React.FC = () => {
             </div>
             <div>
               <span style={{ color: 'var(--text4)' }}>·</span>{' '}
-              Runtime worker visibility now belongs on the Runtime page instead of this analytics screen.
+              Runtime worker visibility belongs on the Runtime page.
             </div>
           </div>
         </div>

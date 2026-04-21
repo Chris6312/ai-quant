@@ -25,17 +25,17 @@ if (-not $NpmCmd) {
 New-Item -ItemType Directory -Path $RunRoot -Force | Out-Null
 
 function Write-Step {
-    param([string]$Message)
+    param([Parameter(Mandatory = $true)][string]$Message)
     Write-Host "`n==> $Message" -ForegroundColor Cyan
 }
 
 function Write-Ok {
-    param([string]$Message)
+    param([Parameter(Mandatory = $true)][string]$Message)
     Write-Host "    OK: $Message" -ForegroundColor Green
 }
 
 function Write-Warn {
-    param([string]$Message)
+    param([Parameter(Mandatory = $true)][string]$Message)
     Write-Host "    WARN: $Message" -ForegroundColor Yellow
 }
 
@@ -230,26 +230,56 @@ $BackendPidFile = Join-Path $RunRoot 'backend.pid'
 $FrontendPidFile = Join-Path $RunRoot 'frontend.pid'
 
 $CeleryCommand = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$BackendRoot'
-Set-Content -LiteralPath '$CeleryPidFile' -Value `$PID -Encoding ascii
 `$env:PYTHONPATH = '$BackendRoot'
 Write-Host 'Starting Celery worker...' -ForegroundColor Cyan
-& '$BackendVenvPython' -m celery -A app.tasks.worker worker --loglevel=INFO --pool=solo
+`$child = Start-Process -FilePath '$BackendVenvPython' `
+    -ArgumentList @('-m', 'celery', '-A', 'app.tasks.worker', 'worker', '--loglevel=INFO', '--pool=solo') `
+    -WorkingDirectory '$BackendRoot' `
+    -NoNewWindow `
+    -PassThru
+Set-Content -LiteralPath '$CeleryPidFile' -Value `$child.Id -Encoding ascii
+Write-Host ('Celery PID: ' + `$child.Id) -ForegroundColor DarkGray
+`$null = `$child.WaitForExit()
+Remove-Item -LiteralPath '$CeleryPidFile' -ErrorAction SilentlyContinue
+exit `$child.ExitCode
 "@
 
 $BackendCommand = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$BackendRoot'
-Set-Content -LiteralPath '$BackendPidFile' -Value `$PID -Encoding ascii
 `$env:PYTHONPATH = '$BackendRoot'
 Write-Host 'Starting FastAPI backend...' -ForegroundColor Cyan
-& '$BackendVenvPython' -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+`$child = Start-Process -FilePath '$BackendVenvPython' `
+    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--reload', '--host', '0.0.0.0', '--port', '8000') `
+    -WorkingDirectory '$BackendRoot' `
+    -NoNewWindow `
+    -PassThru
+Set-Content -LiteralPath '$BackendPidFile' -Value `$child.Id -Encoding ascii
+Write-Host ('Backend PID: ' + `$child.Id) -ForegroundColor DarkGray
+`$null = `$child.WaitForExit()
+Remove-Item -LiteralPath '$BackendPidFile' -ErrorAction SilentlyContinue
+exit `$child.ExitCode
 "@
 
 $FrontendCommand = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$FrontendRoot'
-Set-Content -LiteralPath '$FrontendPidFile' -Value `$PID -Encoding ascii
 Write-Host 'Starting Vite frontend...' -ForegroundColor Cyan
-& '$NpmCmd' run dev -- --host 0.0.0.0
+`$child = Start-Process -FilePath '$NpmCmd' `
+    -ArgumentList @('run', 'dev', '--', '--host', '0.0.0.0') `
+    -WorkingDirectory '$FrontendRoot' `
+    -NoNewWindow `
+    -PassThru
+Set-Content -LiteralPath '$FrontendPidFile' -Value `$child.Id -Encoding ascii
+Write-Host ('Frontend PID: ' + `$child.Id) -ForegroundColor DarkGray
+`$null = `$child.WaitForExit()
+Remove-Item -LiteralPath '$FrontendPidFile' -ErrorAction SilentlyContinue
+exit `$child.ExitCode
 "@
 
 $TabDefinitions = @(

@@ -321,3 +321,18 @@ export const backfillGainers = (limit = 100, days = 365): Promise<MlJob> =>
 
 export const triggerWatchlistResearch = () =>
   requestJson<MlJob>('/ml/research/watchlist', { method: 'POST' });
+
+export type KrakenTicker = {
+  symbol: string;
+  last_price: number;
+  open_price: number;
+  change_pct: number;
+  source: string;
+};
+
+export const getKrakenTicker = (symbols?: string[]) => {
+  const query = symbols && symbols.length > 0
+    ? `?symbols=${encodeURIComponent(symbols.join(','))}`
+    : '';
+  return requestJson<KrakenTicker[]>(`/candles/kraken-ticker${query}`);
+};
