@@ -23,7 +23,9 @@ from app.config.constants import APP_NAME, APP_VERSION
 from app.config.settings import get_settings
 from app.core.logging import configure_logging
 from app.workers.worker_health_service import WorkerHealthService
+from app.workers.worker_lifecycle import WorkerSyncResult
 from app.workers.worker_registry import WorkerRegistry
+from app.workers.worker_supervisor import WorkerSupervisor
 
 
 class PrometheusFastApiInstrumentator(Protocol):
@@ -52,6 +54,7 @@ class _AppStateProtocol(Protocol):
 
     worker_registry: WorkerRegistry
     worker_health_service: WorkerHealthService
+    worker_supervisor: WorkerSupervisor
     settings: Any
 
 
@@ -68,6 +71,12 @@ def _load_instrumentator() -> type[Any]:
         return _NoOpInstrumentator
 
 
+async def _noop_sync_operation() -> WorkerSyncResult:
+    """Fallback sync operation until the live supervisor wiring is attached."""
+
+    return WorkerSyncResult(started=0, stopped=0, unchanged=0)
+
+
 InstrumentatorClass = _load_instrumentator()
 
 
@@ -81,8 +90,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     state = cast(_AppStateProtocol, app.state)
     state.worker_registry = WorkerRegistry()
     state.worker_health_service = WorkerHealthService(state.worker_registry)
+    state.worker_supervisor = WorkerSupervisor(
+        name="watchlist-worker-sync",
+        interval_seconds=30,
+        sync_operation=_noop_sync_operation,
+        enabled=False,
+    )
     state.settings = settings
     yield
+
 
 
 def create_app() -> FastAPI:
