@@ -83,10 +83,30 @@ export type RuntimeSupervisorSnapshot = {
   last_result: RuntimeSupervisorResult | null;
 };
 
+export type RuntimeCoverageSummary = {
+  watchlist_targets: number;
+  attached_workers: number;
+  unattached_workers: number;
+};
+
+export type RuntimeWatchlistTarget = {
+  worker_id: string;
+  symbol: string;
+  asset_class: string;
+  timeframe: string;
+  worker_attached: boolean;
+  worker_status: string | null;
+  worker_health: string | null;
+  last_heartbeat_at: string | null;
+  last_error: string | null;
+};
+
 export type RuntimeWorkersResponse = {
   as_of: string;
   summary: RuntimeWorkerSummary;
+  coverage: RuntimeCoverageSummary;
   workers: RuntimeWorkerRecord[];
+  watchlist_targets: RuntimeWatchlistTarget[];
   recent_events: RuntimeWorkerEvent[];
   supervisor: RuntimeSupervisorSnapshot;
 };

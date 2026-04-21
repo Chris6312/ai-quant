@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import {
   getRuntimeWorkers,
+  type RuntimeWatchlistTarget,
   type RuntimeWorkerEvent,
   type RuntimeWorkerRecord,
   type RuntimeWorkersResponse,
@@ -124,9 +125,10 @@ function toneForStatus(status: string): Tone {
 function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): React.ReactElement {
   if (workers.length === 0) {
     return (
-      <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)' }}>
-        No workers registered yet. Once live worker orchestration is wired to active symbols,
-        they will appear here.
+      <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
+        No managed workers are currently registered. This usually means the supervisor is disabled,
+        watchlist-driven workers have not been attached yet, or the runtime has not launched any
+        candle worker tasks in this process.
       </div>
     );
   }
@@ -170,6 +172,68 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
               </td>
               <td style={{ color: worker.last_error ? 'var(--red)' : 'var(--text3)' }}>
                 {worker.last_error ?? '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }): React.ReactElement {
+  if (targets.length === 0) {
+    return (
+      <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
+        No active stock watchlist symbols were found. Once symbols are active in the watchlist, this
+        section will show whether each one has a real worker attached.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="wl-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Asset</th>
+            <th>Timeframe</th>
+            <th>Attachment</th>
+            <th>Worker status</th>
+            <th>Worker health</th>
+            <th>Last heartbeat</th>
+            <th>Last error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {targets.map((target) => (
+            <tr key={target.worker_id}>
+              <td style={{ fontWeight: 500 }}>{target.symbol}</td>
+              <td>{target.asset_class}</td>
+              <td>{target.timeframe}</td>
+              <td>
+                <span style={pillStyle(target.worker_attached ? 'green' : 'amber')}>
+                  {target.worker_attached ? 'Attached' : 'Missing'}
+                </span>
+              </td>
+              <td>
+                {target.worker_status ? (
+                  <span style={pillStyle(toneForStatus(target.worker_status))}>{target.worker_status}</span>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td>
+                {target.worker_health ? (
+                  <span style={pillStyle(toneForHealth(target.worker_health))}>{target.worker_health}</span>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td>{fmtDateTime(target.last_heartbeat_at)}</td>
+              <td style={{ color: target.last_error ? 'var(--red)' : 'var(--text3)' }}>
+                {target.last_error ?? '—'}
               </td>
             </tr>
           ))}
@@ -257,6 +321,8 @@ const Runtime: React.FC = () => {
 
   const supervisor = runtime?.supervisor;
   const summary = runtime?.summary;
+  const coverage = runtime?.coverage;
+  const watchlistTargets = runtime?.watchlist_targets ?? [];
 
   return (
     <div className="page active">
@@ -272,7 +338,7 @@ const Runtime: React.FC = () => {
         <div>
           <div style={{ fontSize: 18, color: 'var(--text)', fontWeight: 500 }}>Worker runtime</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
-            Live visibility into the Phase 4 worker registry, supervisor, and recent lifecycle activity.
+            Live visibility into the Phase 4 worker registry, supervisor, and watchlist-to-worker coverage.
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -321,13 +387,33 @@ const Runtime: React.FC = () => {
         </div>
       )}
 
+      {!error && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: supervisor?.enabled ? 'var(--bg2)' : 'var(--amber-bg)',
+            border: supervisor?.enabled ? '0.5px solid var(--border)' : '0.5px solid var(--amber2)',
+            borderRadius: 'var(--radius-md)',
+            color: supervisor?.enabled ? 'var(--text2)' : 'var(--amber)',
+            fontSize: 11,
+            lineHeight: 1.7,
+          }}
+        >
+          {supervisor?.enabled
+            ? 'Supervisor is enabled. Compare the watchlist coverage table against the worker registry below to see whether active watchlist symbols actually have managed workers attached.'
+            : 'Supervisor is currently disabled. The coverage table below still shows which active stock watchlist symbols are missing worker attachments in this process.'}
+        </div>
+      )}
+
       <div className="metrics-row" style={{ marginTop: 14 }}>
         {[
-          { label: 'Total workers', value: summary?.total_workers ?? '—', tone: 'muted' as Tone },
-          { label: 'Healthy', value: summary?.healthy_workers ?? '—', tone: 'green' as Tone },
-          { label: 'Stale', value: summary?.stale_workers ?? '—', tone: 'amber' as Tone },
-          { label: 'Inactive', value: summary?.inactive_workers ?? '—', tone: 'muted' as Tone },
-          { label: 'Error', value: summary?.error_workers ?? '—', tone: 'red' as Tone },
+          { label: 'Total workers', value: summary?.total_workers ?? '—', tone: 'muted' as Tone, sub: 'Registry snapshot' },
+          { label: 'Healthy', value: summary?.healthy_workers ?? '—', tone: 'green' as Tone, sub: 'Fresh heartbeats' },
+          { label: 'Stale', value: summary?.stale_workers ?? '—', tone: 'amber' as Tone, sub: 'Needs attention' },
+          { label: 'Watchlist targets', value: coverage?.watchlist_targets ?? '—', tone: 'blue' as Tone, sub: 'Active stock symbols' },
+          { label: 'Attached', value: coverage?.attached_workers ?? '—', tone: 'green' as Tone, sub: 'Targets with workers' },
+          { label: 'Missing', value: coverage?.unattached_workers ?? '—', tone: 'amber' as Tone, sub: 'Targets without workers' },
         ].map((item) => (
           <div className="metric-tile" key={item.label}>
             <div className="metric-eyebrow">{item.label}</div>
@@ -341,12 +427,14 @@ const Runtime: React.FC = () => {
                       ? 'var(--amber)'
                       : item.tone === 'red'
                         ? 'var(--red)'
-                        : 'var(--text)',
+                        : item.tone === 'blue'
+                          ? 'var(--blue)'
+                          : 'var(--text)',
               }}
             >
               {item.value}
             </div>
-            <div className="metric-sub">Worker registry snapshot</div>
+            <div className="metric-sub">{item.sub}</div>
           </div>
         ))}
       </div>
@@ -411,7 +499,8 @@ const Runtime: React.FC = () => {
               <span style={pillStyle('blue')}>UI</span>
             </div>
             <div className="card-body" style={{ display: 'grid', gap: 8, fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              <div>Workers become visible here after the runtime supervisor wires real watchlist sync into the live loop.</div>
+              <div>The worker table shows only real registry entries from this backend process.</div>
+              <div>The watchlist coverage table answers a different question: which active stock watchlist symbols should have workers attached right now.</div>
               <div>This page is read-only on purpose. No start, stop, or restart controls are exposed in Phase 4.</div>
               <div>Health reflects registry timestamps: healthy, stale, inactive, and error.</div>
               <div>Recent events are capped to the latest {EVENT_LIMIT} entries from the backend API.</div>
@@ -422,7 +511,21 @@ const Runtime: React.FC = () => {
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-header">
-          <span className="card-title">Workers</span>
+          <span className="card-title">Watchlist worker coverage</span>
+          <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
+            {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} attached
+          </span>
+        </div>
+        {loading && !runtime ? (
+          <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)' }}>Loading coverage snapshot…</div>
+        ) : (
+          <RuntimeTargetTable targets={watchlistTargets} />
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-header">
+          <span className="card-title">Managed workers</span>
           <span style={pillStyle(summary?.total_workers ? 'green' : 'muted')}>
             {summary?.total_workers ?? 0} tracked
           </span>
