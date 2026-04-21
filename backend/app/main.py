@@ -17,10 +17,13 @@ from app.api.routers.ml import router as ml_router
 from app.api.routers.orders import router as orders_router
 from app.api.routers.paper import router as paper_router
 from app.api.routers.research import router as research_router
+from app.api.routers.runtime import router as runtime_router
 from app.api.routers.watchlist import router as watchlist_router
 from app.config.constants import APP_NAME, APP_VERSION
 from app.config.settings import get_settings
 from app.core.logging import configure_logging
+from app.workers.worker_health_service import WorkerHealthService
+from app.workers.worker_registry import WorkerRegistry
 
 
 class PrometheusFastApiInstrumentator(Protocol):
@@ -44,11 +47,22 @@ class _NoOpInstrumentator:
         del app, endpoint
 
 
+class _AppStateProtocol(Protocol):
+    """Typed view of app.state for worker runtime services."""
+
+    worker_registry: WorkerRegistry
+    worker_health_service: WorkerHealthService
+    settings: Any
+
+
 def _load_instrumentator() -> type[Any]:
     """Load the Prometheus instrumentator or a no-op fallback."""
 
     try:
-        from prometheus_fastapi_instrumentator import Instrumentator as PrometheusInstrumentator
+        from prometheus_fastapi_instrumentator import (
+            Instrumentator as PrometheusInstrumentator,
+        )
+
         return cast(type[Any], PrometheusInstrumentator)
     except ImportError:
         return _NoOpInstrumentator
@@ -63,13 +77,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    state = cast(_AppStateProtocol, app.state)
+    state.worker_registry = WorkerRegistry()
+    state.worker_health_service = WorkerHealthService(state.worker_registry)
+    state.settings = settings
     yield
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
-    settings = get_settings()
     app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
 
     app.add_middleware(
@@ -82,6 +100,7 @@ def create_app() -> FastAPI:
 
     InstrumentatorClass().instrument(app).expose(app, endpoint="/metrics")
     app.include_router(health_router)
+    app.include_router(runtime_router)
     app.include_router(candles_router)
     app.include_router(admin_router)
     app.include_router(watchlist_router)
@@ -90,7 +109,6 @@ def create_app() -> FastAPI:
     app.include_router(ml_router)
     app.include_router(orders_router)
     app.include_router(config_router)
-    app.state.settings = settings
     return app
 
 

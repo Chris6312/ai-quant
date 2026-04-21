@@ -4,6 +4,10 @@ from app.workers.watchlist_worker_sync import (
     WatchlistWorkerSyncConfig,
     WatchlistWorkerSynchronizer,
 )
+from app.workers.worker_health_service import (
+    WorkerHealthService,
+    WorkerHealthSnapshot,
+)
 from app.workers.worker_lifecycle import (
     WorkerLaunchSpec,
     WorkerLifecycleManager,
@@ -22,6 +26,8 @@ __all__ = [
     "WatchlistWorkerSyncConfig",
     "WatchlistWorkerSynchronizer",
     "WorkerHealth",
+    "WorkerHealthService",
+    "WorkerHealthSnapshot",
     "WorkerKey",
     "WorkerLaunchSpec",
     "WorkerLifecycleEvent",
