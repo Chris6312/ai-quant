@@ -1,5 +1,9 @@
 """Phase 4 worker orchestration primitives."""
 
+from app.workers.watchlist_worker_sync import (
+    WatchlistWorkerSyncConfig,
+    WatchlistWorkerSynchronizer,
+)
 from app.workers.worker_lifecycle import (
     WorkerLaunchSpec,
     WorkerLifecycleManager,
@@ -15,6 +19,8 @@ from app.workers.worker_runtime_state import (
 )
 
 __all__ = [
+    "WatchlistWorkerSyncConfig",
+    "WatchlistWorkerSynchronizer",
     "WorkerHealth",
     "WorkerKey",
     "WorkerLaunchSpec",
