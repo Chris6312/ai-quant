@@ -2,19 +2,24 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   backfillCrypto,
+  backfillSp500Stocks,
+  getCryptoUniverse,
   getFeatureParity,
   getMlModelImportances,
   getMlModels,
   getMlPersistence,
+  getStockUniverse,
   getTopGainers,
   requestJson,
   trainMlModel,
+  type CryptoUniverseResponse,
   type FeatureParityResponse,
   type GainersResponse,
   type MlModelImportancesResponse,
   type MlModelRecord,
   type MlModelsResponse,
   type MlPersistenceResponse,
+  type StockUniverseResponse,
 } from '../api';
 import { KRAKEN_UNIVERSE } from '../constants';
 
@@ -50,6 +55,8 @@ const S = {
 
 type BadgeVariant = 'green' | 'amber' | 'blue' | 'red' | 'purple' | 'teal' | 'muted';
 type ActionTone = 'blue' | 'amber' | 'muted' | 'danger';
+type AssetClass = 'crypto' | 'stock';
+type ImportanceDisplayLimit = 10 | 25 | 'all';
 
 type FeatureContractSummary = {
   feature_count: number;
@@ -392,23 +399,30 @@ const MachineLearning: React.FC = () => {
   const [persistence, setPersistence] = useState<MlPersistenceResponse | null>(null);
   const [featureContract, setFeatureContract] = useState<FeatureContractSummary | null>(null);
   const [cryptoUniverse, setCryptoUniverse] = useState<CryptoUniverseResponse | null>(null);
+  const [stockUniverse, setStockUniverse] = useState<StockUniverseResponse | null>(null);
   const [gainers, setGainers] = useState<GainersResponse | null>(null);
   const [modelsResponse, setModelsResponse] = useState<MlModelsResponse | null>(null);
   const [featureParity, setFeatureParity] = useState<FeatureParityResponse | null>(null);
-  const [cryptoImportances, setCryptoImportances] = useState<MlModelImportancesResponse | null>(null);
+  const [selectedImportanceAsset, setSelectedImportanceAsset] = useState<AssetClass>('crypto');
+  const [selectedImportanceLimit, setSelectedImportanceLimit] = useState<ImportanceDisplayLimit>(10);
+  const [selectedImportances, setSelectedImportances] = useState<MlModelImportancesResponse | null>(null);
+  const [isLoadingImportances, setIsLoadingImportances] = useState(false);
+  const [importanceError, setImportanceError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isImportingCrypto, setIsImportingCrypto] = useState(false);
+  const [isBackfillingSp500, setIsBackfillingSp500] = useState(false);
   const [isRefreshingGainers, setIsRefreshingGainers] = useState(false);
   const [isTrainingCrypto, setIsTrainingCrypto] = useState(false);
   const [isTrainingStock, setIsTrainingStock] = useState(false);
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
 
   const loadPageData = useCallback(async () => {
-    const [persistenceResult, featureResult, universeResult, gainersResult, modelsResult, parityResult] = await Promise.allSettled([
+    const [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult] = await Promise.allSettled([
       getMlPersistence(),
       requestJson<FeatureContractSummary>('/ml/features/contract'),
-      requestJson<CryptoUniverseResponse>('/ml/crypto/universe'),
+      getCryptoUniverse(),
+      getStockUniverse(),
       getTopGainers(100),
       getMlModels(),
       getFeatureParity(),
@@ -420,8 +434,11 @@ const MachineLearning: React.FC = () => {
     if (featureResult.status === 'fulfilled') {
       setFeatureContract(featureResult.value);
     }
-    if (universeResult.status === 'fulfilled') {
-      setCryptoUniverse(universeResult.value);
+    if (cryptoUniverseResult.status === 'fulfilled') {
+      setCryptoUniverse(cryptoUniverseResult.value);
+    }
+    if (stockUniverseResult.status === 'fulfilled') {
+      setStockUniverse(stockUniverseResult.value);
     }
     if (gainersResult.status === 'fulfilled') {
       setGainers(gainersResult.value);
@@ -433,7 +450,7 @@ const MachineLearning: React.FC = () => {
       setFeatureParity(parityResult.value);
     }
 
-    const errors = [persistenceResult, featureResult, universeResult, gainersResult, modelsResult, parityResult]
+    const errors = [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult]
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => normalizeError(result.reason));
 
@@ -486,7 +503,7 @@ const MachineLearning: React.FC = () => {
   const cryptoCandles = training?.crypto_candles ?? 0;
   const stockCandles = training?.stock_candles ?? 0;
   const cryptoSymbols = training?.crypto_symbols ?? cryptoUniverse?.count ?? KRAKEN_UNIVERSE.length;
-  const stockSymbols = training?.stock_symbols ?? gainers?.count ?? 0;
+  const stockSymbols = training?.stock_symbols ?? stockUniverse?.supported_symbol_count ?? gainers?.count ?? 0;
   const featureCount = featureContract?.feature_count ?? 51;
   const technicalFeatureCount = featureContract?.technical_feature_count ?? 36;
   const researchFeatureCount = featureContract?.research_feature_count ?? 15;
@@ -506,26 +523,40 @@ const MachineLearning: React.FC = () => {
 
   const activeCryptoModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'crypto' && model.status === 'active') ?? null, [modelsResponse]);
   const activeStockModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'stock' && model.status === 'active') ?? null, [modelsResponse]);
-
+  const selectedImportanceModel = useMemo(() => {
+    return selectedImportanceAsset === 'crypto' ? activeCryptoModel : activeStockModel;
+  }, [activeCryptoModel, activeStockModel, selectedImportanceAsset]);
 
   useEffect(() => {
     let alive = true;
 
     const run = async (): Promise<void> => {
-      if (!activeCryptoModel) {
-        setCryptoImportances(null);
+      if (!selectedImportanceModel) {
+        setSelectedImportances(null);
+        setImportanceError(null);
+        setIsLoadingImportances(false);
         return;
       }
 
       try {
-        const result = await getMlModelImportances(activeCryptoModel.model_id);
         if (alive) {
-          setCryptoImportances(result);
+          setIsLoadingImportances(true);
+          setImportanceError(null);
+        }
+        const result = await getMlModelImportances(selectedImportanceModel.model_id);
+        if (alive) {
+          setSelectedImportances(result);
         }
       } catch (error: unknown) {
         if (alive) {
-          setCryptoImportances(null);
-          setBanner({ tone: 'error', message: `Unable to load crypto model importances: ${normalizeError(error)}` });
+          const message = `Unable to load ${selectedImportanceAsset} model importances: ${normalizeError(error)}`;
+          setSelectedImportances(null);
+          setImportanceError(message);
+          setBanner({ tone: 'error', message });
+        }
+      } finally {
+        if (alive) {
+          setIsLoadingImportances(false);
         }
       }
     };
@@ -535,48 +566,30 @@ const MachineLearning: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [activeCryptoModel]);
+  }, [selectedImportanceAsset, selectedImportanceModel]);
 
-  const previewFeatures = useMemo(() => {
-    const liveImportances = cryptoImportances?.importances ?? [];
-    if (liveImportances.length > 0) {
-      const maxImportance = liveImportances[0]?.importance ?? 1;
-      return liveImportances.slice(0, 7).map((row) => ({
-        name: row.feature,
-        pct: maxImportance > 0 ? (row.importance / maxImportance) * 14.2 : 0,
-        color: featureContract?.research_features.includes(row.feature) ? S.purple : S.blue,
-        tag: featureContract?.research_features.includes(row.feature) ? 'purple' as BadgeVariant : undefined,
-      }));
+  const visibleImportanceCount = useMemo(() => {
+    const totalImportances = selectedImportances?.importances.length ?? 0;
+    if (selectedImportanceLimit === 'all') {
+      return totalImportances;
+    }
+    return Math.min(selectedImportanceLimit, totalImportances);
+  }, [selectedImportanceLimit, selectedImportances]);
+
+  const importanceFeatures = useMemo(() => {
+    const liveImportances = selectedImportances?.importances ?? [];
+    if (liveImportances.length === 0) {
+      return [];
     }
 
-    const technical = featureContract?.technical_features ?? [];
-    const research = featureContract?.research_features ?? [];
-    const combined = [
-      ...technical.slice(0, 5).map((name, index) => ({
-        name,
-        pct: [14.2, 11.8, 10.1, 8.7, 7.3][index] ?? 3.5,
-        color: S.blue,
-        tag: undefined as BadgeVariant | undefined,
-      })),
-      ...research.slice(0, 2).map((name, index) => ({
-        name,
-        pct: [6.9, 4.8][index] ?? 3.2,
-        color: S.purple,
-        tag: 'purple' as BadgeVariant,
-      })),
-    ];
-    return combined.length > 0
-      ? combined
-      : [
-          { name: 'rsi_14', pct: 14.2, color: S.blue, tag: undefined },
-          { name: 'returns_5', pct: 11.8, color: S.blue, tag: undefined },
-          { name: 'macd_hist', pct: 10.1, color: S.blue, tag: undefined },
-          { name: 'bollinger_percent_b_20', pct: 8.7, color: S.blue, tag: undefined },
-          { name: 'volume_ratio_20', pct: 7.3, color: S.blue, tag: undefined },
-          { name: 'news_sentiment_7d', pct: 6.9, color: S.purple, tag: 'purple' as BadgeVariant },
-          { name: 'congress_buy_score', pct: 4.8, color: S.purple, tag: 'purple' as BadgeVariant },
-        ];
-  }, [cryptoImportances, featureContract]);
+    const maxImportance = liveImportances[0]?.importance ?? 1;
+    return liveImportances.slice(0, visibleImportanceCount).map((row) => ({
+      name: row.feature,
+      pct: maxImportance > 0 ? (row.importance / maxImportance) * 14.2 : 0,
+      color: featureContract?.research_features.includes(row.feature) ? S.purple : selectedImportanceAsset === 'crypto' ? S.blue : S.amber,
+      tag: featureContract?.research_features.includes(row.feature) ? 'purple' as BadgeVariant : undefined,
+    }));
+  }, [featureContract, selectedImportances, selectedImportanceAsset, visibleImportanceCount]);
 
   const toModelCardData = (
     model: MlModelRecord | null,
@@ -630,7 +643,7 @@ const MachineLearning: React.FC = () => {
 
   const stockModel: ModelCardData = toModelCardData(
     activeStockModel,
-    'Stock model · SPY basis',
+    'Stock model · S&P 500 basis',
     S.amber2,
     'amber',
     S.amber,
@@ -671,6 +684,24 @@ const MachineLearning: React.FC = () => {
       setBanner({ tone: 'error', message: `${assetClass.toUpperCase()} training failed to start: ${normalizeError(error)}` });
     } finally {
       setter(false);
+    }
+  };
+
+  const handleBackfillSp500 = async (): Promise<void> => {
+    try {
+      setIsBackfillingSp500(true);
+      const job = await backfillSp500Stocks(stockUniverse?.target_candles_per_symbol ?? 1000);
+      setBanner({
+        tone: job.status === 'done' ? 'success' : 'error',
+        message: job.status === 'done'
+          ? `S&P 500 hydration completed: ${job.rows_fetched} candles across ${job.done_symbols}/${job.total_symbols} supported symbols.`
+          : `S&P 500 hydration failed: ${job.error ?? 'unknown error'}`,
+      });
+      await loadPageData();
+    } catch (error) {
+      setBanner({ tone: 'error', message: `S&P 500 hydration failed to start: ${normalizeError(error)}` });
+    } finally {
+      setIsBackfillingSp500(false);
     }
   };
 
@@ -817,7 +848,7 @@ const MachineLearning: React.FC = () => {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
         <div style={{ flex: 1, height: '0.5px', background: S.border2 }} />
-        <span style={{ fontSize: 9, color: S.border2, letterSpacing: '0.14em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Model results layout preserved · live backend still partial</span>
+        <span style={{ fontSize: 9, color: S.border2, letterSpacing: '0.14em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Model registry is live · predictions remain Phase 6</span>
         <div style={{ flex: 1, height: '0.5px', background: S.border2 }} />
       </div>
 
@@ -841,19 +872,52 @@ const MachineLearning: React.FC = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
-          <CardHeader title="Feature importance · crypto model · gain-based">
-            <Badge v="blue">Technical</Badge>
-            <Badge v="purple">Research</Badge>
-            <Badge v="muted">{cryptoImportances ? 'Live weights' : 'Preview weights'}</Badge>
+          <CardHeader title={`Feature importance · ${selectedImportanceAsset} model · gain-based`}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <ActionButton tone={selectedImportanceAsset === 'crypto' ? 'blue' : 'muted'} onClick={() => setSelectedImportanceAsset('crypto')}>
+                Crypto
+              </ActionButton>
+              <ActionButton tone={selectedImportanceAsset === 'stock' ? 'amber' : 'muted'} onClick={() => setSelectedImportanceAsset('stock')}>
+                Stock
+              </ActionButton>
+              <Badge v={selectedImportanceAsset === 'crypto' ? 'blue' : 'amber'}>Active asset</Badge>
+              <Badge v="purple">Research</Badge>
+              <Badge v="muted">{isLoadingImportances ? 'Loading' : selectedImportances ? 'Live weights' : 'No model available'}</Badge>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <ActionButton tone={selectedImportanceLimit === 10 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(10)}>
+                  Top 10
+                </ActionButton>
+                <ActionButton tone={selectedImportanceLimit === 25 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(25)}>
+                  Top 25
+                </ActionButton>
+                <ActionButton tone={selectedImportanceLimit === 'all' ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit('all')}>
+                  All
+                </ActionButton>
+              </div>
+            </div>
           </CardHeader>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {previewFeatures.map((feature) => (
-              <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
-            ))}
+            {selectedImportanceModel && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
+                <div style={{ fontSize: 10, color: S.text3 }}>Artifact<span style={{ display: 'block', fontSize: 11, color: S.text2, fontFamily: S.mono, marginTop: 4 }}>{selectedImportanceModel.artifact_path.split(/[\\/]/).pop() ?? selectedImportanceModel.artifact_path}</span></div>
+                <div style={{ fontSize: 10, color: S.text3 }}>Best fold / accuracy<span style={{ display: 'block', fontSize: 11, color: S.text2, marginTop: 4 }}>Fold {selectedImportanceModel.best_fold} · {(selectedImportanceModel.validation_accuracy * 100).toFixed(1)}%</span></div>
+              </div>
+            )}
+            {isLoadingImportances ? (
+              <div style={{ padding: '10px 0', fontSize: 10, color: S.text3 }}>Loading live feature weights for the active {selectedImportanceAsset} champion model…</div>
+            ) : importanceFeatures.length > 0 ? (
+              importanceFeatures.map((feature) => (
+                <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
+              ))
+            ) : (
+              <div style={{ padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+                {importanceError ?? `No active ${selectedImportanceAsset} model is registered yet. Train a ${selectedImportanceAsset} model to populate live feature weights.`}
+              </div>
+            )}
             <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-              {cryptoImportances
-                ? `Showing ${cryptoImportances.importances.length} live feature weights from the active crypto champion model.`
-                : 'Falling back to preview weights until a live crypto model registry record is available.'}
+              {selectedImportances
+                ? `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} live feature weights from the active ${selectedImportances.asset_class} champion model.`
+                : `This panel only shows backend-sourced weights. Preview data has been removed for ${selectedImportanceAsset}.`}
               {featureParity && (
                 <span style={{ display: 'block', marginTop: 6, color: featureParity.parity_ok ? S.green : S.amber }}>
                   Feature parity: {featureParity.parity_ok ? 'stock and crypto match the ML contract order.' : 'parity review still has mismatches.'}
@@ -994,15 +1058,15 @@ const MachineLearning: React.FC = () => {
         <CardHeader title="Training data · status reference">
           <Badge v="blue">Crypto: {formatNumber(cryptoCandles)} candles · {cryptoSymbols} symbols · CSV</Badge>
           <Badge v="amber">Stock: {formatNumber(stockCandles)} candles · {stockSymbols} symbols · Alpaca</Badge>
-          <Badge v="muted">Manage in ML page</Badge>
+          <Badge v="muted">Universe: {stockUniverse?.index ?? 'S&P 500'} · as of {stockUniverse?.as_of ?? 'pending'}</Badge>
         </CardHeader>
         <div style={{ padding: 16, display: 'flex', gap: 24, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
             {[
               { label: 'Crypto coverage', value: formatNumber(cryptoCandles), color: S.blue, sub: `${cryptoSymbols} symbols · ${cryptoUniverse?.source_dir ?? 'crypto-history'}` },
               { label: 'Stock coverage', value: formatNumber(stockCandles), color: S.amber, sub: `${stockSymbols} symbols in training set` },
-              { label: 'Min per symbol', value: '200', color: S.text, sub: 'candles to build features' },
-              { label: 'Feature warmup', value: '200', color: S.text, sub: 'candles for SMA-200' },
+              { label: 'Target per symbol', value: String(stockUniverse?.target_candles_per_symbol ?? 1000), color: S.text, sub: '1D candles to pull for stock ML' },
+              { label: 'Minimum usable', value: String(stockUniverse?.minimum_candles_per_symbol ?? 750), color: S.text, sub: 'clean candles required for training' },
             ].map((metric) => (
               <div key={metric.label}>
                 <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: S.text3, marginBottom: 4 }}>{metric.label}</div>
@@ -1011,12 +1075,20 @@ const MachineLearning: React.FC = () => {
               </div>
             ))}
           </div>
+          <div style={{ minWidth: 260, maxWidth: 420, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+            <div>Stock universe source: <span style={{ color: S.text2, fontFamily: S.mono }}>{stockUniverse?.source_file ?? 'SP500/sp500_constituents_2026-04-22.json'}</span></div>
+            <div>Supported symbols: <span style={{ color: S.text2 }}>{stockUniverse?.supported_symbol_count ?? 0}</span> · Unsupported share-class symbols skipped: <span style={{ color: S.text2 }}>{stockUniverse?.unsupported_symbol_count ?? 0}</span></div>
+            <div>Top-100 most-active remains a research list only. S&P 500 hydration is now the stock ML backbone.</div>
+          </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <ActionButton tone="blue" disabled={isImportingCrypto} onClick={() => { void handleImportCrypto(); }}>
               {isImportingCrypto ? 'Importing crypto CSVs…' : '→ Import crypto CSVs'}
             </ActionButton>
-            <ActionButton tone="amber" disabled={isRefreshingGainers} onClick={() => { void handleRefreshGainers(); }}>
-              {isRefreshingGainers ? 'Refreshing top 100…' : '→ Refresh top 100 stocks'}
+            <ActionButton tone="amber" disabled={isBackfillingSp500 || Boolean(activeJob)} onClick={() => { void handleBackfillSp500(); }}>
+              {isBackfillingSp500 ? 'Hydrating S&P 500…' : `→ Backfill S&P 500 (${stockUniverse?.supported_symbol_count ?? 0} symbols)`}
+            </ActionButton>
+            <ActionButton tone="muted" disabled={isRefreshingGainers} onClick={() => { void handleRefreshGainers(); }}>
+              {isRefreshingGainers ? 'Refreshing top 100…' : 'Refresh top 100 stocks'}
             </ActionButton>
           </div>
         </div>

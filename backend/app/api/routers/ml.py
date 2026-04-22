@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from pathlib import Path
 from typing import Protocol, cast
 from uuid import uuid4
@@ -26,9 +27,13 @@ from app.ml.features import (
     build_feature_contract_summary,
     validate_feature_vector,
 )
+from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
 from app.ml.trainer import TrainerConfig, TrainResult, WalkForwardTrainer
-from app.ml.training_inputs import train_stock_model_from_db as train_stock_model_from_db_impl
+from app.ml.training_inputs import (
+    train_stock_model_from_db as train_stock_model_from_db_impl,
+)
 from app.models.domain import Candle
+from app.repositories.candles import CandleRepository
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
@@ -130,6 +135,141 @@ def _new_job(job_type: str, symbols: list[str]) -> Mapping[str, object]:
     }
     job_store.create_job(record)
     return record
+
+
+STOCK_DAILY_CANDLE_TARGET = 1000
+STOCK_DAILY_CANDLE_MINIMUM = 750
+STOCK_DAILY_TIMEFRAME = "1Day"
+STOCK_DAILY_LOOKBACK_DAYS = 1600
+
+
+def _serialize_stock_universe(snapshot: StockUniverseSnapshot) -> dict[str, object]:
+    supported = snapshot.supported_symbols
+    unsupported = snapshot.unsupported_symbols
+    return {
+        "index": snapshot.index_name,
+        "as_of": snapshot.as_of,
+        "source_file": str(snapshot.file_path),
+        "constituent_stock_count": snapshot.constituent_stock_count,
+        "supported_symbol_count": len(supported),
+        "unsupported_symbol_count": len(unsupported),
+        "target_candles_per_symbol": STOCK_DAILY_CANDLE_TARGET,
+        "minimum_candles_per_symbol": STOCK_DAILY_CANDLE_MINIMUM,
+        "timeframe": STOCK_DAILY_TIMEFRAME,
+        "lookback_days": STOCK_DAILY_LOOKBACK_DAYS,
+        "sample_symbols": [symbol.symbol for symbol in supported[:12]],
+        "unsupported_symbols": [
+            {
+                "symbol": symbol.symbol,
+                "reason": symbol.unsupported_reason,
+            }
+            for symbol in unsupported
+        ],
+    }
+
+
+def _load_stock_universe_snapshot() -> StockUniverseSnapshot:
+    return StockUniverseLoader().load()
+
+
+def _build_backfill_job(job_type: str, symbols: list[str]) -> Mapping[str, object]:
+    job = _new_job(job_type, symbols)
+    job_id = str(job["job_id"])
+    total_symbols = len(symbols)
+    total_batches = (
+        ceil(total_symbols / AlpacaTrainingFetcher.max_symbols_per_request)
+        if total_symbols > 0
+        else 0
+    )
+    job_store.update_job(
+        job_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        total_symbols=total_symbols,
+        done_symbols=0,
+        current_symbol=None,
+        total_batches=total_batches,
+        done_batches=0,
+        rows_fetched=0,
+        current_timeframe=STOCK_DAILY_TIMEFRAME,
+        status_message="Starting universe hydration",
+        progress_pct=0,
+        error=None,
+        result=None,
+    )
+    refreshed = job_store.get_job(job_id)
+    return refreshed if refreshed is not None else job
+
+
+async def _backfill_stock_universe(*, target_candles: int) -> Mapping[str, object]:
+    settings = get_settings()
+    snapshot = _load_stock_universe_snapshot()
+    supported_symbols = [symbol.symbol for symbol in snapshot.supported_symbols]
+    if not supported_symbols:
+        raise HTTPException(
+            status_code=400,
+            detail="stock universe does not contain supported symbols",
+        )
+
+    job = _build_backfill_job("stock_sp500_backfill", supported_symbols)
+    job_id = str(job["job_id"])
+
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    rows_fetched = 0
+    try:
+        async with session_factory() as session:
+            repository = CandleRepository(session)
+            fetcher = AlpacaTrainingFetcher(
+                repository=repository,
+                api_key=settings.alpaca_api_key,
+                api_secret=settings.alpaca_api_secret,
+                lookback_days=max(STOCK_DAILY_LOOKBACK_DAYS, int(target_candles * 1.6)),
+            )
+            rows_fetched = await fetcher.sync_universe(
+                symbols=supported_symbols,
+                timeframes=[STOCK_DAILY_TIMEFRAME],
+            )
+
+        result = {
+            "rows_fetched": rows_fetched,
+            "requested_symbols": len(snapshot.symbols),
+            "supported_symbols": len(snapshot.supported_symbols),
+            "unsupported_symbols": len(snapshot.unsupported_symbols),
+            "target_candles_per_symbol": target_candles,
+            "minimum_candles_per_symbol": STOCK_DAILY_CANDLE_MINIMUM,
+            "timeframe": STOCK_DAILY_TIMEFRAME,
+            "lookback_days": max(STOCK_DAILY_LOOKBACK_DAYS, int(target_candles * 1.6)),
+            "source_file": str(snapshot.file_path),
+        }
+        job_store.update_job(
+            job_id,
+            done_symbols=len(supported_symbols),
+            current_symbol=None,
+            done_batches=ceil(
+                len(supported_symbols)
+                / AlpacaTrainingFetcher.max_symbols_per_request
+            ),
+            rows_fetched=rows_fetched,
+            status_message="Universe hydration completed",
+            progress_pct=100,
+        )
+        finished = job_store.finish_job(job_id, status="done", result=result)
+        return finished if finished is not None else {
+            "job_id": job_id,
+            "result": result,
+        }
+    except Exception as exc:
+        job_store.update_job(
+            job_id,
+            rows_fetched=rows_fetched,
+            status_message="Universe hydration failed",
+            progress_pct=0,
+        )
+        finished = job_store.finish_job(job_id, status="error", error=str(exc))
+        if finished is not None:
+            return finished
+        raise
 
 
 def _coerce_numeric(value: object | None) -> float:
@@ -633,6 +773,25 @@ async def get_gainers(limit: int = Query(default=100, ge=1, le=100)) -> Mapping[
     if error is not None:
         response["error"] = error
     return response
+
+
+
+
+@router.get("/stock/universe")
+def get_stock_universe() -> Mapping[str, object]:
+    snapshot = _load_stock_universe_snapshot()
+    return {
+        **_serialize_stock_universe(snapshot),
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+    }
+
+
+@router.post("/backfill/stocks/sp500")
+async def backfill_sp500_stock_universe(
+    target_candles: int = Query(default=STOCK_DAILY_CANDLE_TARGET, ge=500, le=2000),
+) -> Mapping[str, object]:
+    _ensure_no_running_job()
+    return await _backfill_stock_universe(target_candles=target_candles)
 
 
 @router.get("/models")

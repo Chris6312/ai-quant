@@ -90,7 +90,8 @@ Status legend:
 
 ### corrections required
 
-* [ ] switch stock screener endpoint to most-actives
+* [x] switch stock screener endpoint to most-actives
+* [x] define stock ML target candle depth
 * [ ] enforce max 100 symbols for most-actives
 * [ ] confirm correct symbol normalization for Alpaca bars endpoint
 
@@ -150,10 +151,11 @@ Status legend:
 
 ## feature coverage
 
-* [~] feature set partially aligned with ML contract
-* [ ] verify feature parity between stock and crypto datasets
-* [ ] validate feature completeness for ML scoring
+* [x] feature set aligned with ML contract
+* [x] verify feature parity between stock and crypto datasets
+* [x] validate feature completeness for ML scoring
 * [ ] ensure feature reproducibility across runs
+* [~] ML UI truth alignment (feature importance + active model binding)
 
 ---
 
@@ -287,6 +289,8 @@ Status legend:
 ## MachineLearning.tsx wiring
 
 * [x] stock backfill controls implemented
+* [x] S&P 500 stock universe source defined
+* [x] S&P 500 hydration control implemented
 * [x] crypto backfill controls implemented
 * [x] job progress display implemented
 * [x] stock symbol input implemented
@@ -327,7 +331,8 @@ Status legend:
 
 * [ ] frontend persistence for ML page
 * [ ] durable ML job storage
-* [ ] switch stock screener endpoint to most-actives
+* [x] switch stock screener endpoint to most-actives
+* [x] define stock ML target candle depth
 * [ ] implement crypto CSV ingestion path
 * [ ] complete research → watchlist orchestration wiring
 * [ ] persistent paper ledger

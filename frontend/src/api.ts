@@ -324,6 +324,27 @@ export type CryptoUniverseResponse = {
   source_dir: string;
 };
 
+export type StockUniverseUnsupportedSymbol = {
+  symbol: string;
+  reason: string | null;
+};
+
+export type StockUniverseResponse = {
+  index: string;
+  as_of: string;
+  source_file: string;
+  constituent_stock_count: number;
+  supported_symbol_count: number;
+  unsupported_symbol_count: number;
+  target_candles_per_symbol: number;
+  minimum_candles_per_symbol: number;
+  timeframe: string;
+  lookback_days: number;
+  sample_symbols: string[];
+  unsupported_symbols: StockUniverseUnsupportedSymbol[];
+  generated_at: string;
+};
+
 export type GainersResponse = {
   gainers: GainerRow[];
   count: number;
@@ -426,6 +447,8 @@ export const getFeatureContract = () =>
   requestJson<FeatureContractResponse>('/ml/features/contract');
 export const getCryptoUniverse = () =>
   requestJson<CryptoUniverseResponse>('/ml/crypto/universe');
+export const getStockUniverse = () =>
+  requestJson<StockUniverseResponse>('/ml/stock/universe');
 export const getMlModels = (assetClass?: 'crypto' | 'stock') =>
   requestJson<MlModelsResponse>(assetClass ? `/ml/models?asset_class=${assetClass}` : '/ml/models');
 export const getMlModel = (modelId: string) =>
@@ -446,14 +469,9 @@ export const backfillCrypto = (): Promise<MlJob> =>
     body: JSON.stringify({}),
   });
 
-export const backfillStocks = (symbols: string, days = 730) =>
-  requestJson<MlJob>('/ml/backfill/stocks', {
+export const backfillSp500Stocks = (targetCandles = 1000) =>
+  requestJson<MlJob>(`/ml/backfill/stocks/sp500?target_candles=${targetCandles}`, {
     method: 'POST',
-    body: JSON.stringify({
-      symbols: symbols.split(',').map((value) => value.trim()).filter(Boolean),
-      timeframe: '1Day',
-      lookback_days: days,
-    }),
   });
 
 export const backfillGainers = (limit = 100, days = 365): Promise<MlJob> =>
