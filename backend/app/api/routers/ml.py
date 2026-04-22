@@ -23,10 +23,12 @@ from app.db.session import build_session_factory as create_session_factory
 from app.ml import job_store, model_registry
 from app.ml.features import (
     FeatureEngineer,
+    FeatureVector,
     ResearchInputs,
     build_feature_contract_summary,
     validate_feature_vector,
 )
+from app.ml.predictor import ModelPredictor
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
 from app.ml.trainer import TrainerConfig, TrainResult, WalkForwardTrainer
 from app.ml.training_inputs import (
@@ -689,6 +691,168 @@ def _get_model_importance_rows(model: model_registry.ModelRecord) -> list[dict[s
         reverse=True,
     )
     return rows
+
+
+def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
+    artifact_path = str(model.get("artifact_path") or "")
+    normalized = artifact_path.replace("\\", "/")
+    path = Path(normalized)
+    if path.is_absolute():
+        return str(path)
+    return str(Path.cwd() / path)
+
+
+def _prediction_action(
+    asset_class: str,
+    direction: str,
+    confidence: float,
+    threshold: float,
+) -> str:
+    if confidence < threshold:
+        return "skip"
+    if direction == "flat":
+        return "skip"
+    if asset_class == "crypto" and direction == "short":
+        return "skip"
+    return "signal"
+
+
+def _format_driver_value(feature: str, value: float) -> str:
+    if feature.startswith("returns_") or feature in {"gap_open", "atr_pct_14"}:
+        return f"{value * 100:+.1f}%"
+    if feature in {"rsi_14", "adx_14", "day_of_week", "day_of_month", "days_to_month_end"}:
+        return f"{value:.1f}"
+    if feature.startswith("news_sentiment"):
+        return f"{value:+.2f}"
+    return f"{value:+.2f}"
+
+
+def _select_top_driver(
+    features: FeatureVector,
+    model: model_registry.ModelRecord,
+) -> str:
+    importances = model.get("feature_importances")
+    if not isinstance(importances, dict) or not importances:
+        return "n/a"
+
+    ranked: list[tuple[str, float]] = []
+    for name, raw_importance in importances.items():
+        if not isinstance(name, str) or name not in features:
+            continue
+        ranked.append((name, _coerce_numeric(raw_importance)))
+    if not ranked:
+        return "n/a"
+
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    feature_name = ranked[0][0]
+    feature_value = features.get(feature_name, 0.0)
+    return f"{feature_name} → {_format_driver_value(feature_name, feature_value)}"
+
+
+async def _build_asset_predictions(
+    asset_class: str,
+    *,
+    limit: int,
+    history_size: int = 220,
+) -> list[dict[str, object]]:
+    active_model = model_registry.get_active_model(asset_class)
+    if active_model is None:
+        return []
+
+    candles = await _load_training_candles(asset_class)
+    if not candles:
+        return []
+
+    predictor = ModelPredictor(
+        _resolve_model_artifact_path(active_model),
+        min_confidence=0.0,
+    )
+    engineer = FeatureEngineer()
+    threshold = _coerce_numeric(active_model.get("confidence_threshold")) or 0.60
+    latest_by_symbol: dict[str, list[Candle]] = {}
+    for candle in candles:
+        bucket = latest_by_symbol.setdefault(candle.symbol, [])
+        bucket.append(candle)
+        if len(bucket) > history_size:
+            del bucket[0]
+
+    rows: list[dict[str, object]] = []
+    model_id = active_model.get("model_id")
+    model_id_value = model_id if isinstance(model_id, str) else None
+    for symbol, history in latest_by_symbol.items():
+        features = engineer.build(history, asset_class)
+        if features is None:
+            continue
+        prediction = predictor.predict(features)
+        if prediction is None:
+            continue
+        candle_time = history[-1].time.isoformat()
+        action = _prediction_action(
+            asset_class,
+            prediction.direction,
+            prediction.confidence,
+            threshold,
+        )
+        rows.append(
+            {
+                "prediction_id": f"{asset_class}:{symbol}:{candle_time}",
+                "model_id": model_id_value,
+                "symbol": symbol,
+                "asset_class": asset_class,
+                "direction": prediction.direction,
+                "confidence": round(prediction.confidence, 6),
+                "class_probabilities": {
+                    "down": round(prediction.class_probs[0], 6),
+                    "flat": round(prediction.class_probs[1], 6),
+                    "up": round(prediction.class_probs[2], 6),
+                },
+                "top_driver": _select_top_driver(features, active_model),
+                "candle_time": candle_time,
+                "action": action,
+                "confidence_threshold": threshold,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            _coerce_numeric(row.get("confidence")),
+            str(row.get("symbol") or ""),
+        ),
+        reverse=True,
+    )
+    return rows[:limit]
+
+
+@router.get("/predictions")
+async def get_predictions(
+    limit: int = Query(default=50, ge=1, le=200),
+    asset_class: str | None = Query(default=None),
+) -> Mapping[str, object]:
+    if asset_class is not None and asset_class not in {"crypto", "stock"}:
+        raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
+
+    assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
+    rows: list[dict[str, object]] = []
+    for asset in assets:
+        rows.extend(await _build_asset_predictions(asset, limit=limit))
+
+    rows.sort(
+        key=lambda row: (
+            _coerce_numeric(row.get("confidence")),
+            str(row.get("symbol") or ""),
+        ),
+        reverse=True,
+    )
+    visible_rows = rows[:limit]
+    return {
+        "predictions": visible_rows,
+        "count": len(visible_rows),
+        "active_model_ids": {
+            "crypto": _get_active_model_id("crypto"),
+            "stock": _get_active_model_id("stock"),
+        },
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+    }
 
 
 @router.get("/jobs")

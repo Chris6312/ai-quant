@@ -7,6 +7,7 @@ import {
   getFeatureParity,
   getMlModelImportances,
   getMlModels,
+  getMlPredictions,
   getMlPersistence,
   getStockUniverse,
   getTopGainers,
@@ -18,6 +19,7 @@ import {
   type MlModelImportancesResponse,
   type MlModelRecord,
   type MlModelsResponse,
+  type MlPredictionsResponse,
   type MlPersistenceResponse,
   type StockUniverseResponse,
 } from '../api';
@@ -57,6 +59,7 @@ type BadgeVariant = 'green' | 'amber' | 'blue' | 'red' | 'purple' | 'teal' | 'mu
 type ActionTone = 'blue' | 'amber' | 'muted' | 'danger';
 type AssetClass = 'crypto' | 'stock';
 type ImportanceDisplayLimit = 10 | 25 | 'all';
+type PredictionDisplayMode = 'top' | 'all';
 
 type FeatureContractSummary = {
   feature_count: number;
@@ -133,14 +136,6 @@ const CRYPTO_FOLDS: Fold[] = [
   { label: 'Fold 6', window: 'Jun 2024 → Nov 2024 | Dec 2024', trainL: 62.5, trainW: 25, testL: 87.5, testW: 12.5, sharpe: 0.77, acc: 63.1 },
   { label: 'Fold 7', window: 'Jul 2024 → Dec 2024 | Jan 2025', trainL: 75, trainW: 12.5, testL: 87.5, testW: 12.5, sharpe: -0.31, acc: 54.7 },
   { label: 'Fold 8', window: 'Aug 2024 → Jan 2025 | Feb 2025', trainL: 75, trainW: 12.5, testL: 87.5, testW: 12.5, sharpe: 1.12, acc: 70.9 },
-];
-
-const PREVIEW_PREDICTIONS = [
-  { symbol: 'BTC/USD', asset: 'crypto', dir: 'long' as const, conf: 81, down: 8, flat: 11, up: 81, driver: 'rsi_14 → 62.4', time: 'Preview only' },
-  { symbol: 'ETH/USD', asset: 'crypto', dir: 'long' as const, conf: 71, down: 12, flat: 17, up: 71, driver: 'macd_hist → +0.44', time: 'Preview only' },
-  { symbol: 'SOL/USD', asset: 'crypto', dir: 'flat' as const, conf: 54, down: 23, flat: 54, up: 23, driver: 'bollinger_percent_b → 0.51', time: 'Preview only' },
-  { symbol: 'NVDA', asset: 'stock', dir: 'short' as const, conf: 68, down: 68, flat: 19, up: 13, driver: 'returns_5 → -4.2%', time: 'Preview only' },
-  { symbol: 'AAPL', asset: 'stock', dir: 'long' as const, conf: 63, down: 14, flat: 23, up: 63, driver: 'news_sentiment_7d → +0.72', time: 'Preview only' },
 ];
 
 const SHAP_ROWS = [
@@ -408,6 +403,9 @@ const MachineLearning: React.FC = () => {
   const [selectedImportances, setSelectedImportances] = useState<MlModelImportancesResponse | null>(null);
   const [isLoadingImportances, setIsLoadingImportances] = useState(false);
   const [importanceError, setImportanceError] = useState<string | null>(null);
+  const [predictionsResponse, setPredictionsResponse] = useState<MlPredictionsResponse | null>(null);
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [predictionDisplayMode, setPredictionDisplayMode] = useState<PredictionDisplayMode>('top');
   const [isLoading, setIsLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isImportingCrypto, setIsImportingCrypto] = useState(false);
@@ -418,7 +416,7 @@ const MachineLearning: React.FC = () => {
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
 
   const loadPageData = useCallback(async () => {
-    const [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult] = await Promise.allSettled([
+    const [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult, predictionsResult] = await Promise.allSettled([
       getMlPersistence(),
       requestJson<FeatureContractSummary>('/ml/features/contract'),
       getCryptoUniverse(),
@@ -426,6 +424,7 @@ const MachineLearning: React.FC = () => {
       getTopGainers(100),
       getMlModels(),
       getFeatureParity(),
+      getMlPredictions(50),
     ]);
 
     if (persistenceResult.status === 'fulfilled') {
@@ -449,8 +448,15 @@ const MachineLearning: React.FC = () => {
     if (parityResult.status === 'fulfilled') {
       setFeatureParity(parityResult.value);
     }
+    if (predictionsResult.status === 'fulfilled') {
+      setPredictionsResponse(predictionsResult.value);
+      setPredictionError(null);
+    } else {
+      setPredictionsResponse(null);
+      setPredictionError(normalizeError(predictionsResult.reason));
+    }
 
-    const errors = [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult]
+    const errors = [persistenceResult, featureResult, cryptoUniverseResult, stockUniverseResult, gainersResult, modelsResult, parityResult, predictionsResult]
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => normalizeError(result.reason));
 
@@ -590,6 +596,14 @@ const MachineLearning: React.FC = () => {
       tag: featureContract?.research_features.includes(row.feature) ? 'purple' as BadgeVariant : undefined,
     }));
   }, [featureContract, selectedImportances, selectedImportanceAsset, visibleImportanceCount]);
+
+  const visiblePredictions = useMemo(() => {
+    const rows = predictionsResponse?.predictions ?? [];
+    if (predictionDisplayMode === 'all') {
+      return rows;
+    }
+    return rows.slice(0, 5);
+  }, [predictionDisplayMode, predictionsResponse]);
 
   const toModelCardData = (
     model: MlModelRecord | null,
@@ -966,8 +980,15 @@ const MachineLearning: React.FC = () => {
 
       <Card>
         <CardHeader title="Live inference · latest predictions from champion models">
-          <span style={{ fontSize: 9, color: S.text3 }}>Confidence gate: 60% · Updated on each 1h candle close</span>
-          <Badge v="muted">Awaiting /ml/predictions</Badge>
+          <span style={{ fontSize: 10, color: S.text3 }}>
+            Confidence gate: {Math.round(((activeCryptoModel?.confidence_threshold ?? activeStockModel?.confidence_threshold ?? 0.6) * 100))}%
+          </span>
+          <span style={{ fontSize: 10, color: S.text3 }}>
+            Updated on each 1h candle close
+          </span>
+          <Badge v="muted">
+            {predictionsResponse ? `${predictionsResponse.count} live predictions` : 'Awaiting /ml/predictions'}
+          </Badge>
         </CardHeader>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -979,21 +1000,35 @@ const MachineLearning: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {PREVIEW_PREDICTIONS.map((prediction) => {
-                const dirColor = prediction.dir === 'long' ? S.green : prediction.dir === 'short' ? S.red : S.text3;
-                const actionV: BadgeVariant = prediction.dir === 'long' ? 'green' : prediction.dir === 'short' ? 'red' : 'muted';
-                const actionLabel = prediction.dir === 'flat' ? 'Skip' : 'Signal';
+              {isLoading ? (
+                <tr>
+                  <td colSpan={10} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>Loading live predictions…</td>
+                </tr>
+              ) : predictionError ? (
+                <tr>
+                  <td colSpan={10} style={{ padding: '14px 12px', color: S.red, borderBottom: `0.5px solid ${S.border}` }}>Unable to load live predictions: {predictionError}</td>
+                </tr>
+              ) : visiblePredictions.length === 0 ? (
+                <tr>
+                  <td colSpan={10} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>No live predictions are available yet. Train active models and ensure persisted candle history exists for the selected assets.</td>
+                </tr>
+              ) : visiblePredictions.map((prediction) => {
+                const dirColor = prediction.direction === 'long' ? S.green : prediction.direction === 'short' ? S.red : S.text3;
+                const actionV: BadgeVariant = prediction.action === 'signal'
+                  ? (prediction.direction === 'short' ? 'red' : 'green')
+                  : 'muted';
+                const actionLabel = prediction.action === 'signal' ? 'Signal' : 'Skip';
                 return (
-                  <tr key={prediction.symbol}>
+                  <tr key={prediction.prediction_id}>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontWeight: 500, color: S.text }}>{prediction.symbol}</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><Badge v={prediction.asset === 'crypto' ? 'blue' : 'amber'}>{prediction.asset}</Badge></td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><DirPill dir={prediction.dir} /></td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><ConfBar pct={prediction.conf} color={dirColor} /></td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.red }}>{prediction.down}%</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.text3 }}>{prediction.flat}%</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.green }}>{prediction.up}%</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{prediction.driver}</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{prediction.time}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><Badge v={prediction.asset_class === 'crypto' ? 'blue' : 'amber'}>{prediction.asset_class}</Badge></td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><DirPill dir={prediction.direction} /></td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><ConfBar pct={Math.round(prediction.confidence * 100)} color={dirColor} /></td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.red }}>{Math.round(prediction.class_probabilities.down * 100)}%</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.text3 }}>{Math.round(prediction.class_probabilities.flat * 100)}%</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.green }}>{Math.round(prediction.class_probabilities.up * 100)}%</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{prediction.top_driver}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{formatTimestamp(prediction.candle_time)}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><Badge v={actionV}>{actionLabel}</Badge></td>
                   </tr>
                 );
@@ -1002,10 +1037,115 @@ const MachineLearning: React.FC = () => {
           </table>
         </div>
         <div style={{ padding: '8px 14px', borderTop: `0.5px solid ${S.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: S.text3 }}>Preview rows keep the intended layout alive until live inference endpoints exist.</span>
-          <ActionButton tone="muted" onClick={() => handlePendingAction('View all predictions is waiting on GET /ml/predictions.')}>View all predictions →</ActionButton>
+          <span style={{ fontSize: 10, color: S.text3 }}>
+            {predictionsResponse
+              ? `Showing ${visiblePredictions.length} of ${predictionsResponse.count} live predictions from active champion models.`
+              : 'Live predictions are waiting on the backend endpoint.'}
+          </span>
+          <ActionButton
+            tone="muted"
+            disabled={!predictionsResponse || predictionsResponse.count === 0}
+            onClick={() => setPredictionDisplayMode((current) => (current === 'top' ? 'all' : 'top'))}
+          >
+            {predictionDisplayMode === 'top' ? 'View all predictions →' : 'Show top 5 only'}
+          </ActionButton>
         </div>
       </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <Card>
+          <CardHeader title={`Feature importance · ${selectedImportanceAsset} model · gain-based`}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <ActionButton tone={selectedImportanceAsset === 'crypto' ? 'blue' : 'muted'} onClick={() => setSelectedImportanceAsset('crypto')}>
+                Crypto
+              </ActionButton>
+              <ActionButton tone={selectedImportanceAsset === 'stock' ? 'amber' : 'muted'} onClick={() => setSelectedImportanceAsset('stock')}>
+                Stock
+              </ActionButton>
+              <Badge v={selectedImportanceAsset === 'crypto' ? 'blue' : 'amber'}>Active asset</Badge>
+              <Badge v="purple">Research</Badge>
+              <Badge v="muted">{isLoadingImportances ? 'Loading' : selectedImportances ? 'Live weights' : 'No model available'}</Badge>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <ActionButton tone={selectedImportanceLimit === 10 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(10)}>
+                  Top 10
+                </ActionButton>
+                <ActionButton tone={selectedImportanceLimit === 25 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(25)}>
+                  Top 25
+                </ActionButton>
+                <ActionButton tone={selectedImportanceLimit === 'all' ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit('all')}>
+                  All
+                </ActionButton>
+              </div>
+            </div>
+          </CardHeader>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {selectedImportanceModel && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
+                <div style={{ fontSize: 10, color: S.text3 }}>Artifact<span style={{ display: 'block', fontSize: 11, color: S.text2, fontFamily: S.mono, marginTop: 4 }}>{selectedImportanceModel.artifact_path.split(/[\\/]/).pop() ?? selectedImportanceModel.artifact_path}</span></div>
+                <div style={{ fontSize: 10, color: S.text3 }}>Best fold / accuracy<span style={{ display: 'block', fontSize: 11, color: S.text2, marginTop: 4 }}>Fold {selectedImportanceModel.best_fold} · {(selectedImportanceModel.validation_accuracy * 100).toFixed(1)}%</span></div>
+              </div>
+            )}
+            {isLoadingImportances ? (
+              <div style={{ padding: '10px 0', fontSize: 10, color: S.text3 }}>Loading live feature weights for the active {selectedImportanceAsset} champion model…</div>
+            ) : importanceFeatures.length > 0 ? (
+              importanceFeatures.map((feature) => (
+                <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
+              ))
+            ) : (
+              <div style={{ padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+                {importanceError ?? `No active ${selectedImportanceAsset} model is registered yet. Train a ${selectedImportanceAsset} model to populate live feature weights.`}
+              </div>
+            )}
+            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+              {selectedImportances
+                ? `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} live feature weights from the active ${selectedImportances.asset_class} champion model.`
+                : `This panel only shows backend-sourced weights. Preview data has been removed for ${selectedImportanceAsset}.`}
+              {featureParity && (
+                <span style={{ display: 'block', marginTop: 6, color: featureParity.parity_ok ? S.green : S.amber }}>
+                  Feature parity: {featureParity.parity_ok ? 'stock and crypto match the ML contract order.' : 'parity review still has mismatches.'}
+                </span>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card>
+            <CardHeader title="Drift monitor · crypto">
+              <Badge v="muted">Awaiting /ml/drift/crypto</Badge>
+            </CardHeader>
+            <div style={{ padding: 16, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+              Drift comparison is not exposed yet. This pane stays in place so the page layout matches your target design instead of vanishing into a trapdoor.
+            </div>
+          </Card>
+
+          {!stockDriftDismissed && (
+            <Card accent={S.amber2}>
+              <CardHeader title="Drift monitor · stock">
+                <Badge v="amber">Pending backend endpoint</Badge>
+              </CardHeader>
+              <div style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: 'rgba(255,181,71,0.06)', border: `0.5px solid ${S.amber2}`, borderRadius: S.rMd }}>
+                  <div style={{ width: 28, height: 28, background: S.amberBg, border: `0.5px solid ${S.amber2}`, borderRadius: S.rSm, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>⚠</div>
+                  <div>
+                    <div style={{ fontSize: 11, color: S.amber, fontWeight: 500, marginBottom: 4 }}>Drift actions are wired, backend drift math is not</div>
+                    <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.6 }}>Use this as the future action area for retrain recommendations once <span style={{ color: S.text2, fontFamily: S.mono }}>GET /ml/drift/stock</span> exists.</div>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                      <ActionButton tone="amber" onClick={() => handlePendingAction('Retrain action is waiting on stock drift + training endpoints.')}>
+                        Retrain
+                      </ActionButton>
+                      <ActionButton tone="muted" onClick={() => setStockDriftDismissed(true)}>
+                        Dismiss
+                      </ActionButton>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      </div>
+
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>

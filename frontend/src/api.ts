@@ -397,6 +397,34 @@ export type MlModelImportancesResponse = {
   generated_at: string;
 };
 
+export type MlPredictionRow = {
+  prediction_id: string;
+  model_id: string | null;
+  symbol: string;
+  asset_class: 'crypto' | 'stock';
+  direction: 'short' | 'flat' | 'long';
+  confidence: number;
+  class_probabilities: {
+    down: number;
+    flat: number;
+    up: number;
+  };
+  top_driver: string;
+  candle_time: string;
+  action: 'signal' | 'skip';
+  confidence_threshold: number;
+};
+
+export type MlPredictionsResponse = {
+  predictions: MlPredictionRow[];
+  count: number;
+  active_model_ids: {
+    crypto: string | null;
+    stock: string | null;
+  };
+  generated_at: string;
+};
+
 export type FeatureParityResponse = {
   generated_at: string;
   feature_count: number;
@@ -457,6 +485,13 @@ export const getMlModelImportances = (modelId: string) =>
   requestJson<MlModelImportancesResponse>(`/ml/models/${modelId}/importances`);
 export const getFeatureParity = () =>
   requestJson<FeatureParityResponse>('/ml/features/parity');
+export const getMlPredictions = (limit = 50, assetClass?: 'crypto' | 'stock') => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (assetClass) {
+    query.set('asset_class', assetClass);
+  }
+  return requestJson<MlPredictionsResponse>(`/ml/predictions?${query.toString()}`);
+};
 
 export const trainMlModel = (assetClass: 'crypto' | 'stock'): Promise<TrainModelResponse> =>
   requestJson<TrainModelResponse>(`/ml/train/${assetClass}`, {
