@@ -304,11 +304,77 @@ export type ActiveMlJobResponse = {
   job: MlJob | null;
 };
 
+export type FeatureContractResponse = {
+  feature_count: number;
+  technical_feature_count: number;
+  research_feature_count: number;
+  feature_names: string[];
+};
+
+export type GainerRow = {
+  symbol: string;
+  price: number | null;
+  percent_change: number | null;
+  volume: number | null;
+};
+
+export type CryptoUniverseResponse = {
+  symbols: string[];
+  count: number;
+  source_dir: string;
+};
+
 export type GainersResponse = {
-  gainers: Record<string, unknown>[];
+  gainers: GainerRow[];
   count: number;
   fetched_at: string;
   error?: string;
+};
+
+export type ModelFold = {
+  fold_index: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  validation_sharpe: number;
+  validation_accuracy: number;
+  n_train_samples: number;
+  n_test_samples: number;
+  model_path: string;
+};
+
+export type MlModelRecord = {
+  model_id: string;
+  asset_class: 'crypto' | 'stock';
+  status: 'active' | 'retired' | 'challenger' | 'failed';
+  artifact_path: string;
+  trained_at: string;
+  fold_count: number;
+  best_fold: number;
+  validation_accuracy: number;
+  validation_sharpe: number;
+  train_samples: number;
+  test_samples: number;
+  feature_count: number;
+  confidence_threshold: number;
+  latest_job_id: string | null;
+  feature_importances: Record<string, number>;
+  folds: ModelFold[];
+};
+
+export type MlModelsResponse = {
+  models: MlModelRecord[];
+  active_by_asset: {
+    crypto: string | null;
+    stock: string | null;
+  };
+  generated_at: string;
+};
+
+export type TrainModelResponse = {
+  job: MlJob;
+  active_model_id: string | null;
 };
 
 export const getMlJobs = () => requestJson<MlJob[]>('/ml/jobs');
@@ -321,6 +387,19 @@ export const getTopGainers = (limit = 100) =>
   requestJson<GainersResponse>(`/ml/gainers?limit=${limit}`);
 export const getTrainingStatus = () =>
   requestJson<TrainingStatus>('/ml/training/status');
+export const getFeatureContract = () =>
+  requestJson<FeatureContractResponse>('/ml/features/contract');
+export const getCryptoUniverse = () =>
+  requestJson<CryptoUniverseResponse>('/ml/crypto/universe');
+export const getMlModels = (assetClass?: 'crypto' | 'stock') =>
+  requestJson<MlModelsResponse>(assetClass ? `/ml/models?asset_class=${assetClass}` : '/ml/models');
+export const getMlModel = (modelId: string) =>
+  requestJson<MlModelRecord>(`/ml/models/${modelId}`);
+
+export const trainMlModel = (assetClass: 'crypto' | 'stock'): Promise<TrainModelResponse> =>
+  requestJson<TrainModelResponse>(`/ml/train/${assetClass}`, {
+    method: 'POST',
+  });
 
 export const backfillCrypto = (): Promise<MlJob> =>
   requestJson<MlJob>('/ml/backfill/crypto', {
@@ -329,10 +408,14 @@ export const backfillCrypto = (): Promise<MlJob> =>
   });
 
 export const backfillStocks = (symbols: string, days = 730) =>
-  requestJson<MlJob>(
-    `/ml/backfill/stocks?symbols=${encodeURIComponent(symbols)}&lookback_days=${days}`,
-    { method: 'POST' },
-  );
+  requestJson<MlJob>('/ml/backfill/stocks', {
+    method: 'POST',
+    body: JSON.stringify({
+      symbols: symbols.split(',').map((value) => value.trim()).filter(Boolean),
+      timeframe: '1Day',
+      lookback_days: days,
+    }),
+  });
 
 export const backfillGainers = (limit = 100, days = 365): Promise<MlJob> =>
   requestJson<MlJob>(`/ml/backfill/gainers?limit=${limit}&lookback_days=${days}`, {

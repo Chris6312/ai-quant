@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 
@@ -88,6 +88,73 @@ class ResearchInputs:
     analyst_upgrade_score: float = 0.0
     consensus_rating: float = 3.0
     watchlist_research_score: float = 0.0
+
+
+@dataclass(slots=True, frozen=True)
+class FeatureValidationResult:
+    """Describe whether a feature vector matches the ML contract."""
+
+    missing: tuple[str, ...]
+    extra: tuple[str, ...]
+    nonfinite: tuple[str, ...]
+
+    @property
+    def is_valid(self) -> bool:
+        """Return true when the vector exactly matches the expected contract."""
+
+        return not self.missing and not self.extra and not self.nonfinite
+
+
+def validate_feature_vector(features: Mapping[str, float]) -> FeatureValidationResult:
+    """Validate a feature vector against the canonical ML contract."""
+
+    feature_names = set(features)
+    expected_names = set(ALL_FEATURES)
+    missing = tuple(sorted(expected_names - feature_names))
+    extra = tuple(sorted(feature_names - expected_names))
+    nonfinite = tuple(
+        sorted(
+            name
+            for name, value in features.items()
+            if not isinstance(value, (int, float)) or not isfinite(value)
+        )
+    )
+    return FeatureValidationResult(missing=missing, extra=extra, nonfinite=nonfinite)
+
+
+def ordered_feature_row(features: Mapping[str, float]) -> list[float]:
+    """Return a strictly ordered numeric feature row for downstream ML code."""
+
+    validation = validate_feature_vector(features)
+    if not validation.is_valid:
+        details: list[str] = []
+        if validation.missing:
+            details.append(f"missing={list(validation.missing)}")
+        if validation.extra:
+            details.append(f"extra={list(validation.extra)}")
+        if validation.nonfinite:
+            details.append(f"nonfinite={list(validation.nonfinite)}")
+        detail_text = ", ".join(details)
+        raise ValueError(f"Feature vector does not match ML contract: {detail_text}")
+    return [float(features[name]) for name in ALL_FEATURES]
+
+
+def build_feature_contract_summary() -> dict[str, object]:
+    """Return a compact summary of the canonical feature contract."""
+
+    return {
+        "feature_count": len(ALL_FEATURES),
+        "technical_feature_count": len(TECHNICAL_FEATURES),
+        "research_feature_count": len(RESEARCH_FEATURES),
+        "all_features": list(ALL_FEATURES),
+        "technical_features": list(TECHNICAL_FEATURES),
+        "research_features": list(RESEARCH_FEATURES),
+        "stock_research_policy": "stock feature vectors may include non-zero research features",
+        "crypto_research_policy": (
+            "crypto feature vectors keep research feature keys but use the "
+            "default research placeholders"
+        ),
+    }
 
 
 class FeatureEngineer:

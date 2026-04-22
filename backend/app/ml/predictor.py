@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# NEW DEP: lightgbm — reason: load persisted ML boosters for inference.
-import lightgbm as lgbm  # type: ignore[import-not-found]  # mypy stub unavailable in this env.
+import lightgbm as lgbm
+import numpy as np
+from numpy.typing import NDArray
 
-# NEW DEP: numpy — reason: array conversion for model inputs and outputs.
-import numpy as np  # type: ignore[import-not-found]  # mypy stub unavailable in this env.
+from app.ml.features import FeatureVector, ordered_feature_row
 
-from app.ml.features import ALL_FEATURES, FeatureVector
+FloatArray = NDArray[np.float64]
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,23 +34,32 @@ class ModelPredictor:
         """Return a prediction or None when confidence is below threshold."""
 
         row = np.asarray([self._vectorize(features)], dtype=float)
-        probabilities = np.asarray(self._booster.predict(row))
+        probabilities = np.asarray(self._booster.predict(row), dtype=float)
         class_probs = self._extract_class_probs(probabilities)
         if class_probs is None:
             return None
+
         confidence = max(class_probs)
         if confidence < self.min_confidence:
             return None
+
         class_index = int(np.argmax(class_probs))
         direction = self._direction_for_class(class_index)
-        return PredictionResult(direction=direction, confidence=confidence, class_probs=class_probs)
+        return PredictionResult(
+            direction=direction,
+            confidence=confidence,
+            class_probs=class_probs,
+        )
 
     def _vectorize(self, features: FeatureVector) -> list[float]:
         """Convert a feature dictionary into an ordered numeric row."""
 
-        return [float(features.get(name, 0.0)) for name in ALL_FEATURES]
+        return ordered_feature_row(features)
 
-    def _extract_class_probs(self, probabilities: np.ndarray) -> tuple[float, float, float] | None:
+    def _extract_class_probs(
+        self,
+        probabilities: FloatArray,
+    ) -> tuple[float, float, float] | None:
         """Normalize LightGBM output into a 3-class probability tuple."""
 
         if probabilities.ndim == 2 and probabilities.shape[0] >= 1:
@@ -59,8 +68,10 @@ class ModelPredictor:
             row = probabilities
         else:
             return None
+
         if row.shape[0] != 3:
             return None
+
         return (float(row[0]), float(row[1]), float(row[2]))
 
     def _direction_for_class(self, class_index: int) -> str:

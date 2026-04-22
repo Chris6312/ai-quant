@@ -20,14 +20,25 @@ from app.config.settings import get_settings
 from app.db.models import CandleRow
 from app.db.session import build_engine, build_session_factory
 from app.ml.crypto_csv_ingestion import CryptoCsvTrainingIngestor
+from app.ml.features import ALL_FEATURES, FeatureEngineer, build_feature_contract_summary
 from app.ml.job_store import create_job, finish_job, update_job
 from app.ml.job_store import get_job as load_job
 from app.ml.job_store import list_jobs as load_jobs
+from app.ml.model_registry import (
+    FoldSummaryRecord,
+    ModelRecord,
+    get_active_model,
+    get_model,
+    register_model,
+)
+from app.ml.model_registry import list_models as load_models
+from app.ml.trainer import FoldResult, TrainerConfig, WalkForwardTrainer
 from app.ml.training_status_cache import (
     get_or_build_training_status,
     mark_training_status_stale,
     rebuild_training_status,
 )
+from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
 
 router = APIRouter(prefix="/ml", tags=["ml"])
@@ -84,6 +95,182 @@ class GainersSnapshotRow(NamedTuple):
     price: float | None
     percent_change: float | None
     volume: float | None
+
+
+class ModelRegistryResponse(BaseModel):
+    models: list[ModelRecord]
+    active_by_asset: dict[str, str | None]
+    generated_at: str
+
+
+class TrainModelResponse(BaseModel):
+    job: dict[str, object]
+    active_model_id: str | None = None
+
+
+def _coerce_numeric(value: object) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return 0.0
+
+
+async def _load_training_candles(asset_class: str) -> list[Candle]:
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+
+    async with session_factory() as session:
+        stmt = (
+            select(CandleRow)
+            .where(
+                CandleRow.asset_class == asset_class,
+                CandleRow.source.in_(_TRAINING_SOURCES),
+            )
+            .order_by(CandleRow.symbol.asc(), CandleRow.time.asc())
+        )
+        rows = list((await session.scalars(stmt)).all())
+
+    return [
+        Candle(
+            time=row.time,
+            symbol=row.symbol,
+            asset_class=row.asset_class,
+            timeframe=row.timeframe,
+            open=_coerce_numeric(row.open),
+            high=_coerce_numeric(row.high),
+            low=_coerce_numeric(row.low),
+            close=_coerce_numeric(row.close),
+            volume=_coerce_numeric(row.volume),
+            source=row.source,
+        )
+        for row in rows
+    ]
+
+
+def _fold_record(fold: FoldResult) -> FoldSummaryRecord:
+    return {
+        "fold_index": fold.fold_index,
+        "train_start": fold.train_start.isoformat(),
+        "train_end": fold.train_end.isoformat(),
+        "test_start": fold.test_start.isoformat(),
+        "test_end": fold.test_end.isoformat(),
+        "validation_sharpe": fold.validation_sharpe,
+        "validation_accuracy": fold.validation_accuracy,
+        "n_train_samples": fold.n_train_samples,
+        "n_test_samples": fold.n_test_samples,
+        "model_path": fold.model_path,
+    }
+
+
+async def _run_training_job(job_id: str, asset_class: str) -> None:
+    mark_training_status_stale(f"{asset_class}_train_started")
+    update_job(
+        job_id,
+        current_timeframe="1Day",
+        status_message="loading training candles",
+        progress_pct=5,
+    )
+
+    try:
+        candles = await _load_training_candles(asset_class)
+        if not candles:
+            raise ValueError(f"No {asset_class} training candles available")
+
+        unique_symbols = sorted({candle.symbol for candle in candles})
+        update_job(
+            job_id,
+            symbols=unique_symbols,
+            total_symbols=len(unique_symbols),
+            rows_fetched=len(candles),
+            status_message=f"loaded {len(candles)} candles across {len(unique_symbols)} symbols",
+            progress_pct=15,
+        )
+
+        trainer = WalkForwardTrainer(
+            TrainerConfig(model_dir=str(_PROJECT_ROOT / "backend" / "models"))
+        )
+
+        def _progress_callback(
+            current_fold: int,
+            total_folds: int,
+            message: str | None = None,
+        ) -> None:
+            pct = 20 + int((current_fold / max(total_folds, 1)) * 60)
+            status_message = message or f"training fold {current_fold} of {total_folds}"
+            update_job(
+                job_id,
+                current_symbol=f"fold {current_fold}/{total_folds}",
+                total_batches=total_folds,
+                done_batches=max(current_fold - 1, 0),
+                progress_pct=pct,
+                status_message=status_message,
+            )
+
+        result = await trainer.train(
+            candles=candles,
+            asset_class=asset_class,
+            feature_engineer=FeatureEngineer(),
+            progress_callback=_progress_callback,
+        )
+
+        model_id = f"{asset_class}-{datetime.now(tz=UTC).strftime('%Y%m%d-%H%M%S')}"
+        record = register_model(
+            {
+                "model_id": model_id,
+                "asset_class": asset_class,
+                "status": "active",
+                "artifact_path": result.model_path,
+                "trained_at": datetime.now(tz=UTC).isoformat(),
+                "fold_count": result.fold_count,
+                "best_fold": result.best_fold_index,
+                "validation_accuracy": result.validation_accuracy,
+                "validation_sharpe": result.validation_sharpe,
+                "train_samples": result.n_train_samples,
+                "test_samples": result.n_test_samples,
+                "feature_count": len(ALL_FEATURES),
+                "confidence_threshold": trainer.config.min_confidence_threshold,
+                "latest_job_id": job_id,
+                "feature_importances": result.feature_importances,
+                "folds": [_fold_record(fold) for fold in result.folds],
+            }
+        )
+
+        finish_job(
+            job_id,
+            status="done",
+            result={
+                "asset_class": asset_class,
+                "model_id": record["model_id"],
+                "artifact_path": result.model_path,
+                "fold_count": result.fold_count,
+                "best_fold": result.best_fold_index,
+                "validation_accuracy": result.validation_accuracy,
+                "validation_sharpe": result.validation_sharpe,
+                "train_samples": result.n_train_samples,
+                "test_samples": result.n_test_samples,
+            },
+        )
+        update_job(
+            job_id,
+            current_symbol=None,
+            current_timeframe=None,
+            done_batches=result.fold_count,
+            total_batches=result.fold_count,
+            progress_pct=100,
+            status_message=f"completed {asset_class} training",
+        )
+    except Exception as exc:
+        finish_job(job_id, status="error", error=str(exc))
+        update_job(job_id, status_message="training failed")
+
+
+@router.get("/features/contract")
+async def get_feature_contract() -> dict[str, object]:
+    """Return the canonical ML feature contract used by training and inference."""
+
+    return build_feature_contract_summary()
 
 
 def _resolve_asset_class(job_type: str) -> str:
@@ -602,3 +789,74 @@ async def crypto_universe() -> dict[str, object]:
         "count": len(KRAKEN_UNIVERSE),
         "source_dir": str(_CRYPTO_HISTORY_DIR),
     }
+
+
+@router.post("/train/{asset_class}")
+async def train_model(
+    asset_class: str,
+    background_tasks: BackgroundTasks,
+) -> TrainModelResponse:
+    normalized_asset_class = asset_class.strip().lower()
+    if normalized_asset_class not in {"crypto", "stock"}:
+        raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
+
+    active_job = _active_job()
+    if active_job is not None:
+        raise HTTPException(status_code=409, detail="another ML job is already running")
+
+    latest_status = await get_or_build_training_status(_build_training_status)
+    detail_key = f"{normalized_asset_class}_detail"
+    detail_rows = latest_status.get(detail_key)
+    if not isinstance(detail_rows, list) or len(detail_rows) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No {normalized_asset_class} training data is ready yet",
+        )
+
+    symbols = sorted(
+        {
+            str(row.get("symbol"))
+            for row in detail_rows
+            if isinstance(row, Mapping) and row.get("symbol")
+        }
+    )
+    job = _new_job(f"{normalized_asset_class}_train", symbols)
+    update_job(
+        str(job["job_id"]),
+        status_message=f"queued {normalized_asset_class} training",
+        current_timeframe="1Day",
+    )
+
+    background_tasks.add_task(_run_training_job, str(job["job_id"]), normalized_asset_class)
+    active_model = get_active_model(normalized_asset_class)
+    return TrainModelResponse(
+        job=job,
+        active_model_id=active_model.get("model_id") if active_model else None,
+    )
+
+
+@router.get("/models")
+async def list_registered_models(
+    asset_class: str | None = Query(default=None),
+) -> ModelRegistryResponse:
+    normalized_asset_class = asset_class.strip().lower() if asset_class else None
+    if normalized_asset_class not in {None, "crypto", "stock"}:
+        raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
+
+    models = load_models(normalized_asset_class)
+    return ModelRegistryResponse(
+        models=models,
+        active_by_asset={
+            "crypto": (get_active_model("crypto") or {}).get("model_id"),
+            "stock": (get_active_model("stock") or {}).get("model_id"),
+        },
+        generated_at=datetime.now(tz=UTC).isoformat(),
+    )
+
+
+@router.get("/models/{model_id}")
+async def get_registered_model(model_id: str) -> dict[str, object]:
+    record = get_model(model_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    return cast(dict[str, object], record)

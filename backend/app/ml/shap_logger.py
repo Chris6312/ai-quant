@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
-# NEW DEP: lightgbm — reason: load persisted boosters for SHAP explainability.
-import lightgbm as lgbm  # type: ignore[import-not-found]  # mypy stub unavailable in this env.
-
-# NEW DEP: numpy — reason: matrix conversion for SHAP evaluation.
-import numpy as np  # type: ignore[import-not-found]  # mypy stub unavailable in this env.
+import lightgbm as lgbm
+import numpy as np
+from numpy.typing import NDArray
 
 from app.ml.features import FeatureVector
 
-# NEW DEP: shap — reason: SHAP explainability for per-trade feature attribution.
 try:
     import shap  # type: ignore[import-not-found]
 except ImportError:
     shap = None
+
+FloatArray = NDArray[np.float64]
+
 
 class _LoggerProtocol(Protocol):
     """Minimal logging protocol used by the SHAP logger."""
@@ -25,8 +25,10 @@ class _LoggerProtocol(Protocol):
     def info(self, message: str, **kwargs: object) -> None:
         ...
 
+
 try:
     import structlog
+
     _HAS_STRUCTLOG = True
 except ImportError:
     import logging
@@ -57,7 +59,7 @@ class ShapLogger:
         self._booster = lgbm.Booster(model_file=model_path)
         if shap is None:
             raise RuntimeError("shap is required for ShapLogger")
-        self._explainer = shap.TreeExplainer(self._booster)
+        self._explainer: Any = shap.TreeExplainer(self._booster)
         self._logger: _LoggerProtocol = get_logger()
 
     def log_trade_shap(
@@ -74,6 +76,7 @@ class ShapLogger:
         values = self._select_class_values(shap_values, class_index)
         if values is None:
             return {}
+
         contributions = {
             name: float(value)
             for name, value in zip(feature_names, values, strict=True)
@@ -101,10 +104,10 @@ class ShapLogger:
 
         return [float(features.get(name, 0.0)) for name in feature_names]
 
-    def _predicted_class_index(self, matrix: np.ndarray) -> int:
+    def _predicted_class_index(self, matrix: FloatArray) -> int:
         """Return the predicted class index for the provided feature row."""
 
-        probabilities = np.asarray(self._booster.predict(matrix))
+        probabilities = np.asarray(self._booster.predict(matrix), dtype=float)
         if probabilities.ndim == 2 and probabilities.shape[0] >= 1:
             row = probabilities[0]
         elif probabilities.ndim == 1:
@@ -117,18 +120,24 @@ class ShapLogger:
         self,
         shap_values: object,
         class_index: int,
-    ) -> np.ndarray | None:
+    ) -> FloatArray | None:
         """Return the SHAP vector for the predicted class."""
 
         if isinstance(shap_values, list):
             if class_index >= len(shap_values):
                 return None
-            return np.asarray(shap_values[class_index])[0]
-        values = np.asarray(shap_values)
+            class_values = np.asarray(shap_values[class_index], dtype=float)
+            if class_values.ndim == 2 and class_values.shape[0] >= 1:
+                return cast(FloatArray, class_values[0])
+            if class_values.ndim == 1:
+                return cast(FloatArray, class_values)
+            return None
+
+        values = np.asarray(shap_values, dtype=float)
         if values.ndim == 3:
             if class_index >= values.shape[1]:
                 return None
-            return values[0, class_index]
+            return cast(FloatArray, values[0, class_index])
         if values.ndim == 2:
-            return values[0]
+            return cast(FloatArray, values[0])
         return None
