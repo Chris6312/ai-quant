@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,7 @@ from app.api.routers import ml as ml_router
 from app.main import app
 from app.ml import job_store, model_registry
 from app.ml.features import FeatureEngineer
-from app.ml.trainer import FoldResult, TrainResult, TrainerConfig
+from app.ml.trainer import FoldResult, TrainerConfig, TrainResult
 from app.models.domain import Candle
 
 
@@ -89,6 +89,7 @@ class _FakeTrainer:
             best_fold_index=2,
         )
 
+
 @pytest.mark.asyncio
 async def test_run_training_job_registers_active_model(
     tmp_path: Path,
@@ -100,7 +101,11 @@ async def test_run_training_job_registers_active_model(
     monkeypatch.setattr(job_store, "_RUNTIME_DIR", runtime_dir)
     monkeypatch.setattr(job_store, "_JOB_STORE_PATH", runtime_dir / "ml_jobs.json")
     monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
-    monkeypatch.setattr(model_registry, "_REGISTRY_PATH", runtime_dir / "ml_model_registry.json")
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
 
     candles = [
         Candle(
@@ -129,7 +134,6 @@ async def test_run_training_job_registers_active_model(
     await ml_router._run_training_job(str(job["job_id"]), "crypto")
 
     stored_job = job_store.get_job(str(job["job_id"]))
-    print(stored_job)
     assert stored_job is not None
     assert stored_job["status"] == "done"
     assert stored_job["result"] is not None
