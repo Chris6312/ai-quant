@@ -363,6 +363,38 @@ export type MlModelRecord = {
   folds: ModelFold[];
 };
 
+export type MlModelImportance = {
+  feature: string;
+  importance: number;
+};
+
+export type MlModelImportancesResponse = {
+  model_id: string;
+  asset_class: 'crypto' | 'stock';
+  feature_count: number;
+  importances: MlModelImportance[];
+  generated_at: string;
+};
+
+export type FeatureParityResponse = {
+  generated_at: string;
+  feature_count: number;
+  parity_ok: boolean;
+  same_feature_order: boolean;
+  stock_contract_valid: boolean;
+  crypto_contract_valid: boolean;
+  stock_missing: string[];
+  stock_extra: string[];
+  stock_nonfinite: string[];
+  crypto_missing: string[];
+  crypto_extra: string[];
+  crypto_nonfinite: string[];
+  stock_research_features_with_signal: string[];
+  crypto_research_features_with_signal: string[];
+  stock_preview: Record<string, number>;
+  crypto_preview: Record<string, number>;
+};
+
 export type MlModelsResponse = {
   models: MlModelRecord[];
   active_by_asset: {
@@ -373,8 +405,11 @@ export type MlModelsResponse = {
 };
 
 export type TrainModelResponse = {
-  job: MlJob;
-  active_model_id: string | null;
+  job?: MlJob;
+  active_model_id?: string | null;
+  model_id?: string;
+  best_fold?: number;
+  asset_class?: 'crypto' | 'stock';
 };
 
 export const getMlJobs = () => requestJson<MlJob[]>('/ml/jobs');
@@ -395,6 +430,10 @@ export const getMlModels = (assetClass?: 'crypto' | 'stock') =>
   requestJson<MlModelsResponse>(assetClass ? `/ml/models?asset_class=${assetClass}` : '/ml/models');
 export const getMlModel = (modelId: string) =>
   requestJson<MlModelRecord>(`/ml/models/${modelId}`);
+export const getMlModelImportances = (modelId: string) =>
+  requestJson<MlModelImportancesResponse>(`/ml/models/${modelId}/importances`);
+export const getFeatureParity = () =>
+  requestJson<FeatureParityResponse>('/ml/features/parity');
 
 export const trainMlModel = (assetClass: 'crypto' | 'stock'): Promise<TrainModelResponse> =>
   requestJson<TrainModelResponse>(`/ml/train/${assetClass}`, {

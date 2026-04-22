@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   backfillCrypto,
+  getFeatureParity,
+  getMlModelImportances,
   getMlModels,
   getMlPersistence,
   getTopGainers,
   requestJson,
   trainMlModel,
+  type FeatureParityResponse,
   type GainersResponse,
+  type MlModelImportancesResponse,
   type MlModelRecord,
   type MlModelsResponse,
   type MlPersistenceResponse,
@@ -390,6 +394,8 @@ const MachineLearning: React.FC = () => {
   const [cryptoUniverse, setCryptoUniverse] = useState<CryptoUniverseResponse | null>(null);
   const [gainers, setGainers] = useState<GainersResponse | null>(null);
   const [modelsResponse, setModelsResponse] = useState<MlModelsResponse | null>(null);
+  const [featureParity, setFeatureParity] = useState<FeatureParityResponse | null>(null);
+  const [cryptoImportances, setCryptoImportances] = useState<MlModelImportancesResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isImportingCrypto, setIsImportingCrypto] = useState(false);
@@ -399,12 +405,13 @@ const MachineLearning: React.FC = () => {
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
 
   const loadPageData = useCallback(async () => {
-    const [persistenceResult, featureResult, universeResult, gainersResult, modelsResult] = await Promise.allSettled([
+    const [persistenceResult, featureResult, universeResult, gainersResult, modelsResult, parityResult] = await Promise.allSettled([
       getMlPersistence(),
       requestJson<FeatureContractSummary>('/ml/features/contract'),
       requestJson<CryptoUniverseResponse>('/ml/crypto/universe'),
       getTopGainers(100),
       getMlModels(),
+      getFeatureParity(),
     ]);
 
     if (persistenceResult.status === 'fulfilled') {
@@ -422,8 +429,11 @@ const MachineLearning: React.FC = () => {
     if (modelsResult.status === 'fulfilled') {
       setModelsResponse(modelsResult.value);
     }
+    if (parityResult.status === 'fulfilled') {
+      setFeatureParity(parityResult.value);
+    }
 
-    const errors = [persistenceResult, featureResult, universeResult, gainersResult, modelsResult]
+    const errors = [persistenceResult, featureResult, universeResult, gainersResult, modelsResult, parityResult]
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => normalizeError(result.reason));
 
@@ -497,7 +507,48 @@ const MachineLearning: React.FC = () => {
   const activeCryptoModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'crypto' && model.status === 'active') ?? null, [modelsResponse]);
   const activeStockModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'stock' && model.status === 'active') ?? null, [modelsResponse]);
 
+
+  useEffect(() => {
+    let alive = true;
+
+    const run = async (): Promise<void> => {
+      if (!activeCryptoModel) {
+        setCryptoImportances(null);
+        return;
+      }
+
+      try {
+        const result = await getMlModelImportances(activeCryptoModel.model_id);
+        if (alive) {
+          setCryptoImportances(result);
+        }
+      } catch (error: unknown) {
+        if (alive) {
+          setCryptoImportances(null);
+          setBanner({ tone: 'error', message: `Unable to load crypto model importances: ${normalizeError(error)}` });
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      alive = false;
+    };
+  }, [activeCryptoModel]);
+
   const previewFeatures = useMemo(() => {
+    const liveImportances = cryptoImportances?.importances ?? [];
+    if (liveImportances.length > 0) {
+      const maxImportance = liveImportances[0]?.importance ?? 1;
+      return liveImportances.slice(0, 7).map((row) => ({
+        name: row.feature,
+        pct: maxImportance > 0 ? (row.importance / maxImportance) * 14.2 : 0,
+        color: featureContract?.research_features.includes(row.feature) ? S.purple : S.blue,
+        tag: featureContract?.research_features.includes(row.feature) ? 'purple' as BadgeVariant : undefined,
+      }));
+    }
+
     const technical = featureContract?.technical_features ?? [];
     const research = featureContract?.research_features ?? [];
     const combined = [
@@ -525,7 +576,7 @@ const MachineLearning: React.FC = () => {
           { name: 'news_sentiment_7d', pct: 6.9, color: S.purple, tag: 'purple' as BadgeVariant },
           { name: 'congress_buy_score', pct: 4.8, color: S.purple, tag: 'purple' as BadgeVariant },
         ];
-  }, [featureContract]);
+  }, [cryptoImportances, featureContract]);
 
   const toModelCardData = (
     model: MlModelRecord | null,
@@ -564,7 +615,7 @@ const MachineLearning: React.FC = () => {
       trainN: fallbackSamples || null,
       testN: null,
       foldLabel: 'pending walk-forward endpoint',
-      artifact: 'GET /ml/models not implemented yet',
+      artifact: 'Awaiting first model artifact',
     };
   };
 
@@ -613,7 +664,8 @@ const MachineLearning: React.FC = () => {
     try {
       setter(true);
       const response = await trainMlModel(assetClass);
-      setBanner({ tone: 'success', message: `${assetClass.toUpperCase()} training started: ${response.job.job_id}` });
+      const runLabel = response.job?.job_id ?? response.model_id ?? 'completed';
+      setBanner({ tone: 'success', message: `${assetClass.toUpperCase()} training response: ${runLabel}` });
       await loadPageData();
     } catch (error) {
       setBanner({ tone: 'error', message: `${assetClass.toUpperCase()} training failed to start: ${normalizeError(error)}` });
@@ -792,14 +844,21 @@ const MachineLearning: React.FC = () => {
           <CardHeader title="Feature importance · crypto model · gain-based">
             <Badge v="blue">Technical</Badge>
             <Badge v="purple">Research</Badge>
-            <Badge v="muted">Live feature names · preview weights</Badge>
+            <Badge v="muted">{cryptoImportances ? 'Live weights' : 'Preview weights'}</Badge>
           </CardHeader>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {previewFeatures.map((feature) => (
               <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
             ))}
-            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>
-              The feature contract is live. Importance weights remain preview-only until <span style={{ color: S.text2, fontFamily: S.mono }}>GET /ml/models/&#123;id&#125;/importances</span> exists.
+            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
+              {cryptoImportances
+                ? `Showing ${cryptoImportances.importances.length} live feature weights from the active crypto champion model.`
+                : 'Falling back to preview weights until a live crypto model registry record is available.'}
+              {featureParity && (
+                <span style={{ display: 'block', marginTop: 6, color: featureParity.parity_ok ? S.green : S.amber }}>
+                  Feature parity: {featureParity.parity_ok ? 'stock and crypto match the ML contract order.' : 'parity review still has mismatches.'}
+                </span>
+              )}
             </div>
           </div>
         </Card>

@@ -497,17 +497,22 @@ async def train_stock_model_from_db(
     trainer: WalkForwardTrainer | None = None,
     feature_engineer: FeatureEngineer | None = None,
 ) -> tuple[TrainResult, StockTrainingDataset]:
-    """Assemble stock candles/research inputs from DB and train a walk-forward model."""
+    """Assemble stock candles/research inputs from DB and train a real walk-forward model."""
 
     dataset_assembler = assembler or StockTrainingInputAssembler()
     model_trainer = trainer or WalkForwardTrainer()
     engineer = feature_engineer or FeatureEngineer()
 
     dataset = await dataset_assembler.assemble(session, symbols=symbols, timeframe=timeframe)
+
+    if not dataset.candles:
+        raise ValueError("No persisted stock candles found for training")
+
     result = await model_trainer.train(
         dataset.candles,
         "stock",
         engineer,
         research_lookup=dataset.research_lookup,
     )
+
     return result, dataset

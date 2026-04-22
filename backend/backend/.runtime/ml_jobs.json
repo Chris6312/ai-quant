@@ -2239,5 +2239,125 @@
         "volume": 25283164.0
       }
     ]
+  },
+  "63cba386-b6ee-4de8-91e2-04e34a98396d": {
+    "job_id": "63cba386-b6ee-4de8-91e2-04e34a98396d",
+    "type": "crypto_train",
+    "asset_class": "crypto",
+    "symbols": [
+      "BTC/USD"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T14:11:18.903221+00:00",
+    "updated_at": "2026-04-22T14:22:52.290447+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "crypto-63cba386-b6ee-4de8-91e2-04e34a98396d",
+      "best_fold": 135
+    }
+  },
+  "18330cab-2850-4796-b4a0-b612a63699c8": {
+    "job_id": "18330cab-2850-4796-b4a0-b612a63699c8",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "failed",
+    "created_at": "2026-04-22T14:39:08.393817+00:00",
+    "updated_at": "2026-04-22T14:39:08.421522+00:00",
+    "progress_pct": 100,
+    "error": "'_TrainResultStub' object has no attribute 'fold_count'"
+  },
+  "b79bd533-21d1-4d7f-a01b-8472485ef5f6": {
+    "job_id": "b79bd533-21d1-4d7f-a01b-8472485ef5f6",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T15:04:54.174140+00:00",
+    "updated_at": "2026-04-22T15:04:54.205035+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-da764a9b-8647-4bd5-8174-a917047f876f",
+      "best_fold": 0
+    }
+  },
+  "0e5c58a5-666b-4b28-be3b-ee70a8e521f9": {
+    "job_id": "0e5c58a5-666b-4b28-be3b-ee70a8e521f9",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T15:26:53.862225+00:00",
+    "updated_at": "2026-04-22T15:26:53.898584+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-661bda9a-5457-4837-ab07-06569fe54fe6",
+      "best_fold": 0
+    }
+  },
+  "0849364c-c6c6-4de4-9e8d-4d2ef6040364": {
+    "job_id": "0849364c-c6c6-4de4-9e8d-4d2ef6040364",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T17:45:15.001999+00:00",
+    "updated_at": "2026-04-22T17:45:15.043684+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-0efeecff-ffa9-4e70-8ac9-dec3e1cf0d3c",
+      "best_fold": 0
+    }
+  },
+  "486c2a73-f8f0-4a0f-a79d-9394a7e800be": {
+    "job_id": "486c2a73-f8f0-4a0f-a79d-9394a7e800be",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T17:49:34.023605+00:00",
+    "updated_at": "2026-04-22T17:49:34.064979+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-1212fa52-4f08-4fc7-a18a-eabf2683fab9",
+      "best_fold": 0
+    }
+  },
+  "0d59fc9a-6d64-44e5-8ef5-38257717d154": {
+    "job_id": "0d59fc9a-6d64-44e5-8ef5-38257717d154",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "TOP100"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T17:49:49.008837+00:00",
+    "updated_at": "2026-04-22T17:50:02.432813+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-10342ed3-f65c-4110-90cd-9badfc85d570",
+      "best_fold": 1
+    }
   }
 }

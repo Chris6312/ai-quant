@@ -183,3 +183,72 @@ def test_train_endpoint_blocks_when_job_running(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "another ML job is already running"
+
+def test_get_model_importances_endpoint_returns_sorted_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feature importance endpoint should expose sorted live weights for the UI."""
+
+    runtime_dir = tmp_path / ".runtime"
+    monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
+
+    model_registry.register_model(
+        {
+            "model_id": "crypto-model-1",
+            "asset_class": "crypto",
+            "status": "active",
+            "artifact_path": "models/model_crypto_fold2.lgbm",
+            "trained_at": "2026-04-22T10:00:00+00:00",
+            "fold_count": 2,
+            "best_fold": 2,
+            "validation_accuracy": 0.68,
+            "validation_sharpe": 1.24,
+            "train_samples": 180,
+            "test_samples": 40,
+            "feature_count": 3,
+            "confidence_threshold": 0.6,
+            "latest_job_id": "job-1",
+            "feature_importances": {
+                "macd_hist": 0.21,
+                "rsi_14": 0.31,
+                "returns_5": 0.27,
+            },
+            "folds": [],
+            "created_at": "2026-04-22T10:00:00+00:00",
+        }
+    )
+
+    client = TestClient(app)
+    response = client.get("/ml/models/crypto-model-1/importances")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model_id"] == "crypto-model-1"
+    assert payload["feature_count"] == 3
+    assert [row["feature"] for row in payload["importances"]] == [
+        "rsi_14",
+        "returns_5",
+        "macd_hist",
+    ]
+
+
+
+def test_feature_parity_endpoint_reports_valid_contract() -> None:
+    """Parity endpoint should confirm stock and crypto align to the feature contract."""
+
+    client = TestClient(app)
+    response = client.get("/ml/features/parity")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parity_ok"] is True
+    assert payload["same_feature_order"] is True
+    assert payload["stock_contract_valid"] is True
+    assert payload["crypto_contract_valid"] is True
+    assert payload["feature_count"] > 0
