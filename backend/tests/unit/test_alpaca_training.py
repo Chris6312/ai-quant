@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.brokers.alpaca import AlpacaTrainingFetcher
+from app.config.constants import ML_CANDLE_USAGE
 
 
 class _FakeResponse:
@@ -91,6 +92,7 @@ async def test_fetch_batch_parses_multi_symbol_payload() -> None:
         timeframe="1Day",
         start=datetime(2026, 4, 1, tzinfo=UTC),
         end=datetime(2026, 4, 18, tzinfo=UTC),
+        asset_class="stock",
     )
     assert "AAPL" in batch
     candle = batch["AAPL"][0]
@@ -134,3 +136,40 @@ async def test_sync_universe_persists_new_rows() -> None:
     assert total_rows == 2
     assert len(repository.rows) == 2
     assert all(row.source == "alpaca_training" for row in repository.rows)
+    assert all(row.usage == ML_CANDLE_USAGE for row in repository.rows)
+
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_parses_crypto_payload() -> None:
+    """The fetcher should parse Alpaca crypto bars into domain candles."""
+
+    payload = {
+        "bars": {
+            "BTC/USD": [
+                {
+                    "t": "2026-04-18T00:00:00Z",
+                    "o": 85000.0,
+                    "h": 86000.0,
+                    "l": 84000.0,
+                    "c": 85500.0,
+                    "v": 123.45,
+                }
+            ]
+        }
+    }
+    client = _FakeClient(payload)
+    fetcher = AlpacaTrainingFetcher(client=client)
+    batch = await fetcher.fetch_batch(
+        symbols=["BTC/USD"],
+        timeframe="1Day",
+        start=datetime(2026, 4, 1, tzinfo=UTC),
+        end=datetime(2026, 4, 18, tzinfo=UTC),
+        asset_class="crypto",
+    )
+    assert "BTC/USD" in batch
+    candle = batch["BTC/USD"][0]
+    assert candle.source == "alpaca_training"
+    assert candle.symbol == "BTC/USD"
+    assert candle.asset_class == "crypto"
+    assert client.calls[0]["url"].endswith("/v1beta3/crypto/us/bars")

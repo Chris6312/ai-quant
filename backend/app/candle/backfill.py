@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from app.config.constants import ML_CANDLE_USAGE, TRADING_CANDLE_USAGE
 from app.db.models import CandleRow
 from app.exceptions import CandleValidationError
 from app.models.domain import Candle
@@ -41,6 +42,7 @@ class BackfillService:
         timeframe: str,
         client: HistoricalCandleClient,
         source: str,
+        usage: str,
         lookback_days: int = 30,
     ) -> int:
         """Fetch and persist a historical back-fill window."""
@@ -48,7 +50,7 @@ class BackfillService:
         end = datetime.now(tz=UTC)
         start = end - timedelta(days=lookback_days)
         candles = await client.fetch_history(symbol, timeframe, start, end)
-        rows = [self._to_row(candle, asset_class, timeframe, source) for candle in candles]
+        rows = [self._to_row(candle, asset_class, timeframe, source, usage) for candle in candles]
         self._validate_rows(rows)
         if rows:
             await self.repository.bulk_upsert(rows)
@@ -61,6 +63,7 @@ class BackfillService:
         timeframes: Sequence[str],
         client: HistoricalCandleClient,
         source: str,
+        usage: str,
         lookback_days: int = 30,
     ) -> int:
         """Back-fill multiple symbols across multiple timeframes."""
@@ -74,6 +77,7 @@ class BackfillService:
                     timeframe=timeframe,
                     client=client,
                     source=source,
+                    usage=usage,
                     lookback_days=lookback_days,
                 )
         return total_rows
@@ -84,11 +88,14 @@ class BackfillService:
         asset_class: str,
         timeframe: str,
         source: str,
+        usage: str,
     ) -> CandleRow:
         """Convert a domain candle to a persistence row."""
 
         if candle.time.tzinfo is None:
             raise CandleValidationError("Backfill candle time must be timezone-aware")
+        if usage not in {ML_CANDLE_USAGE, TRADING_CANDLE_USAGE}:
+            raise CandleValidationError("Backfill candle usage must be explicit")
         return CandleRow(
             time=candle.time,
             symbol=candle.symbol,
@@ -100,6 +107,7 @@ class BackfillService:
             close=candle.close,
             volume=candle.volume,
             source=source,
+            usage=usage,
         )
 
     def _validate_rows(self, rows: Sequence[CandleRow]) -> None:

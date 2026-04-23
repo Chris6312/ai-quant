@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.routers import ml as ml_router
+from app.config.constants import ML_CANDLE_USAGE
 from app.db.models import (
     CandleRow,
     CongressTradeRow,
@@ -110,6 +111,7 @@ async def test_stock_training_input_assembler_builds_non_default_research_inputs
             close=Decimal("100.5"),
             volume=Decimal("1000000"),
             source="alpaca_training",
+            usage=ML_CANDLE_USAGE,
         )
         for index in range(220)
     ]
@@ -381,6 +383,7 @@ def test_train_stock_model_endpoint_returns_dataset_summary(
     monkeypatch.setattr(ml_router, "build_engine", lambda settings: object())
     monkeypatch.setattr(ml_router, "build_session_factory", lambda engine: lambda: _FakeSession())
     monkeypatch.setattr(ml_router, "train_stock_model_from_db", fake_train_stock_model_from_db)
+    monkeypatch.setattr(ml_router, "load_jobs", lambda: [])
 
     app = FastAPI()
     app.include_router(ml_router.router)

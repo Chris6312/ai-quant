@@ -14,6 +14,7 @@ from app.config.constants import (
     CANDLE_FETCH_DELAY_SECONDS,
     CANDLE_HEARTBEAT_TTL_SECONDS,
     CANDLE_LOCK_TTL_SECONDS,
+    TRADING_CANDLE_USAGE,
 )
 from app.db.models import CandleRow
 from app.exceptions import CandleValidationError
@@ -164,6 +165,7 @@ class CandleWorker(ABC):
             close=candle.close,
             volume=candle.volume,
             source=candle.source,
+            usage=TRADING_CANDLE_USAGE,
         )
         await self.repository.bulk_upsert([row])
 

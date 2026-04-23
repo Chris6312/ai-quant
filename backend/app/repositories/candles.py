@@ -10,6 +10,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.constants import ML_CANDLE_USAGE, TRADING_CANDLE_USAGE
 from app.db.models import CandleRow
 from app.repositories.base import BaseRepository
 
@@ -63,7 +64,12 @@ class CandleRepository(BaseRepository):
     async def bulk_upsert(self, rows: Sequence[CandleRow]) -> None:
         """Upsert candles one row at a time for the initial scaffold."""
 
+        valid_usages = {ML_CANDLE_USAGE, TRADING_CANDLE_USAGE}
         for row in rows:
+            if row.usage not in valid_usages:
+                raise ValueError(
+                    f"candle usage must be one of {sorted(valid_usages)}; got {row.usage!r}"
+                )
             await self.session.merge(row)
         await self.session.commit()
 

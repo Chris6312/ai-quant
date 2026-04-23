@@ -2946,5 +2946,413 @@
       "model_id": "stock-45eee095-0142-469a-b2a5-6625a46363ff",
       "best_fold": 34
     }
+  },
+  "d6a6ae43-dd53-49d3-9013-cb165526f3e9": {
+    "job_id": "d6a6ae43-dd53-49d3-9013-cb165526f3e9",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T22:50:00.731299+00:00",
+    "updated_at": "2026-04-22T22:50:00.774440+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-5b5c0bb9-4059-40e6-8c32-ff496c01c127",
+      "best_fold": 0
+    }
+  },
+  "37511f5d-4314-4b62-bd02-4d4bfe1e955f": {
+    "job_id": "37511f5d-4314-4b62-bd02-4d4bfe1e955f",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T23:17:08.311359+00:00",
+    "updated_at": "2026-04-22T23:17:08.339657+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-b48610c5-ddcc-43e4-be5a-c9084b5c940b",
+      "best_fold": 0
+    }
+  },
+  "2ac5c138-2aab-479f-bfef-26cbb8e8d81d": {
+    "job_id": "2ac5c138-2aab-479f-bfef-26cbb8e8d81d",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T23:30:06.412505+00:00",
+    "updated_at": "2026-04-22T23:30:06.456922+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-845f04dc-3117-43b1-a2cc-8b81d79a020d",
+      "best_fold": 0
+    }
+  },
+  "322dc37e-af80-4ba5-a8a7-f731e5ee4e59": {
+    "job_id": "322dc37e-af80-4ba5-a8a7-f731e5ee4e59",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-22T23:32:12.737470+00:00",
+    "updated_at": "2026-04-22T23:32:12.782372+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-afc15ae6-a7f6-4cca-b5dc-dff3d734a97a",
+      "best_fold": 0
+    }
+  },
+  "8b0fcafd-e774-4a74-8064-d9daf988f9b8": {
+    "job_id": "8b0fcafd-e774-4a74-8064-d9daf988f9b8",
+    "type": "crypto_daily_catchup",
+    "asset_class": "crypto",
+    "symbols": [
+      "BTC/USD",
+      "ETH/USD",
+      "SOL/USD",
+      "XRP/USD",
+      "ADA/USD",
+      "AVAX/USD",
+      "DOT/USD",
+      "LINK/USD",
+      "MATIC/USD",
+      "LTC/USD",
+      "UNI/USD",
+      "ATOM/USD",
+      "NEAR/USD",
+      "ALGO/USD",
+      "FIL/USD"
+    ],
+    "status": "failed",
+    "created_at": "2026-04-22T23:32:57.428032+00:00",
+    "updated_at": "2026-04-23T01:38:49.606687+00:00",
+    "started_at": "2026-04-22T23:32:57.434603+00:00",
+    "total_symbols": 15,
+    "done_symbols": 0,
+    "current_symbol": "BTC/USD",
+    "total_batches": 1,
+    "done_batches": 0,
+    "rows_fetched": 0,
+    "current_timeframe": "1Day",
+    "status_message": "Catching up BTC/USD 1Day candles [auto-recovered stale job]",
+    "progress_pct": 0,
+    "error": "stale job auto-recovered from status=running",
+    "result": null,
+    "finished_at": "2026-04-23T01:38:49.606687+00:00"
+  },
+  "000ff2fc-961b-4d7b-bc61-310510cbdfe5": {
+    "job_id": "000ff2fc-961b-4d7b-bc61-310510cbdfe5",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T00:47:55.415149+00:00",
+    "updated_at": "2026-04-23T00:47:55.448705+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-3445236a-bb5b-44b6-8e1d-7e84aabab442",
+      "best_fold": 0
+    }
+  },
+  "205742cf-d3ce-4bd3-bff3-9c1017e2b1a7": {
+    "job_id": "205742cf-d3ce-4bd3-bff3-9c1017e2b1a7",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T01:02:11.651314+00:00",
+    "updated_at": "2026-04-23T01:02:11.686306+00:00",
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-1bde26b1-57b1-4ed2-9d80-ce18c5bc0853",
+      "best_fold": 0
+    }
+  },
+  "5737c925-cad1-49bd-a42a-2c0ab8609302": {
+    "job_id": "5737c925-cad1-49bd-a42a-2c0ab8609302",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T01:39:31.825403+00:00",
+    "updated_at": "2026-04-23T01:39:31.853850+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-44eb4498-f193-4df9-821c-101ad8b11793",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T01:39:31.853850+00:00"
+  },
+  "d78dba3e-fee0-4532-8ee1-0083202ea9f8": {
+    "job_id": "d78dba3e-fee0-4532-8ee1-0083202ea9f8",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T01:44:49.653106+00:00",
+    "updated_at": "2026-04-23T01:44:49.706357+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-74aed6c8-39e7-4748-9e5e-cfcda41d0136",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T01:44:49.706357+00:00"
+  },
+  "53d1f6ee-5083-4e26-a0fc-59f97e2b0931": {
+    "job_id": "53d1f6ee-5083-4e26-a0fc-59f97e2b0931",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T01:50:27.593477+00:00",
+    "updated_at": "2026-04-23T01:50:27.624333+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-1aaf5479-ac7a-4fdb-8d49-4f5b988f134b",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T01:50:27.624333+00:00"
+  },
+  "67bbaef6-c8ed-4261-86cd-1945681400e1": {
+    "job_id": "67bbaef6-c8ed-4261-86cd-1945681400e1",
+    "type": "crypto_daily_catchup",
+    "asset_class": "crypto",
+    "symbols": [
+      "BTC/USD",
+      "ETH/USD",
+      "SOL/USD",
+      "XRP/USD",
+      "ADA/USD",
+      "AVAX/USD",
+      "DOT/USD",
+      "LINK/USD",
+      "MATIC/USD",
+      "LTC/USD",
+      "UNI/USD",
+      "ATOM/USD",
+      "NEAR/USD",
+      "ALGO/USD",
+      "FIL/USD"
+    ],
+    "status": "failed",
+    "created_at": "2026-04-23T01:50:39.279735+00:00",
+    "updated_at": "2026-04-23T02:12:52.279013+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 0,
+    "started_at": "2026-04-23T01:50:39.285892+00:00",
+    "total_symbols": 15,
+    "done_symbols": 0,
+    "current_symbol": "BTC/USD",
+    "total_batches": 1,
+    "done_batches": 0,
+    "rows_fetched": 0,
+    "current_timeframe": "1Day",
+    "status_message": "Catching up BTC/USD 1Day candles [auto-recovered stale job]",
+    "error": "stale job auto-recovered from status=running",
+    "result": null,
+    "finished_at": "2026-04-23T02:12:52.279013+00:00"
+  },
+  "771b41b1-e9b9-4e2f-a79b-ef3e41bff1bd": {
+    "job_id": "771b41b1-e9b9-4e2f-a79b-ef3e41bff1bd",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T01:59:12.932739+00:00",
+    "updated_at": "2026-04-23T01:59:12.963378+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-a8715f77-b4d3-4ef9-9e2d-7c3aa9975660",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T01:59:12.963378+00:00"
+  },
+  "7006a515-862f-4e67-b942-6629cfefdf5c": {
+    "job_id": "7006a515-862f-4e67-b942-6629cfefdf5c",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:01:43.420406+00:00",
+    "updated_at": "2026-04-23T02:01:43.467936+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-e44af349-6d15-47e8-a760-241b4263f6f0",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T02:01:43.467936+00:00"
+  },
+  "f8e9eae2-4b00-4390-9014-7314e68631fe": {
+    "job_id": "f8e9eae2-4b00-4390-9014-7314e68631fe",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:04:46.129037+00:00",
+    "updated_at": "2026-04-23T02:04:46.189448+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-6bd92595-d792-4de3-ad53-c4e9fe87d017",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T02:04:46.189448+00:00"
+  },
+  "ad9179cc-90e7-48eb-bf33-fe1f40cb4256": {
+    "job_id": "ad9179cc-90e7-48eb-bf33-fe1f40cb4256",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:09:04.294127+00:00",
+    "updated_at": "2026-04-23T02:09:04.345816+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-aae01c07-a418-44c1-9cad-38ec5902eb63",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T02:09:04.345816+00:00"
+  },
+  "e4866078-7e44-4951-b387-9d8c53261e4a": {
+    "job_id": "e4866078-7e44-4951-b387-9d8c53261e4a",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:12:14.957118+00:00",
+    "updated_at": "2026-04-23T02:12:15.015951+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-af092c8d-fbc5-48ea-827b-6df24746a9ed",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T02:12:15.015951+00:00"
+  },
+  "394bbf6e-6919-4372-be1f-e1220709b66e": {
+    "job_id": "394bbf6e-6919-4372-be1f-e1220709b66e",
+    "type": "crypto_daily_catchup",
+    "asset_class": "crypto",
+    "symbols": [
+      "BTC/USD",
+      "ETH/USD",
+      "SOL/USD",
+      "XRP/USD",
+      "ADA/USD",
+      "AVAX/USD",
+      "DOT/USD",
+      "LINK/USD",
+      "MATIC/USD",
+      "LTC/USD",
+      "UNI/USD",
+      "ATOM/USD",
+      "NEAR/USD",
+      "ALGO/USD",
+      "FIL/USD"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:13:14.623474+00:00",
+    "updated_at": "2026-04-23T02:13:17.699851+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "started_at": "2026-04-23T02:13:14.630476+00:00",
+    "total_symbols": 15,
+    "done_symbols": 15,
+    "current_symbol": null,
+    "total_batches": 1,
+    "done_batches": 1,
+    "rows_fetched": 330,
+    "current_timeframe": "1Day",
+    "status_message": "Crypto 1Day Alpaca refresh completed",
+    "error": null,
+    "result": {
+      "rows_written": 330,
+      "symbols_checked": 15,
+      "timeframe": "1Day",
+      "source": "alpaca_training"
+    },
+    "finished_at": "2026-04-23T02:13:17.682982+00:00"
+  },
+  "a04459f7-1fa2-4a06-bfbb-e6afc9104a5a": {
+    "job_id": "a04459f7-1fa2-4a06-bfbb-e6afc9104a5a",
+    "type": "crypto_train",
+    "asset_class": "crypto",
+    "symbols": [
+      "BTC/USD"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T02:16:27.760110+00:00",
+    "updated_at": "2026-04-23T02:25:38.852531+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "crypto-af98ee4f-4b19-4c85-9b3e-b2d32b5246a5",
+      "best_fold": 135
+    },
+    "finished_at": "2026-04-23T02:25:38.852531+00:00"
   }
 }

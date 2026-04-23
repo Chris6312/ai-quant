@@ -415,6 +415,13 @@ export type MlPredictionRow = {
   confidence_threshold: number;
 };
 
+export type MlPredictionFreshness = {
+  latest_candle_time: string | null;
+  lag_days: number | null;
+  is_stale: boolean;
+  status: 'fresh' | 'stale' | 'no_data';
+};
+
 export type MlPredictionsResponse = {
   predictions: MlPredictionRow[];
   count: number;
@@ -422,6 +429,7 @@ export type MlPredictionsResponse = {
     crypto: string | null;
     stock: string | null;
   };
+  freshness_by_asset: Partial<Record<'crypto' | 'stock', MlPredictionFreshness>>;
   generated_at: string;
 };
 
@@ -502,6 +510,11 @@ export const backfillCrypto = (): Promise<MlJob> =>
   requestJson<MlJob>('/ml/backfill/crypto', {
     method: 'POST',
     body: JSON.stringify({}),
+  });
+
+export const catchUpCryptoDaily = () =>
+  requestJson<MlJob>('/ml/backfill/crypto/daily-catchup', {
+    method: 'POST',
   });
 
 export const backfillSp500Stocks = (targetCandles = 1000) =>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -11,6 +11,8 @@ _RUNTIME_DIR = Path("backend/.runtime")
 _JOB_STORE_PATH = _RUNTIME_DIR / "ml_jobs.json"
 
 _UNSET = object()
+
+_STALE_JOB_AFTER = timedelta(minutes=5)
 
 
 class JobRecord(TypedDict, total=False):
@@ -35,6 +37,15 @@ class JobRecord(TypedDict, total=False):
     gainers_snapshot: list[dict[str, object]]
     created_at: str
     updated_at: str
+    heartbeat_at: str | None
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat()
 
 
 def _load_jobs_unlocked() -> dict[str, JobRecord]:
@@ -46,16 +57,151 @@ def _load_jobs_unlocked() -> dict[str, JobRecord]:
 
 def _save_jobs_unlocked(jobs: dict[str, JobRecord]) -> None:
     _RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    _JOB_STORE_PATH.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
+    _JOB_STORE_PATH.write_text(
+        json.dumps(jobs, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _clamp_progress(value: int) -> int:
+    if value < 0:
+        return 0
+    if value > 100:
+        return 100
+    return value
+
+
+def _derive_progress(
+    current: JobRecord,
+    *,
+    explicit_progress_pct: int | None,
+    status: str | None,
+    total_symbols: int | None,
+    done_symbols: int | None,
+    total_batches: int | None,
+    done_batches: int | None,
+) -> int:
+    if explicit_progress_pct is not None:
+        return _clamp_progress(explicit_progress_pct)
+
+    resolved_status = status if status is not None else current.get("status")
+    if resolved_status in {"done", "completed", "success"}:
+        return 100
+    if resolved_status in {"error", "failed", "cancelled"}:
+        current_progress = current.get("progress_pct", 0)
+        if isinstance(current_progress, int):
+            return _clamp_progress(current_progress)
+        return 0
+
+    resolved_total_symbols = (
+        total_symbols if total_symbols is not None else current.get("total_symbols")
+    )
+    resolved_done_symbols = (
+        done_symbols if done_symbols is not None else current.get("done_symbols")
+    )
+    if isinstance(resolved_total_symbols, int) and resolved_total_symbols > 0:
+        done_count = resolved_done_symbols if isinstance(resolved_done_symbols, int) else 0
+        return _clamp_progress(round((done_count / resolved_total_symbols) * 100))
+
+    resolved_total_batches = (
+        total_batches if total_batches is not None else current.get("total_batches")
+    )
+    resolved_done_batches = (
+        done_batches if done_batches is not None else current.get("done_batches")
+    )
+    if isinstance(resolved_total_batches, int) and resolved_total_batches > 0:
+        done_count = resolved_done_batches if isinstance(resolved_done_batches, int) else 0
+        return _clamp_progress(round((done_count / resolved_total_batches) * 100))
+
+    current_progress = current.get("progress_pct", 0)
+    if isinstance(current_progress, int):
+        return _clamp_progress(current_progress)
+    return 0
+
+
+def _is_running_status(status: object) -> bool:
+    return status in {"pending", "queued", "running"}
+
+
+def _mark_job_stale(job: JobRecord) -> None:
+    now_iso = _utc_now_iso()
+    previous_status = str(job.get("status") or "running")
+    status_message = job.get("status_message")
+    base_message = (
+        str(status_message)
+        if isinstance(status_message, str) and status_message
+        else "Job became stale with no heartbeat updates"
+    )
+    job["status"] = "failed"
+    job["finished_at"] = now_iso
+    job["updated_at"] = now_iso
+    job["heartbeat_at"] = None
+    job["error"] = f"stale job auto-recovered from status={previous_status}"
+    job["status_message"] = f"{base_message} [auto-recovered stale job]"
+    if not isinstance(job.get("progress_pct"), int):
+        job["progress_pct"] = 0
+
+
+def _reconcile_jobs_unlocked(jobs: dict[str, JobRecord]) -> bool:
+    changed = False
+    now = _utc_now()
+
+    for job in jobs.values():
+        status = job.get("status")
+        if not _is_running_status(status):
+            continue
+
+        heartbeat_dt = _parse_datetime(job.get("heartbeat_at"))
+        updated_dt = _parse_datetime(job.get("updated_at"))
+        reference_dt = heartbeat_dt or updated_dt
+
+        if reference_dt is None:
+            _mark_job_stale(job)
+            changed = True
+            continue
+
+        if now - reference_dt > _STALE_JOB_AFTER:
+            _mark_job_stale(job)
+            changed = True
+
+    return changed
 
 
 def create_job(job: JobRecord) -> JobRecord:
-    now = datetime.now(UTC).isoformat()
+    now_iso = _utc_now_iso()
     record: JobRecord = {
         **job,
-        "created_at": job.get("created_at", now),
-        "updated_at": now,
+        "created_at": job.get("created_at", now_iso),
+        "updated_at": now_iso,
     }
+
+    status = record.get("status")
+    if _is_running_status(status):
+        record["heartbeat_at"] = now_iso
+    else:
+        heartbeat_value = record.get("heartbeat_at")
+        record["heartbeat_at"] = heartbeat_value if isinstance(heartbeat_value, str) else None
+
+    progress_pct = record.get("progress_pct")
+    if isinstance(progress_pct, int):
+        record["progress_pct"] = _clamp_progress(progress_pct)
+    elif status in {"done", "completed", "success"}:
+        record["progress_pct"] = 100
+    else:
+        record["progress_pct"] = 0
+
     job_id = record["job_id"]
     with _LOCK:
         jobs = _load_jobs_unlocked()
@@ -120,16 +266,38 @@ def update_job(
             current["current_timeframe"] = cast(str | None, current_timeframe)
         if status_message is not _UNSET:
             current["status_message"] = cast(str | None, status_message)
-        if progress_pct is not None:
-            current["progress_pct"] = progress_pct
-
         if error is not _UNSET:
             current["error"] = cast(str | None, error)
         if result is not _UNSET:
             current["result"] = cast(dict[str, object] | None, result)
         if gainers_snapshot is not None:
             current["gainers_snapshot"] = gainers_snapshot
-        current["updated_at"] = datetime.now(UTC).isoformat()
+
+        resolved_progress = _derive_progress(
+            current,
+            explicit_progress_pct=progress_pct,
+            status=status,
+            total_symbols=total_symbols,
+            done_symbols=done_symbols,
+            total_batches=total_batches,
+            done_batches=done_batches,
+        )
+        current["progress_pct"] = resolved_progress
+
+        now_iso = _utc_now_iso()
+        current["updated_at"] = now_iso
+
+        resolved_status = current.get("status")
+        if _is_running_status(resolved_status):
+            current["heartbeat_at"] = now_iso
+            if current.get("finished_at") is not None:
+                current["finished_at"] = None
+        else:
+            current["heartbeat_at"] = None
+            if resolved_status in {"done", "completed", "success"}:
+                current["progress_pct"] = 100
+                if current.get("finished_at") is None:
+                    current["finished_at"] = now_iso
 
         _save_jobs_unlocked(jobs)
         return current
@@ -145,7 +313,8 @@ def finish_job(
     return update_job(
         job_id,
         status=status,
-        finished_at=datetime.now(UTC).isoformat(),
+        finished_at=_utc_now_iso(),
+        progress_pct=100 if status in {"done", "completed", "success"} else None,
         error=error,
         result=result,
     )
@@ -153,14 +322,22 @@ def finish_job(
 
 def get_job(job_id: str) -> JobRecord | None:
     with _LOCK:
-        return _load_jobs_unlocked().get(job_id)
+        jobs = _load_jobs_unlocked()
+        changed = _reconcile_jobs_unlocked(jobs)
+        if changed:
+            _save_jobs_unlocked(jobs)
+        return jobs.get(job_id)
 
 
 def list_jobs() -> list[JobRecord]:
     with _LOCK:
         jobs = _load_jobs_unlocked()
+        changed = _reconcile_jobs_unlocked(jobs)
+        if changed:
+            _save_jobs_unlocked(jobs)
+
     return sorted(
         jobs.values(),
-        key=lambda job: job.get("started_at", ""),
+        key=lambda job: str(job.get("started_at", "")),
         reverse=True,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import logging
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -8,13 +9,18 @@ from typing import Protocol, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
+from lightgbm.basic import LightGBMError
 from sqlalchemy import func, select
 from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.brokers.alpaca import AlpacaTrainingFetcher
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
-from app.config.constants import ALPACA_DEFAULT_SOURCE, CRYPTO_CSV_TRAINING_SOURCE
+from app.config.constants import (
+    ALPACA_DEFAULT_SOURCE,
+    CRYPTO_CSV_TRAINING_SOURCE,
+    ML_CANDLE_USAGE,
+)
 from app.config.settings import Settings
 from app.config.settings import get_settings as load_settings
 from app.db.models import CandleRow
@@ -38,8 +44,11 @@ from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
 
 router = APIRouter(prefix="/ml", tags=["ml"])
+logger = logging.getLogger(__name__)
 
-
+class GainersFetcher(Protocol):
+    async def get_top_gainers(self, *, limit: int) -> list[dict[str, object]]: ...
+    
 class TrainingStatusRow(Protocol):
     symbol: object
     asset_class: object
@@ -90,7 +99,6 @@ def build_engine(settings: Settings) -> AsyncEngine:
 def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return create_session_factory(engine)
 
-
 async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
     statement = (
         select(
@@ -101,9 +109,17 @@ async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
             func.min(CandleRow.time).label("earliest"),
             func.max(CandleRow.time).label("latest"),
         )
-        .where(CandleRow.source.in_((ALPACA_DEFAULT_SOURCE, CRYPTO_CSV_TRAINING_SOURCE)))
-        .group_by(CandleRow.symbol, CandleRow.asset_class, CandleRow.timeframe)
-        .order_by(CandleRow.asset_class.asc(), CandleRow.symbol.asc(), CandleRow.timeframe.asc())
+        .where(CandleRow.usage == ML_CANDLE_USAGE)
+        .group_by(
+            CandleRow.symbol,
+            CandleRow.asset_class,
+            CandleRow.timeframe,
+        )
+        .order_by(
+            CandleRow.asset_class.asc(),
+            CandleRow.symbol.asc(),
+            CandleRow.timeframe.asc(),
+        )
     )
     result = await session.execute(statement)
     return cast(TrainingStatusResult, result)
@@ -143,6 +159,9 @@ STOCK_DAILY_CANDLE_TARGET = 1000
 STOCK_DAILY_CANDLE_MINIMUM = 750
 STOCK_DAILY_TIMEFRAME = "1Day"
 STOCK_DAILY_LOOKBACK_DAYS = 1600
+CRYPTO_DAILY_TIMEFRAME = "1Day"
+CRYPTO_FRESHNESS_MAX_AGE_DAYS = 2
+STOCK_FRESHNESS_MAX_AGE_DAYS = 5
 
 
 def _serialize_stock_universe(snapshot: StockUniverseSnapshot) -> dict[str, object]:
@@ -290,15 +309,15 @@ async def _load_training_candles(asset_class: str) -> list[Candle]:
     settings = get_settings()
     engine = build_engine(settings)
     session_factory = build_session_factory(engine)
-    source = CRYPTO_CSV_TRAINING_SOURCE if asset_class == "crypto" else ALPACA_DEFAULT_SOURCE
 
     statement = (
         select(CandleRow)
         .where(CandleRow.asset_class == asset_class)
-        .where(CandleRow.source == source)
         .where(CandleRow.timeframe == "1Day")
         .order_by(CandleRow.symbol.asc(), CandleRow.time.asc())
     )
+
+    statement = statement.where(CandleRow.usage == ML_CANDLE_USAGE)
 
     async with session_factory() as session:
         result: Result[tuple[CandleRow]] = await session.execute(statement)
@@ -326,12 +345,17 @@ async def _build_training_status() -> dict[str, object]:
     engine = build_engine(settings)
     session_factory = build_session_factory(engine)
 
+    default_sources = [
+        ALPACA_DEFAULT_SOURCE,
+        CRYPTO_CSV_TRAINING_SOURCE,
+    ]
+
     try:
         async with session_factory() as session:
             result = await _training_status_stmt(session)
     except Exception:
         return {
-            "source": "alpaca_training,crypto_csv_training",
+            "source": ",".join(default_sources),
             "total_candles": 0,
             "crypto_candles": 0,
             "stock_candles": 0,
@@ -359,7 +383,11 @@ async def _build_training_status() -> dict[str, object]:
         asset_class = str(row.asset_class)
         timeframe = str(row.timeframe)
         row_count_raw = row.row_count
-        row_count = row_count_raw if isinstance(row_count_raw, int) else int(str(row_count_raw))
+        row_count = (
+            row_count_raw
+            if isinstance(row_count_raw, int)
+            else int(str(row_count_raw))
+        )
         earliest = row.earliest
         latest = row.latest
 
@@ -368,8 +396,16 @@ async def _build_training_status() -> dict[str, object]:
             "asset_class": asset_class,
             "timeframe": timeframe,
             "candle_count": row_count,
-            "earliest": earliest.isoformat() if hasattr(earliest, "isoformat") else earliest,
-            "latest": latest.isoformat() if hasattr(latest, "isoformat") else latest,
+            "earliest": (
+                earliest.isoformat()
+                if hasattr(earliest, "isoformat")
+                else earliest
+            ),
+            "latest": (
+                latest.isoformat()
+                if hasattr(latest, "isoformat")
+                else latest
+            ),
         }
 
         total_candles += row_count
@@ -383,7 +419,7 @@ async def _build_training_status() -> dict[str, object]:
             stock_detail.append(detail)
 
     return {
-        "source": "alpaca_training,crypto_csv_training",
+        "source": ",".join(default_sources),
         "total_candles": total_candles,
         "crypto_candles": crypto_candles,
         "stock_candles": stock_candles,
@@ -395,7 +431,6 @@ async def _build_training_status() -> dict[str, object]:
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "cache_state": "live",
     }
-
 
 def _build_sample_history(symbol: str, asset_class: str) -> list[Candle]:
     start = datetime(2025, 1, 1, tzinfo=UTC)
@@ -693,13 +728,97 @@ def _get_model_importance_rows(model: model_registry.ModelRecord) -> list[dict[s
     return rows
 
 
-def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
-    artifact_path = str(model.get("artifact_path") or "")
-    normalized = artifact_path.replace("\\", "/")
+def _normalize_model_artifact_path(raw_path: str) -> Path:
+    normalized = raw_path.replace("\\", "/")
     path = Path(normalized)
     if path.is_absolute():
-        return str(path)
-    return str(Path.cwd() / path)
+        return path
+    return Path.cwd() / path
+
+
+def _candidate_model_artifact_paths(model: model_registry.ModelRecord) -> list[Path]:
+    raw_candidates: list[str] = []
+
+    artifact_path = model.get("artifact_path")
+    if isinstance(artifact_path, str) and artifact_path:
+        raw_candidates.append(artifact_path)
+
+    raw_best_fold = model.get("best_fold")
+    best_fold = raw_best_fold if isinstance(raw_best_fold, int) else None
+    raw_folds = model.get("folds")
+    if isinstance(raw_folds, list):
+        for fold in raw_folds:
+            if not isinstance(fold, dict):
+                continue
+            fold_path = fold.get("model_path")
+            if isinstance(fold_path, str) and fold_path:
+                if best_fold is not None and fold.get("fold_index") == best_fold:
+                    raw_candidates.insert(0, fold_path)
+                else:
+                    raw_candidates.append(fold_path)
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path in raw_candidates:
+        candidate = _normalize_model_artifact_path(raw_path)
+        variants = [candidate]
+        if candidate.suffix.lower() == ".txt":
+            variants.append(candidate.with_suffix(".lgbm"))
+        elif candidate.suffix.lower() == ".lgbm":
+            variants.append(candidate.with_suffix(".txt"))
+        else:
+            variants.append(candidate.with_suffix(".lgbm"))
+            variants.append(candidate.with_suffix(".txt"))
+        for variant in variants:
+            if variant in seen:
+                continue
+            seen.add(variant)
+            candidates.append(variant)
+    return candidates
+
+
+def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
+    candidates = _candidate_model_artifact_paths(model)
+    if not candidates:
+        return ""
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
+
+
+def _iter_prediction_model_candidates(
+    asset_class: str,
+) -> Iterator[tuple[model_registry.ModelRecord, str]]:
+    seen_model_ids: set[str] = set()
+    for model in model_registry.list_models(asset_class):
+        model_id = model.get("model_id")
+        if isinstance(model_id, str) and model_id in seen_model_ids:
+            continue
+        if isinstance(model_id, str):
+            seen_model_ids.add(model_id)
+
+        resolved_path = _resolve_model_artifact_path(model)
+        if not resolved_path:
+            logger.warning(
+                "Skipping %s model with no artifact candidates (model_id=%s)",
+                asset_class,
+                model.get("model_id"),
+            )
+            continue
+
+        path_obj = Path(resolved_path)
+        if path_obj.exists():
+            yield model, resolved_path
+            continue
+
+        logger.warning(
+            "Model artifact missing for %s model_id=%s status=%s candidates=%s",
+            asset_class,
+            model.get("model_id"),
+            model.get("status"),
+            [str(candidate) for candidate in _candidate_model_artifact_paths(model)],
+        )
 
 
 def _prediction_action(
@@ -749,6 +868,123 @@ def _select_top_driver(
     return f"{feature_name} → {_format_driver_value(feature_name, feature_value)}"
 
 
+def _prediction_freshness(
+    asset_class: str,
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    if not rows:
+        return {
+            "latest_candle_time": None,
+            "lag_days": None,
+            "is_stale": True,
+            "status": "no_data",
+        }
+
+    latest_candle_time = max(
+        datetime.fromisoformat(str(row["candle_time"]))
+        for row in rows
+    )
+    now = datetime.now(tz=UTC)
+    lag_days = max(0.0, (now - latest_candle_time).total_seconds() / 86400.0)
+    max_age_days = (
+        CRYPTO_FRESHNESS_MAX_AGE_DAYS
+        if asset_class == "crypto"
+        else STOCK_FRESHNESS_MAX_AGE_DAYS
+    )
+    is_stale = lag_days > float(max_age_days)
+    return {
+        "latest_candle_time": latest_candle_time.isoformat(),
+        "lag_days": round(lag_days, 2),
+        "is_stale": is_stale,
+        "status": "stale" if is_stale else "fresh",
+    }
+
+
+async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    symbols = list(KRAKEN_UNIVERSE)
+    job = _build_backfill_job("crypto_daily_catchup", symbols)
+    job_id = str(job["job_id"])
+
+    total_rows = 0
+
+    def _on_progress(done_batches: int, total_batches: int, rows_fetched: int) -> None:
+        nonlocal total_rows
+        total_rows = rows_fetched
+        progress_pct = 0
+        if total_batches > 0:
+            progress_pct = round((done_batches / total_batches) * 100)
+        job_store.update_job(
+            job_id,
+            done_symbols=min(
+                done_batches * AlpacaTrainingFetcher.max_symbols_per_request,
+                len(symbols),
+            ),
+            total_symbols=len(symbols),
+            done_batches=done_batches,
+            total_batches=total_batches,
+            current_symbol=None,
+            progress_pct=progress_pct,
+            status_message="Refreshing crypto 1Day ML candles from Alpaca",
+            current_timeframe=CRYPTO_DAILY_TIMEFRAME,
+            rows_fetched=rows_fetched,
+        )
+
+    try:
+        async with session_factory() as session:
+            repository = CandleRepository(session)
+            fetcher = AlpacaTrainingFetcher(
+                repository=repository,
+                api_key=settings.alpaca_api_key,
+                api_secret=settings.alpaca_api_secret,
+                lookback_days=30,
+            )
+            total_rows = await fetcher.sync_universe(
+                symbols,
+                [CRYPTO_DAILY_TIMEFRAME],
+                asset_class="crypto",
+                progress_callback=_on_progress,
+            )
+    except Exception as exc:
+        job_store.update_job(
+            job_id,
+            rows_fetched=total_rows,
+            status_message="Crypto 1Day Alpaca refresh failed",
+        )
+        finished = job_store.finish_job(job_id, status="error", error=str(exc))
+        if finished is not None:
+            return finished
+        raise
+
+    job_store.update_job(
+        job_id,
+        done_symbols=len(symbols),
+        total_symbols=len(symbols),
+        done_batches=ceil(len(symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
+        total_batches=ceil(len(symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
+        current_symbol=None,
+        progress_pct=100,
+        status_message="Crypto 1Day Alpaca refresh completed",
+        rows_fetched=total_rows,
+    )
+    finished = job_store.finish_job(
+        job_id,
+        status="done",
+        result={
+            "rows_written": total_rows,
+            "symbols_checked": len(symbols),
+            "timeframe": CRYPTO_DAILY_TIMEFRAME,
+            "source": ALPACA_DEFAULT_SOURCE,
+        },
+    )
+    if finished is None:
+        raise HTTPException(status_code=500, detail="crypto catch-up job could not be finalized")
+    return finished
+
+
+
 async def _build_asset_predictions(
     asset_class: str,
     *,
@@ -757,18 +993,60 @@ async def _build_asset_predictions(
 ) -> list[dict[str, object]]:
     active_model = model_registry.get_active_model(asset_class)
     if active_model is None:
+        logger.info("No active %s model found for predictions", asset_class)
         return []
 
     candles = await _load_training_candles(asset_class)
     if not candles:
+        logger.info("No %s candles available for prediction generation", asset_class)
         return []
 
-    predictor = ModelPredictor(
-        _resolve_model_artifact_path(active_model),
-        min_confidence=0.0,
-    )
+    predictor: ModelPredictor | None = None
+    selected_model: model_registry.ModelRecord | None = None
+    selected_model_path: str | None = None
+    for candidate_model, candidate_path in _iter_prediction_model_candidates(asset_class):
+        try:
+            predictor = ModelPredictor(candidate_path, min_confidence=0.0)
+            selected_model = candidate_model
+            selected_model_path = candidate_path
+            break
+        except (LightGBMError, FileNotFoundError, OSError) as exc:
+            logger.warning(
+                "Skipping unusable %s model_id=%s artifact=%s error=%s",
+                asset_class,
+                candidate_model.get("model_id"),
+                candidate_path,
+                exc,
+            )
+
+    if predictor is None or selected_model is None or selected_model_path is None:
+        logger.warning(
+            "No usable %s prediction model found. active_model_id=%s",
+            asset_class,
+            active_model.get("model_id"),
+        )
+        return []
+
+    selected_model_id = selected_model.get("model_id")
+    active_model_id = active_model.get("model_id")
+    if selected_model_id != active_model_id:
+        logger.warning(
+            "Falling back from active %s model_id=%s to model_id=%s artifact=%s",
+            asset_class,
+            active_model_id,
+            selected_model_id,
+            selected_model_path,
+        )
+    else:
+        logger.info(
+            "Using %s prediction model_id=%s artifact=%s",
+            asset_class,
+            selected_model_id,
+            selected_model_path,
+        )
+
     engineer = FeatureEngineer()
-    threshold = _coerce_numeric(active_model.get("confidence_threshold")) or 0.60
+    threshold = _coerce_numeric(selected_model.get("confidence_threshold")) or 0.60
     latest_by_symbol: dict[str, list[Candle]] = {}
     for candle in candles:
         bucket = latest_by_symbol.setdefault(candle.symbol, [])
@@ -777,8 +1055,7 @@ async def _build_asset_predictions(
             del bucket[0]
 
     rows: list[dict[str, object]] = []
-    model_id = active_model.get("model_id")
-    model_id_value = model_id if isinstance(model_id, str) else None
+    model_id_value = selected_model_id if isinstance(selected_model_id, str) else None
     for symbol, history in latest_by_symbol.items():
         features = engineer.build(history, asset_class)
         if features is None:
@@ -806,7 +1083,7 @@ async def _build_asset_predictions(
                     "flat": round(prediction.class_probs[1], 6),
                     "up": round(prediction.class_probs[2], 6),
                 },
-                "top_driver": _select_top_driver(features, active_model),
+                "top_driver": _select_top_driver(features, selected_model),
                 "candle_time": candle_time,
                 "action": action,
                 "confidence_threshold": threshold,
@@ -820,6 +1097,12 @@ async def _build_asset_predictions(
         ),
         reverse=True,
     )
+    logger.info(
+        "Built %s prediction rows=%s using model_id=%s",
+        asset_class,
+        len(rows),
+        model_id_value,
+    )
     return rows[:limit]
 
 
@@ -832,9 +1115,13 @@ async def get_predictions(
         raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
 
     assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
-    rows: list[dict[str, object]] = []
+    rows_by_asset: dict[str, list[dict[str, object]]] = {}
     for asset in assets:
-        rows.extend(await _build_asset_predictions(asset, limit=limit))
+        rows_by_asset[asset] = await _build_asset_predictions(asset, limit=limit)
+
+    rows: list[dict[str, object]] = []
+    for asset_rows in rows_by_asset.values():
+        rows.extend(asset_rows)
 
     rows.sort(
         key=lambda row: (
@@ -850,6 +1137,10 @@ async def get_predictions(
         "active_model_ids": {
             "crypto": _get_active_model_id("crypto"),
             "stock": _get_active_model_id("stock"),
+        },
+        "freshness_by_asset": {
+            asset: _prediction_freshness(asset, asset_rows)
+            for asset, asset_rows in rows_by_asset.items()
         },
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
@@ -918,9 +1209,12 @@ def get_crypto_universe() -> Mapping[str, object]:
 @router.get("/gainers")
 async def get_gainers(limit: int = Query(default=100, ge=1, le=100)) -> Mapping[str, object]:
     settings = get_settings()
-    fetcher = AlpacaTrainingFetcher(
-        api_key=settings.alpaca_api_key,
-        api_secret=settings.alpaca_api_secret,
+    fetcher = cast(
+        GainersFetcher,
+        AlpacaTrainingFetcher(
+            api_key=settings.alpaca_api_key,
+            api_secret=settings.alpaca_api_secret,
+        ),
     )
     try:
         gainers = await fetcher.get_top_gainers(limit=limit)
@@ -956,6 +1250,12 @@ async def backfill_sp500_stock_universe(
 ) -> Mapping[str, object]:
     _ensure_no_running_job()
     return await _backfill_stock_universe(target_candles=target_candles)
+
+
+@router.post("/backfill/crypto/daily-catchup")
+async def catch_up_crypto_daily() -> Mapping[str, object]:
+    _ensure_no_running_job()
+    return await _catch_up_crypto_daily_candles()
 
 
 @router.get("/models")

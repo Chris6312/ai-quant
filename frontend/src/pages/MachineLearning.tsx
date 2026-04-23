@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   backfillCrypto,
+  catchUpCryptoDaily,
   backfillSp500Stocks,
   getCryptoUniverse,
   getFeatureParity,
@@ -409,6 +410,7 @@ const MachineLearning: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState | null>(null);
   const [isImportingCrypto, setIsImportingCrypto] = useState(false);
+  const [isCatchingUpCryptoDaily, setIsCatchingUpCryptoDaily] = useState(false);
   const [isBackfillingSp500, setIsBackfillingSp500] = useState(false);
   const [isRefreshingGainers, setIsRefreshingGainers] = useState(false);
   const [isTrainingCrypto, setIsTrainingCrypto] = useState(false);
@@ -485,8 +487,21 @@ const MachineLearning: React.FC = () => {
     };
   }, [loadPageData]);
 
+  const activeJob = useMemo(() => {
+    if (!persistence?.active_job_id) {
+      return null;
+    }
+
+    const matchedJob = persistence.jobs.find((job) => job.job_id === persistence.active_job_id) ?? null;
+    if (!matchedJob) {
+      return null;
+    }
+
+    return matchedJob.status === 'running' ? matchedJob : null;
+  }, [persistence]);
+
   useEffect(() => {
-    if (!persistence?.has_running_job) {
+    if (!activeJob) {
       return undefined;
     }
 
@@ -495,14 +510,7 @@ const MachineLearning: React.FC = () => {
     }, 3000);
 
     return () => window.clearInterval(id);
-  }, [loadPageData, persistence?.has_running_job]);
-
-  const activeJob = useMemo(() => {
-    if (!persistence) {
-      return null;
-    }
-    return persistence.jobs.find((job) => job.job_id === persistence.active_job_id) ?? null;
-  }, [persistence]);
+  }, [activeJob, loadPageData]);
 
   const training = persistence?.training ?? null;
   const totalCandles = training?.total_candles ?? 0;
@@ -529,6 +537,8 @@ const MachineLearning: React.FC = () => {
 
   const activeCryptoModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'crypto' && model.status === 'active') ?? null, [modelsResponse]);
   const activeStockModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'stock' && model.status === 'active') ?? null, [modelsResponse]);
+  const cryptoPredictionFreshness = predictionsResponse?.freshness_by_asset.crypto ?? null;
+  const stockPredictionFreshness = predictionsResponse?.freshness_by_asset.stock ?? null;
   const selectedImportanceModel = useMemo(() => {
     return selectedImportanceAsset === 'crypto' ? activeCryptoModel : activeStockModel;
   }, [activeCryptoModel, activeStockModel, selectedImportanceAsset]);
@@ -729,6 +739,24 @@ const MachineLearning: React.FC = () => {
       setBanner({ tone: 'error', message: `Crypto CSV import failed to start: ${normalizeError(error)}` });
     } finally {
       setIsImportingCrypto(false);
+    }
+  };
+
+  const handleCatchUpCryptoDaily = async (): Promise<void> => {
+    try {
+      setIsCatchingUpCryptoDaily(true);
+      const job = await catchUpCryptoDaily();
+      setBanner({
+        tone: job.status === 'done' ? 'success' : 'error',
+        message: job.status === 'done'
+          ? `Crypto 1Day catch-up completed: ${job.rows_fetched} candles merged across ${job.done_symbols}/${job.total_symbols} symbols.`
+          : `Crypto 1Day catch-up failed: ${job.error ?? 'unknown error'}`,
+      });
+      await loadPageData();
+    } catch (error) {
+      setBanner({ tone: 'error', message: `Crypto 1Day catch-up failed to start: ${normalizeError(error)}` });
+    } finally {
+      setIsCatchingUpCryptoDaily(false);
     }
   };
 
@@ -984,12 +1012,38 @@ const MachineLearning: React.FC = () => {
             Confidence gate: {Math.round(((activeCryptoModel?.confidence_threshold ?? activeStockModel?.confidence_threshold ?? 0.6) * 100))}%
           </span>
           <span style={{ fontSize: 10, color: S.text3 }}>
-            Updated on each 1h candle close
+            Predictions as of {predictionsResponse ? formatTimestamp(predictionsResponse.generated_at) : 'pending'}
           </span>
           <Badge v="muted">
             {predictionsResponse ? `${predictionsResponse.count} live predictions` : 'Awaiting /ml/predictions'}
           </Badge>
+          {cryptoPredictionFreshness && (
+            <Badge v={cryptoPredictionFreshness.is_stale ? 'red' : 'blue'}>
+              Crypto 1D {cryptoPredictionFreshness.is_stale ? 'stale' : 'fresh'}
+            </Badge>
+          )}
+          {stockPredictionFreshness && (
+            <Badge v={stockPredictionFreshness.is_stale ? 'red' : 'amber'}>
+              Stock 1D {stockPredictionFreshness.is_stale ? 'stale' : 'fresh'}
+            </Badge>
+          )}
         </CardHeader>
+        {(cryptoPredictionFreshness || stockPredictionFreshness) && (
+          <div style={{ padding: '0 16px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 10, color: S.text3 }}>
+            {cryptoPredictionFreshness && (
+              <span>
+                Crypto latest 1D candle: {cryptoPredictionFreshness.latest_candle_time ? formatTimestamp(cryptoPredictionFreshness.latest_candle_time) : 'n/a'}
+                {cryptoPredictionFreshness.lag_days !== null ? ` · lag ${cryptoPredictionFreshness.lag_days.toFixed(1)}d` : ''}
+              </span>
+            )}
+            {stockPredictionFreshness && (
+              <span>
+                Stock latest 1D candle: {stockPredictionFreshness.latest_candle_time ? formatTimestamp(stockPredictionFreshness.latest_candle_time) : 'n/a'}
+                {stockPredictionFreshness.lag_days !== null ? ` · lag ${stockPredictionFreshness.lag_days.toFixed(1)}d` : ''}
+              </span>
+            )}
+          </div>
+        )}
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
@@ -1052,100 +1106,6 @@ const MachineLearning: React.FC = () => {
         </div>
       </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <Card>
-          <CardHeader title={`Feature importance · ${selectedImportanceAsset} model · gain-based`}>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-              <ActionButton tone={selectedImportanceAsset === 'crypto' ? 'blue' : 'muted'} onClick={() => setSelectedImportanceAsset('crypto')}>
-                Crypto
-              </ActionButton>
-              <ActionButton tone={selectedImportanceAsset === 'stock' ? 'amber' : 'muted'} onClick={() => setSelectedImportanceAsset('stock')}>
-                Stock
-              </ActionButton>
-              <Badge v={selectedImportanceAsset === 'crypto' ? 'blue' : 'amber'}>Active asset</Badge>
-              <Badge v="purple">Research</Badge>
-              <Badge v="muted">{isLoadingImportances ? 'Loading' : selectedImportances ? 'Live weights' : 'No model available'}</Badge>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                <ActionButton tone={selectedImportanceLimit === 10 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(10)}>
-                  Top 10
-                </ActionButton>
-                <ActionButton tone={selectedImportanceLimit === 25 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(25)}>
-                  Top 25
-                </ActionButton>
-                <ActionButton tone={selectedImportanceLimit === 'all' ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit('all')}>
-                  All
-                </ActionButton>
-              </div>
-            </div>
-          </CardHeader>
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedImportanceModel && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
-                <div style={{ fontSize: 10, color: S.text3 }}>Artifact<span style={{ display: 'block', fontSize: 11, color: S.text2, fontFamily: S.mono, marginTop: 4 }}>{selectedImportanceModel.artifact_path.split(/[\\/]/).pop() ?? selectedImportanceModel.artifact_path}</span></div>
-                <div style={{ fontSize: 10, color: S.text3 }}>Best fold / accuracy<span style={{ display: 'block', fontSize: 11, color: S.text2, marginTop: 4 }}>Fold {selectedImportanceModel.best_fold} · {(selectedImportanceModel.validation_accuracy * 100).toFixed(1)}%</span></div>
-              </div>
-            )}
-            {isLoadingImportances ? (
-              <div style={{ padding: '10px 0', fontSize: 10, color: S.text3 }}>Loading live feature weights for the active {selectedImportanceAsset} champion model…</div>
-            ) : importanceFeatures.length > 0 ? (
-              importanceFeatures.map((feature) => (
-                <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
-              ))
-            ) : (
-              <div style={{ padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-                {importanceError ?? `No active ${selectedImportanceAsset} model is registered yet. Train a ${selectedImportanceAsset} model to populate live feature weights.`}
-              </div>
-            )}
-            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-              {selectedImportances
-                ? `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} live feature weights from the active ${selectedImportances.asset_class} champion model.`
-                : `This panel only shows backend-sourced weights. Preview data has been removed for ${selectedImportanceAsset}.`}
-              {featureParity && (
-                <span style={{ display: 'block', marginTop: 6, color: featureParity.parity_ok ? S.green : S.amber }}>
-                  Feature parity: {featureParity.parity_ok ? 'stock and crypto match the ML contract order.' : 'parity review still has mismatches.'}
-                </span>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card>
-            <CardHeader title="Drift monitor · crypto">
-              <Badge v="muted">Awaiting /ml/drift/crypto</Badge>
-            </CardHeader>
-            <div style={{ padding: 16, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-              Drift comparison is not exposed yet. This pane stays in place so the page layout matches your target design instead of vanishing into a trapdoor.
-            </div>
-          </Card>
-
-          {!stockDriftDismissed && (
-            <Card accent={S.amber2}>
-              <CardHeader title="Drift monitor · stock">
-                <Badge v="amber">Pending backend endpoint</Badge>
-              </CardHeader>
-              <div style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: 'rgba(255,181,71,0.06)', border: `0.5px solid ${S.amber2}`, borderRadius: S.rMd }}>
-                  <div style={{ width: 28, height: 28, background: S.amberBg, border: `0.5px solid ${S.amber2}`, borderRadius: S.rSm, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>⚠</div>
-                  <div>
-                    <div style={{ fontSize: 11, color: S.amber, fontWeight: 500, marginBottom: 4 }}>Drift actions are wired, backend drift math is not</div>
-                    <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.6 }}>Use this as the future action area for retrain recommendations once <span style={{ color: S.text2, fontFamily: S.mono }}>GET /ml/drift/stock</span> exists.</div>
-                    <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-                      <ActionButton tone="amber" onClick={() => handlePendingAction('Retrain action is waiting on stock drift + training endpoints.')}>
-                        Retrain
-                      </ActionButton>
-                      <ActionButton tone="muted" onClick={() => setStockDriftDismissed(true)}>
-                        Dismiss
-                      </ActionButton>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
-      </div>
-
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
@@ -1196,7 +1156,7 @@ const MachineLearning: React.FC = () => {
 
       <Card>
         <CardHeader title="Training data · status reference">
-          <Badge v="blue">Crypto: {formatNumber(cryptoCandles)} candles · {cryptoSymbols} symbols · CSV</Badge>
+          <Badge v="blue">Crypto: {formatNumber(cryptoCandles)} candles · {cryptoSymbols} symbols · CSV + Kraken catch-up</Badge>
           <Badge v="amber">Stock: {formatNumber(stockCandles)} candles · {stockSymbols} symbols · Alpaca</Badge>
           <Badge v="muted">Universe: {stockUniverse?.index ?? 'S&P 500'} · as of {stockUniverse?.as_of ?? 'pending'}</Badge>
         </CardHeader>
@@ -1221,8 +1181,11 @@ const MachineLearning: React.FC = () => {
             <div>Top-100 most-active remains a research list only. S&P 500 hydration is now the stock ML backbone.</div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <ActionButton tone="blue" disabled={isImportingCrypto} onClick={() => { void handleImportCrypto(); }}>
+            <ActionButton tone="blue" disabled={isImportingCrypto || Boolean(activeJob)} onClick={() => { void handleImportCrypto(); }}>
               {isImportingCrypto ? 'Importing crypto CSVs…' : '→ Import crypto CSVs'}
+            </ActionButton>
+            <ActionButton tone="blue" disabled={isCatchingUpCryptoDaily || Boolean(activeJob)} onClick={() => { void handleCatchUpCryptoDaily(); }}>
+              {isCatchingUpCryptoDaily ? 'Catching up crypto 1D…' : '→ Catch up crypto 1D'}
             </ActionButton>
             <ActionButton tone="amber" disabled={isBackfillingSp500 || Boolean(activeJob)} onClick={() => { void handleBackfillSp500(); }}>
               {isBackfillingSp500 ? 'Hydrating S&P 500…' : `→ Backfill S&P 500 (${stockUniverse?.supported_symbol_count ?? 0} symbols)`}

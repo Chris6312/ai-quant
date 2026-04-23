@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.config.constants import CRYPTO_CSV_TRAINING_SOURCE
+from app.config.constants import CRYPTO_CSV_TRAINING_SOURCE, ML_CANDLE_USAGE
 from app.db.models import CandleRow
 from app.exceptions import ResearchParseError
 from app.repositories.candles import CandleRepository
@@ -128,6 +128,7 @@ class CryptoCsvTrainingIngestor:
                         field_name="volume",
                         file_name=csv_path.name,
                     ),
+                    usage=ML_CANDLE_USAGE,
                 )
 
         return symbol, list(dedup.values()), rows_seen

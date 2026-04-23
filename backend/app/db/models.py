@@ -34,6 +34,7 @@ class CandleRow(Base):
     close: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     volume: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
+    usage: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class WatchlistRow(Base):

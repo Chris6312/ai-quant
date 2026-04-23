@@ -12,6 +12,7 @@ from app.candle.backfill import BackfillService
 from app.candle.kraken_worker import KRAKEN_UNIVERSE, KrakenUniverseSupervisor
 from app.candle.tradier_worker import TradierWorkerManager
 from app.candle.worker import CandleWorker
+from app.config.constants import TRADING_CANDLE_USAGE
 from app.models.domain import Candle
 
 
@@ -155,6 +156,8 @@ async def test_candle_worker_processes_close_and_publishes() -> None:
     assert result == candle
     assert len(repository.rows) == 1
     assert repository.rows[0].source == "tradier"
+    assert repository.rows[0].usage == TRADING_CANDLE_USAGE
+    assert repository.rows[0].usage == TRADING_CANDLE_USAGE
     assert redis_client.messages[0][0] == "candle_closed:stock:AAPL:1Day"
     assert "\"symbol\":\"AAPL\"" in redis_client.messages[0][1]
 
@@ -219,8 +222,10 @@ async def test_backfill_service_persists_history() -> None:
         timeframe="1Day",
         client=_FakeSourceClient(candle),
         source="tradier",
+        usage=TRADING_CANDLE_USAGE,
         lookback_days=7,
     )
     assert total == 1
     assert len(repository.rows) == 1
     assert repository.rows[0].source == "tradier"
+    assert repository.rows[0].usage == TRADING_CANDLE_USAGE

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from itertools import batched
 
@@ -10,9 +10,10 @@ from app.config.constants import (
     ALPACA_BATCH_MAX_SYMBOLS,
     ALPACA_DEFAULT_SOURCE,
     ALPACA_SYNC_LOOKBACK_DAYS,
+    ML_CANDLE_USAGE,
 )
 from app.db.models import CandleRow
-from app.exceptions import ResearchAPIError, ResearchParseError
+from app.exceptions import ResearchParseError
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
 
@@ -22,6 +23,10 @@ type RawBatch = dict[str, list[RawBar]]
 type HttpScalar = str | int | float | bool | None
 type HttpValue = HttpScalar | Sequence[HttpScalar]
 type HttpParams = Mapping[str, HttpValue]
+type ProgressCallback = Callable[[int, int, int], None]
+
+_STOCK_BARS_URL = "https://data.alpaca.markets/v2/stocks/bars"
+_CRYPTO_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
 
 
 def _as_float(value: object | None) -> float:
@@ -32,12 +37,6 @@ def _as_float(value: object | None) -> float:
     if isinstance(value, str):
         return float(value)
     raise ResearchParseError("invalid numeric value in Alpaca response")
-
-
-def _as_str(value: object | None) -> str:
-    if value is None:
-        return ""
-    return str(value)
 
 
 def _coerce_params(params: Mapping[str, object]) -> dict[str, HttpValue]:
@@ -109,6 +108,7 @@ class AlpacaTrainingFetcher:
         self,
         symbol: str,
         timeframe: str,
+        asset_class: str,
         raw: RawBar,
     ) -> Candle:
         ts_raw = raw.get("t")
@@ -121,7 +121,7 @@ class AlpacaTrainingFetcher:
 
         return Candle(
             symbol=symbol,
-            asset_class="stock",
+            asset_class=asset_class,
             timeframe=timeframe,
             time=ts,
             open=_as_float(raw.get("o")),
@@ -170,6 +170,7 @@ class AlpacaTrainingFetcher:
                         close=candle.close,
                         volume=candle.volume,
                         source=candle.source,
+                        usage=ML_CANDLE_USAGE,
                     )
                 )
 
@@ -182,23 +183,27 @@ class AlpacaTrainingFetcher:
         *,
         start: datetime,
         end: datetime,
+        asset_class: str = "stock",
     ) -> dict[str, list[Candle]]:
-        params = _coerce_params(
-            {
-                "symbols": ",".join(symbols),
-                "timeframe": timeframe,
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "limit": 10_000,
-                "adjustment": "raw",
-                "feed": "iex",
-                "sort": "asc",
-            }
-        )
+        params_base: dict[str, object] = {
+            "symbols": ",".join(symbols),
+            "timeframe": timeframe,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "limit": 10_000,
+            "sort": "asc",
+        }
+        if asset_class == "stock":
+            params_base.update({"adjustment": "raw", "feed": "iex"})
+            url = _STOCK_BARS_URL
+        elif asset_class == "crypto":
+            url = _CRYPTO_BARS_URL
+        else:
+            raise ResearchParseError(f"unsupported alpaca asset class: {asset_class}")
 
         payload = await self._get(
-            "https://data.alpaca.markets/v2/stocks/bars",
-            params=params,
+            url,
+            params=_coerce_params(params_base),
         )
 
         bars = payload.get("bars")
@@ -213,7 +218,7 @@ class AlpacaTrainingFetcher:
 
             for raw in raw_list:
                 if isinstance(raw, Mapping):
-                    candles.append(self._parse_bar(symbol, timeframe, raw))
+                    candles.append(self._parse_bar(symbol, timeframe, asset_class, raw))
 
             result[symbol] = candles
 
@@ -223,12 +228,21 @@ class AlpacaTrainingFetcher:
         self,
         symbols: Sequence[str],
         timeframes: Sequence[str],
+        *,
+        asset_class: str = "stock",
+        progress_callback: ProgressCallback | None = None,
     ) -> int:
         if self.repository is None:
             raise RuntimeError("repository required")
 
         total_rows = 0
+        total_batches = 0
+        for _timeframe in timeframes:
+            for batch_symbols in batched(symbols, self.max_symbols_per_request):
+                if tuple(batch_symbols):
+                    total_batches += 1
 
+        done_batches = 0
         for timeframe in timeframes:
             latest_times = await self.repository.get_latest_candle_times(
                 symbols,
@@ -248,57 +262,16 @@ class AlpacaTrainingFetcher:
                     timeframe,
                     start=start,
                     end=end,
+                    asset_class=asset_class,
                 )
                 rows = self._rows_from_batch(candles_by_symbol, timeframe)
 
-                if not rows:
-                    continue
+                if rows:
+                    await self.repository.bulk_upsert(rows)
+                    total_rows += len(rows)
 
-                await self.repository.bulk_upsert(rows)
-                total_rows += len(rows)
+                done_batches += 1
+                if progress_callback is not None:
+                    progress_callback(done_batches, total_batches, total_rows)
 
         return total_rows
-
-    async def get_top_gainers(
-        self,
-        limit: int = 20,
-    ) -> list[dict[str, object]]:
-        params = _coerce_params({"top": limit})
-
-        payload = await self._get(
-            "https://data.alpaca.markets/v1beta1/screener/stocks/most-actives",
-            params=params,
-        )
-
-        raw_gainers = payload.get("most_actives")
-        if not isinstance(raw_gainers, Sequence):
-            raise ResearchAPIError("invalid screener response")
-
-        gainers: list[dict[str, object]] = []
-
-        for item in raw_gainers:
-            if not isinstance(item, Mapping):
-                continue
-
-            symbol = _as_str(item.get("symbol")).upper()
-            if not symbol:
-                continue
-
-            gainers.append(
-                {
-                    "symbol": symbol,
-                    "price": item.get("price"),
-                    "percent_change": item.get("percent_change"),
-                    "volume": item.get("volume"),
-                }
-            )
-
-        return gainers[:limit]
-
-    async def fetch_most_active(
-        self,
-        top: int = 20,
-    ) -> list[dict[str, object]]:
-        """Backward-compatible alias used by ML routes."""
-
-        return await self.get_top_gainers(limit=top)
