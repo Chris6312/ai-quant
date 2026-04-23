@@ -90,6 +90,18 @@ export type RuntimeCoverageSummary = {
   scope_note?: string;
 };
 
+export type RuntimeCryptoScope = {
+  universe_symbols: string[];
+  universe_count: number;
+  universe_source: string;
+  watchlist_symbols: string[];
+  watchlist_count: number;
+  watchlist_source: string;
+  active_runtime_symbols: string[];
+  active_runtime_count: number;
+  active_runtime_source: string;
+};
+
 export type RuntimeWatchlistTarget = {
   worker_id: string;
   symbol: string;
@@ -106,6 +118,7 @@ export type RuntimeWorkersResponse = {
   as_of: string;
   summary: RuntimeWorkerSummary;
   coverage: RuntimeCoverageSummary;
+  crypto_scope: RuntimeCryptoScope;
   workers: RuntimeWorkerRecord[];
   watchlist_targets: RuntimeWatchlistTarget[];
   recent_events: RuntimeWorkerEvent[];
@@ -114,6 +127,20 @@ export type RuntimeWorkersResponse = {
 
 export const getRuntimeWorkers = (eventLimit = 20) =>
   requestJson<RuntimeWorkersResponse>(`/runtime/workers?event_limit=${eventLimit}`);
+
+export type ResearchScopeResponse = {
+  stock_watchlist_symbols: string[];
+  stock_watchlist_count: number;
+  stock_watchlist_source: string;
+  crypto_universe_symbols: string[];
+  crypto_universe_count: number;
+  crypto_universe_source: string;
+  crypto_watchlist_symbols: string[];
+  crypto_watchlist_count: number;
+  crypto_watchlist_source: string;
+};
+
+export const getResearchScope = () => requestJson<ResearchScopeResponse>('/research/scope');
 
 // ── Watchlist ─────────────────────────────────────────────────────────────
 export type WatchlistItem = {

@@ -83,11 +83,15 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
         "watchlist_targets": 1,
         "attached_workers": 1,
         "unattached_workers": 0,
+        "scope_note": "Stock watchlist coverage is separate from crypto scope coverage.",
     }
     assert len(payload["workers"]) == 1
     assert payload["workers"][0]["worker_id"] == "stock:AAPL:1Day"
     assert payload["workers"][0]["status"] == WorkerStatus.RUNNING.value
     assert payload["workers"][0]["health"] == "healthy"
+    assert payload["crypto_scope"]["universe_count"] >= 1
+    assert payload["crypto_scope"]["watchlist_count"] == payload["crypto_scope"]["universe_count"]
+    assert payload["crypto_scope"]["active_runtime_count"] == 0
     assert payload["watchlist_targets"] == [
         {
             "worker_id": "stock:AAPL:1Day",
@@ -128,6 +132,7 @@ def test_runtime_workers_endpoint_honors_event_limit() -> None:
     assert payload["coverage"]["watchlist_targets"] == 1
     assert payload["coverage"]["attached_workers"] == 0
     assert payload["coverage"]["unattached_workers"] == 1
+    assert payload["crypto_scope"]["active_runtime_count"] == 0
 
 
 def _build_runtime_app() -> FastAPI:

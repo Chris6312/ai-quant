@@ -5,12 +5,48 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_research_repository
+from app.api.dependencies import get_research_repository, get_session
+from app.config.crypto_scope import (
+    list_crypto_universe_symbols,
+    list_crypto_watchlist_symbols,
+)
 from app.db.models import CongressTradeRow, InsiderTradeRow, ResearchSignalRow
 from app.repositories.research import ResearchRepository
+from app.repositories.watchlist import WatchlistRepository
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+
+@router.get("/scope")
+async def get_research_scope(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, object]:
+    """Return backend-truth research scope for stock watchlist and crypto universe."""
+
+    watchlist_repository = WatchlistRepository(session)
+    active_rows = await watchlist_repository.list_active()
+    stock_rows = [
+        row
+        for row in active_rows
+        if row.asset_class.lower() == "stock"
+    ]
+    stock_symbols = [row.symbol for row in stock_rows]
+    crypto_universe_symbols = list_crypto_universe_symbols()
+    crypto_watchlist_symbols = list_crypto_watchlist_symbols()
+
+    return {
+        "stock_watchlist_symbols": stock_symbols,
+        "stock_watchlist_count": len(stock_symbols),
+        "stock_watchlist_source": "research watchlist",
+        "crypto_universe_symbols": crypto_universe_symbols,
+        "crypto_universe_count": len(crypto_universe_symbols),
+        "crypto_universe_source": "KRAKEN_UNIVERSE",
+        "crypto_watchlist_symbols": crypto_watchlist_symbols,
+        "crypto_watchlist_count": len(crypto_watchlist_symbols),
+        "crypto_watchlist_source": "crypto universe",
+    }
 
 
 @router.get("/signals")

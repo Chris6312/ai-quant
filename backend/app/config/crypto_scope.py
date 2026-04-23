@@ -26,20 +26,22 @@ KRAKEN_UNIVERSE: Final[tuple[str, ...]] = (
     "ALGO/USD",
     "FIL/USD",
 )
-"""Canonical crypto universe for the runtime Kraken lane in Phase 1."""
+"""Canonical crypto universe for the runtime Kraken lane."""
 
 CRYPTO_SCOPE_MODEL: Final[dict[str, str]] = {
     "crypto_universe": (
         "Canonical crypto symbol set for the current crypto-first rollout. "
-        "In Phase 1 this is the fixed Kraken universe."
+        "This is the fixed Kraken universe until later runtime phases derive "
+        "a narrower active set."
     ),
     "crypto_watchlist": (
-        "Operator-facing crypto list. In Phase 1 it is intentionally identical "
-        "to the crypto universe so the app does not invent a second source of truth."
+        "Operator-facing crypto list. It is intentionally identical to the "
+        "crypto universe right now so the app does not invent a second source "
+        "of truth before runtime derivation exists."
     ),
     "active_runtime_set": (
-        "Symbols that should eventually have runtime workers attached. This is "
-        "derived from crypto scope in later phases, not hand-curated here."
+        "Symbols that currently have runtime workers attached. This starts "
+        "empty until a later phase attaches crypto worker targets."
     ),
     "prediction_set": (
         "Symbols with persisted inference rows. This is a downstream ML/runtime "
@@ -47,15 +49,30 @@ CRYPTO_SCOPE_MODEL: Final[dict[str, str]] = {
     ),
 }
 
-CRYPTO_SCOPE_PHASE_1_MAPPING: Final[dict[str, str]] = {
+CRYPTO_SCOPE_MAPPING: Final[dict[str, str]] = {
     "crypto_universe": "KRAKEN_UNIVERSE",
-    "crypto_watchlist": "Same as crypto universe for Phase 1",
-    "active_runtime_set": "Derived in later runtime phases",
+    "crypto_watchlist": "Same as crypto universe for the current crypto-first phase",
+    "active_runtime_set": "Derived from attached runtime workers when available",
     "prediction_set": "Derived from persisted inference output",
 }
 
+# Backward-compatible alias for prior handoffs and references.
+CRYPTO_SCOPE_PHASE_1_MAPPING: Final[dict[str, str]] = CRYPTO_SCOPE_MAPPING
+
+
+def list_crypto_universe_symbols() -> list[str]:
+    """Return the canonical crypto universe as a mutable list."""
+
+    return list(KRAKEN_UNIVERSE)
+
+
+def list_crypto_watchlist_symbols() -> list[str]:
+    """Return the current operator-facing crypto watchlist symbols."""
+
+    return list_crypto_universe_symbols()
+
 
 def is_phase_1_crypto_symbol(symbol: str) -> bool:
-    """Return whether a symbol belongs to the Phase 1 canonical crypto scope."""
+    """Return whether a symbol belongs to the canonical crypto scope."""
 
     return symbol.upper() in KRAKEN_UNIVERSE

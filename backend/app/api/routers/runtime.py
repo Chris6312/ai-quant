@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session
+from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_watchlist_symbols
 from app.repositories.watchlist import WatchlistRepository
 from app.workers.worker_health_service import WorkerHealthService
 from app.workers.worker_runtime_state import WorkerKey, WorkerLifecycleEvent, WorkerSnapshot
@@ -67,7 +68,9 @@ async def get_runtime_workers(
             "watchlist_targets": len(targets),
             "attached_workers": attached_workers,
             "unattached_workers": unattached_workers,
+            "scope_note": "Stock watchlist coverage is separate from crypto scope coverage.",
         },
+        "crypto_scope": _serialize_crypto_scope(snapshot.workers),
         "workers": workers,
         "watchlist_targets": targets,
         "recent_events": [_serialize_event(event) for event in snapshot.recent_events],
@@ -83,6 +86,31 @@ async def get_runtime_workers(
             "last_error": supervisor.last_error,
             "last_result": _serialize_sync_result(supervisor.last_result),
         },
+    }
+
+
+def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
+    """Return the current crypto universe, watchlist, and active runtime scope."""
+
+    universe_symbols = list_crypto_universe_symbols()
+    watchlist_symbols = list_crypto_watchlist_symbols()
+    active_runtime_symbols = sorted(
+        {worker.key.symbol for worker in workers if worker.key.asset_class == "crypto"}
+    )
+    return {
+        "universe_symbols": universe_symbols,
+        "universe_count": len(universe_symbols),
+        "universe_source": "KRAKEN_UNIVERSE",
+        "watchlist_symbols": watchlist_symbols,
+        "watchlist_count": len(watchlist_symbols),
+        "watchlist_source": "crypto universe",
+        "active_runtime_symbols": active_runtime_symbols,
+        "active_runtime_count": len(active_runtime_symbols),
+        "active_runtime_source": (
+            "attached crypto workers"
+            if active_runtime_symbols
+            else "no crypto workers attached yet"
+        ),
     }
 
 
