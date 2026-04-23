@@ -1,5 +1,71 @@
 [
   {
+    "model_id": "stock-dcbfe6f2-cbdf-4737-b367-126b4ef69439",
+    "asset_class": "stock",
+    "status": "active",
+    "artifact_path": "models/stock_fold_0.txt",
+    "trained_at": "2026-04-23T04:59:35.920227+00:00",
+    "fold_count": 0,
+    "best_fold": 0,
+    "validation_accuracy": 0.72,
+    "validation_sharpe": 1.5,
+    "train_samples": 200,
+    "test_samples": 40,
+    "feature_count": 1,
+    "confidence_threshold": 0.6,
+    "latest_job_id": "ffd553b2-35f8-4b84-aee8-749d20e59453",
+    "feature_importances": {
+      "news_sentiment_7d": 4.0
+    },
+    "folds": [],
+    "created_at": "2026-04-23T04:59:35.920227+00:00",
+    "updated_at": "2026-04-23T04:59:35.920227+00:00"
+  },
+  {
+    "model_id": "stock-ee0f4f87-9b9f-48f9-9f36-715effb47495",
+    "asset_class": "stock",
+    "status": "retired",
+    "artifact_path": "models/stock_fold_0.txt",
+    "trained_at": "2026-04-23T04:56:13.167362+00:00",
+    "fold_count": 0,
+    "best_fold": 0,
+    "validation_accuracy": 0.72,
+    "validation_sharpe": 1.5,
+    "train_samples": 200,
+    "test_samples": 40,
+    "feature_count": 1,
+    "confidence_threshold": 0.6,
+    "latest_job_id": "978b9860-fb40-4cae-b751-5c1f31703f12",
+    "feature_importances": {
+      "news_sentiment_7d": 4.0
+    },
+    "folds": [],
+    "created_at": "2026-04-23T04:56:13.167362+00:00",
+    "updated_at": "2026-04-23T04:59:35.920227+00:00"
+  },
+  {
+    "model_id": "stock-06050dbf-9157-441d-8ae5-ae6d0ca62fc3",
+    "asset_class": "stock",
+    "status": "retired",
+    "artifact_path": "models/stock_fold_0.txt",
+    "trained_at": "2026-04-23T04:50:25.473600+00:00",
+    "fold_count": 0,
+    "best_fold": 0,
+    "validation_accuracy": 0.72,
+    "validation_sharpe": 1.5,
+    "train_samples": 200,
+    "test_samples": 40,
+    "feature_count": 1,
+    "confidence_threshold": 0.6,
+    "latest_job_id": "0575f57a-cec5-4b87-acf5-2124eaa4d06b",
+    "feature_importances": {
+      "news_sentiment_7d": 4.0
+    },
+    "folds": [],
+    "created_at": "2026-04-23T04:50:25.473600+00:00",
+    "updated_at": "2026-04-23T04:56:13.167362+00:00"
+  },
+  {
     "model_id": "crypto-af98ee4f-4b19-4c85-9b3e-b2d32b5246a5",
     "asset_class": "crypto",
     "status": "active",
@@ -1718,7 +1784,7 @@
   {
     "model_id": "stock-af092c8d-fbc5-48ea-827b-6df24746a9ed",
     "asset_class": "stock",
-    "status": "active",
+    "status": "retired",
     "artifact_path": "models/stock_fold_0.txt",
     "trained_at": "2026-04-23T02:12:14.990207+00:00",
     "fold_count": 0,
@@ -1735,7 +1801,7 @@
     },
     "folds": [],
     "created_at": "2026-04-23T02:12:14.990207+00:00",
-    "updated_at": "2026-04-23T02:12:14.990207+00:00"
+    "updated_at": "2026-04-23T04:50:25.473600+00:00"
   },
   {
     "model_id": "stock-aae01c07-a418-44c1-9cad-38ec5902eb63",

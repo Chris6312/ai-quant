@@ -15,11 +15,13 @@ from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.brokers.alpaca import AlpacaTrainingFetcher
-from app.candle.kraken_worker import KRAKEN_UNIVERSE
 from app.config.constants import (
     ALPACA_DEFAULT_SOURCE,
     CRYPTO_CSV_TRAINING_SOURCE,
     ML_CANDLE_USAGE,
+)
+from app.config.crypto_scope import (
+    KRAKEN_UNIVERSE,
 )
 from app.config.settings import Settings
 from app.config.settings import get_settings as load_settings

@@ -73,12 +73,6 @@ type FeatureContractSummary = {
   crypto_research_policy: string;
 };
 
-type CryptoUniverseResponse = {
-  symbols: string[];
-  count: number;
-  source_dir: string;
-};
-
 type BannerState = {
   tone: 'info' | 'success' | 'error';
   message: string;
@@ -1163,7 +1157,7 @@ const MachineLearning: React.FC = () => {
         <div style={{ padding: 16, display: 'flex', gap: 24, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
             {[
-              { label: 'Crypto coverage', value: formatNumber(cryptoCandles), color: S.blue, sub: `${cryptoSymbols} symbols · ${cryptoUniverse?.source_dir ?? 'crypto-history'}` },
+              { label: 'Crypto coverage', value: formatNumber(cryptoCandles), color: S.blue, sub: `${cryptoSymbols} symbols · ${cryptoUniverse?.scope_source ?? 'KRAKEN_UNIVERSE'}` },
               { label: 'Stock coverage', value: formatNumber(stockCandles), color: S.amber, sub: `${stockSymbols} symbols in training set` },
               { label: 'Target per symbol', value: String(stockUniverse?.target_candles_per_symbol ?? 1000), color: S.text, sub: '1D candles to pull for stock ML' },
               { label: 'Minimum usable', value: String(stockUniverse?.minimum_candles_per_symbol ?? 750), color: S.text, sub: 'clean candles required for training' },

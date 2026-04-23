@@ -87,6 +87,7 @@ export type RuntimeCoverageSummary = {
   watchlist_targets: number;
   attached_workers: number;
   unattached_workers: number;
+  scope_note?: string;
 };
 
 export type RuntimeWatchlistTarget = {
@@ -322,6 +323,12 @@ export type CryptoUniverseResponse = {
   symbols: string[];
   count: number;
   source_dir: string;
+  scope_source: string;
+  watchlist_mode: string;
+  runtime_mode: string;
+  prediction_mode: string;
+  scope_model: Record<string, string>;
+  phase_1_mapping: Record<string, string>;
 };
 
 export type StockUniverseUnsupportedSymbol = {

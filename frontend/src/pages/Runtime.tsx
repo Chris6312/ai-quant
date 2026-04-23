@@ -401,8 +401,8 @@ const Runtime: React.FC = () => {
           }}
         >
           {supervisor?.enabled
-            ? 'Supervisor is enabled. Compare the watchlist coverage table against the worker registry below to see whether active watchlist symbols actually have managed workers attached.'
-            : 'Supervisor is currently disabled. The coverage table below still shows which active stock watchlist symbols are missing worker attachments in this process.'}
+            ? 'Supervisor is enabled. The coverage table below is still stock-watchlist coverage only. Crypto scope is now treated as a separate first-class lane and will gain runtime-derived coverage in later phases.'
+            : 'Supervisor is currently disabled. The coverage table below still shows which active stock watchlist symbols are missing worker attachments in this process. Crypto scope is defined separately from this stock table.'}
         </div>
       )}
 
@@ -411,7 +411,7 @@ const Runtime: React.FC = () => {
           { label: 'Total workers', value: summary?.total_workers ?? '—', tone: 'muted' as Tone, sub: 'Registry snapshot' },
           { label: 'Healthy', value: summary?.healthy_workers ?? '—', tone: 'green' as Tone, sub: 'Fresh heartbeats' },
           { label: 'Stale', value: summary?.stale_workers ?? '—', tone: 'amber' as Tone, sub: 'Needs attention' },
-          { label: 'Watchlist targets', value: coverage?.watchlist_targets ?? '—', tone: 'blue' as Tone, sub: 'Active stock symbols' },
+          { label: 'Stock targets', value: coverage?.watchlist_targets ?? '—', tone: 'blue' as Tone, sub: 'Active stock watchlist symbols' },
           { label: 'Attached', value: coverage?.attached_workers ?? '—', tone: 'green' as Tone, sub: 'Targets with workers' },
           { label: 'Missing', value: coverage?.unattached_workers ?? '—', tone: 'amber' as Tone, sub: 'Targets without workers' },
         ].map((item) => (
@@ -513,7 +513,7 @@ const Runtime: React.FC = () => {
         <div className="card-header">
           <span className="card-title">Watchlist worker coverage</span>
           <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
-            {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} attached
+            {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} stock targets attached
           </span>
         </div>
         {loading && !runtime ? (

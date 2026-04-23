@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Protocol
+from typing import Protocol
 
 from app.candle.worker import CandleWorker, RedisClient
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
 
-KRAKEN_UNIVERSE: Final[tuple[str, ...]] = (
+KRAKEN_UNIVERSE: tuple[str, ...] = (
     "BTC/USD",
     "ETH/USD",
     "SOL/USD",
@@ -28,6 +28,8 @@ KRAKEN_UNIVERSE: Final[tuple[str, ...]] = (
     "ALGO/USD",
     "FIL/USD",
 )
+
+__all__ = ["KRAKEN_UNIVERSE", "KrakenCandleWorker", "KrakenUniverseSupervisor"]
 
 
 class KrakenMarketDataClient(Protocol):

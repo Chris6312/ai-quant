@@ -178,7 +178,7 @@ const Research: React.FC = () => {
             <div style={{ padding: '20px 16px', fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
               No {filter === 'all' ? '' : filter} symbols on watchlist yet.
               <div style={{ marginTop: 6, color: 'var(--text4)' }}>
-                Research engine promotes symbols when composite score ≥ 65
+                Crypto scope is defined separately from stock research promotion. In Phase 1, the crypto universe exists even when this research watchlist panel is empty.
               </div>
             </div>
           ) : (
