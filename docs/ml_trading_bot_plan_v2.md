@@ -9,18 +9,18 @@
 
 | Broker / API | Role | What It Does |
 |---|---|---|
-| **Kraken** | Live crypto execution | Orders, WS price feed, top 15 liquid USD pairs only |
+| **Kraken** | Live crypto execution | Orders, WS price feed, fixed USD crypto universe |
 | **Tradier** | Live stock execution + watchlist candles | Orders, quotes, OHLCV candles for active watchlist |
-| **Alpaca** | ML training data only | Batch OHLCV fetch for stock universe (no live orders) |
+| **Alpaca** | ML training data only | Batch OHLCV fetch for stock universe and supported crypto overlap (no live orders) |
 | **Alpaca** | Stock universe screening | Historical data for backtesting new watchlist candidates |
 
-### Kraken — Top 15 Liquid USD Pairs (Fixed Universe)
+### Kraken / Alpaca Overlap — Top 15 USD Pairs (Fixed Universe)
 
 ```python
 KRAKEN_UNIVERSE = [
-    "BTC/USD",  "ETH/USD",  "SOL/USD",  "XRP/USD",  "ADA/USD",
-    "AVAX/USD", "DOT/USD",  "LINK/USD", "MATIC/USD","LTC/USD",
-    "UNI/USD",  "ATOM/USD", "NEAR/USD", "ALGO/USD", "FIL/USD",
+    "BTC/USD",   "ETH/USD",  "SOL/USD",   "LTC/USD",  "BCH/USD",
+    "LINK/USD",  "UNI/USD",  "AVAX/USD",  "DOGE/USD", "DOT/USD",
+    "AAVE/USD",  "CRV/USD",  "SUSHI/USD", "SHIB/USD", "XTZ/USD",
 ]
 # All 15 are always monitored. Candles via Tradier-equivalent Kraken REST.
 # Crypto: long trades ONLY, no exceptions regardless of balance.

@@ -55,6 +55,12 @@ export type RuntimeWorkerRecord = {
   task_name: string | null;
   heartbeat_ttl_s: number;
   heartbeat_age_s: number | null;
+  freshness?: string;
+  latest_ml_candle_at?: string | null;
+  latest_ml_candle_date?: string | null;
+  tracked_symbol_count?: number;
+  symbols_with_ml_candles?: number;
+  missing_or_stale_symbols?: string[];
 };
 
 export type RuntimeWorkerEvent = {

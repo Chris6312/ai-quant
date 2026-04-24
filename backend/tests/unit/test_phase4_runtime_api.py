@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import get_session
+from app.api.routers.runtime import _classify_ml_freshness
 from app.api.routers.runtime import router as runtime_router
+from app.config.crypto_scope import list_crypto_watchlist_symbols
 from app.workers import (
     WorkerHealthService,
     WorkerKey,
@@ -36,9 +38,24 @@ class _FakeScalarResult:
         return iter(self._rows)
 
 
+class _FakeLatestCandleResult:
+    def __init__(self, rows: list[tuple[str, datetime]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[str, datetime]]:
+        return self._rows
+
+
 class _FakeSession:
     def __init__(self, rows: list[_FakeWatchlistRow]) -> None:
         self._rows = rows
+        self._latest_candle_at = datetime.now(tz=UTC)
+
+    async def execute(self, statement: object) -> _FakeLatestCandleResult:
+        del statement
+        return _FakeLatestCandleResult(
+            [(symbol, self._latest_candle_at) for symbol in list_crypto_watchlist_symbols()]
+        )
 
     async def scalars(self, statement: object) -> _FakeScalarResult:
         del statement
@@ -91,6 +108,8 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
     assert payload["workers"][0]["health"] == "healthy"
     assert payload["ml_workers"][0]["worker_id"] == "ml:crypto:1D"
     assert payload["ml_workers"][0]["task_name"] == "tasks.ml_candles.daily_sync"
+    assert payload["ml_workers"][0]["freshness"] == "fresh"
+    assert payload["ml_workers"][0]["latest_ml_candle_date"] is not None
     assert payload["crypto_scope"]["universe_count"] >= 1
     assert (
         payload["crypto_scope"]["watchlist_count"]
@@ -167,6 +186,35 @@ def test_runtime_workers_endpoint_counts_attached_crypto_workers() -> None:
     assert payload["crypto_scope"]["active_runtime_symbols"] == ["KRAKEN_UNIVERSE"]
     assert payload["crypto_scope"]["active_runtime_count"] == 1
     assert payload["crypto_scope"]["active_runtime_source"] == "attached crypto candle scheduler"
+
+
+
+
+def test_ml_freshness_uses_daily_candle_date_not_eastern_shift() -> None:
+    """A UTC-midnight daily candle for today should remain fresh for ML."""
+
+    latest_candle_at = datetime(2026, 4, 24, 0, 0, tzinfo=UTC)
+
+    freshness = _classify_ml_freshness(
+        latest_candle_at,
+        current_date=date(2026, 4, 24),
+    )
+
+    assert freshness == "fresh"
+
+
+def test_ml_freshness_marks_current_date_partial_coverage_stale() -> None:
+    """Current-date ML data is stale when some tracked symbols lag or are missing."""
+
+    latest_candle_at = datetime(2026, 4, 24, 0, 0, tzinfo=UTC)
+
+    freshness = _classify_ml_freshness(
+        latest_candle_at,
+        has_missing_or_stale_symbols=True,
+        current_date=date(2026, 4, 24),
+    )
+
+    assert freshness == "stale"
 
 
 def _build_runtime_app() -> FastAPI:

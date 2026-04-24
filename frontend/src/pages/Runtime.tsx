@@ -84,10 +84,52 @@ function toneForHealth(health: string): Tone {
     case 'error':
       return 'red';
     case 'inactive':
+    case 'missing':
+      return 'muted';
+    case 'fresh':
+      return 'green';
+    case 'dead':
+      return 'red';
+    default:
+      return 'muted';
+  }
+}
+
+function toneForFreshness(freshness: string | undefined): Tone {
+  switch (freshness) {
+    case 'fresh':
+      return 'green';
+    case 'stale':
+      return 'amber';
+    case 'dead':
+      return 'red';
+    case 'missing':
       return 'muted';
     default:
       return 'muted';
   }
+}
+
+function formatFreshnessLabel(worker: RuntimeWorkerRecord): string {
+  if (!isMlWorker(worker)) {
+    return fmtDateTime(worker.last_candle_close_at);
+  }
+
+  if (worker.latest_ml_candle_date) {
+    return worker.latest_ml_candle_date;
+  }
+
+  return 'No ML candles';
+}
+
+function formatMlCoverage(worker: RuntimeWorkerRecord): string {
+  if (!isMlWorker(worker)) {
+    return formatWorkerTask(worker);
+  }
+
+  const withCandles = worker.symbols_with_ml_candles ?? 0;
+  const tracked = worker.tracked_symbol_count ?? 0;
+  return `${withCandles}/${tracked} symbols`;
 }
 
 function toneForStatus(status: string): Tone {
@@ -192,8 +234,8 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
             <th style={{ width: '9%' }}>Status</th>
             <th style={{ width: '9%' }}>Health</th>
             <th style={{ width: '10%' }}>Updated</th>
-            <th style={{ width: '10%' }}>Candle close</th>
-            <th style={{ width: '10%' }}>Task</th>
+            <th style={{ width: '10%' }}>Latest data</th>
+            <th style={{ width: '10%' }}>Task / Coverage</th>
             <th>Last error</th>
           </tr>
         </thead>
@@ -228,11 +270,11 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
                 <span style={pillStyle(toneForStatus(worker.status))}>{worker.status}</span>
               </td>
               <td>
-                <span style={pillStyle(toneForHealth(worker.health))}>{worker.health}</span>
+                <span style={pillStyle(isMlWorker(worker) ? toneForFreshness(worker.freshness) : toneForHealth(worker.health))}>{isMlWorker(worker) ? (worker.freshness ?? worker.health) : worker.health}</span>
               </td>
               <td>{fmtDateTime(worker.updated_at)}</td>
-              <td>{fmtDateTime(worker.last_candle_close_at)}</td>
-              <td>{formatWorkerTask(worker)}</td>
+              <td>{formatFreshnessLabel(worker)}</td>
+              <td>{formatMlCoverage(worker)}</td>
               <td
                 style={{
                   color: worker.last_error ? 'var(--red)' : 'var(--text3)',
@@ -678,8 +720,8 @@ const Runtime: React.FC = () => {
           <div className="card-body" style={{ display: 'grid', gap: 10 }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
               Managed workers include both the trading candle scheduler and the ML daily candle
-              sync lane. Heartbeat noise is filtered out of the visible lifecycle table so fills,
-              dispatches, errors, and other meaningful events remain readable.
+              sync lane. The ML lane shows latest ML candle freshness and symbol coverage instead
+              of pretending it should heartbeat like the trading scheduler.
             </div>
             <RuntimeWorkerTable workers={managedWorkers} />
           </div>
