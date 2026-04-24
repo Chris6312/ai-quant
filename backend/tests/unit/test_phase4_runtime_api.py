@@ -153,18 +153,20 @@ def test_runtime_workers_endpoint_counts_attached_crypto_workers() -> None:
     app.dependency_overrides[get_session] = _override_session
     with TestClient(app) as client:
         registry = client.app.state.worker_registry
-        key = WorkerKey(symbol="BTC/USD", asset_class="crypto", timeframe="1Day")
+        key = WorkerKey(symbol="KRAKEN_UNIVERSE", asset_class="crypto", timeframe="multi")
         now = datetime.now(tz=UTC)
-        registry.register(key, source="crypto scope target derivation", recorded_at=now)
+        registry.register(key, source="kraken crypto candle scheduler", recorded_at=now)
         registry.mark_heartbeat(key, recorded_at=now)
 
         response = client.get("/runtime/workers")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["crypto_scope"]["active_runtime_symbols"] == ["BTC/USD"]
+    assert payload["crypto_scope"]["active_runtime_symbols"] == ["KRAKEN_UNIVERSE"]
     assert payload["crypto_scope"]["active_runtime_count"] == 1
-    assert payload["crypto_scope"]["active_runtime_source"] == "attached crypto workers"
+    assert payload["crypto_scope"]["active_runtime_source"] == "attached crypto candle scheduler"
+
+
 def _build_runtime_app() -> FastAPI:
     app = FastAPI()
     registry = WorkerRegistry()

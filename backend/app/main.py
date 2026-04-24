@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         registry=state.worker_registry,
     )
     state.worker_supervisor = WorkerSupervisor(
-        name="crypto-worker-sync",
+        name="crypto-candle-scheduler-sync",
         interval_seconds=30,
         sync_operation=crypto_synchronizer.sync_crypto_targets,
         enabled=True,

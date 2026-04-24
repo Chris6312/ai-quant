@@ -3414,5 +3414,245 @@
       "best_fold": 0
     },
     "finished_at": "2026-04-23T04:59:35.948979+00:00"
+  },
+  "e345c97f-52e3-4c3a-a26c-e96a61d8c3a9": {
+    "job_id": "e345c97f-52e3-4c3a-a26c-e96a61d8c3a9",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T05:11:09.748686+00:00",
+    "updated_at": "2026-04-23T05:11:09.793472+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-5d016503-d7b1-411d-bb19-9f2c3340bb6c",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T05:11:09.793472+00:00"
+  },
+  "5a023b39-802b-45b4-b402-d2a6f24f2f0e": {
+    "job_id": "5a023b39-802b-45b4-b402-d2a6f24f2f0e",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-23T05:13:33.096853+00:00",
+    "updated_at": "2026-04-23T05:13:33.145120+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-17e58614-9fc6-4374-b211-dd7d598fe6cd",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-23T05:13:33.145120+00:00"
+  },
+  "cbe89308-3af7-4687-ba86-3e0d3a36462f": {
+    "job_id": "cbe89308-3af7-4687-ba86-3e0d3a36462f",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:13:37.118312+00:00",
+    "updated_at": "2026-04-24T00:13:37.170906+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-5b86e39d-8249-4ba0-8221-9963f48f8f42",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:13:37.170906+00:00"
+  },
+  "e6905710-a2ff-4cd1-ba47-508639a39510": {
+    "job_id": "e6905710-a2ff-4cd1-ba47-508639a39510",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:13:57.160103+00:00",
+    "updated_at": "2026-04-24T00:13:57.207812+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-95e47424-443c-45c2-9006-bdf7deb5713b",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:13:57.207812+00:00"
+  },
+  "3c0c4f30-7f21-44ec-aa2e-6557364717e0": {
+    "job_id": "3c0c4f30-7f21-44ec-aa2e-6557364717e0",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:24:01.307851+00:00",
+    "updated_at": "2026-04-24T00:24:01.344546+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-111515ee-66c7-4d22-9749-407e2fae7110",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:24:01.344546+00:00"
+  },
+  "4a919f7b-410e-4097-84c9-8e02f185e107": {
+    "job_id": "4a919f7b-410e-4097-84c9-8e02f185e107",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:28:16.266028+00:00",
+    "updated_at": "2026-04-24T00:28:16.320984+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-dec07a2d-e1c9-49cb-a4c8-85e4bd0ecb7a",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:28:16.320984+00:00"
+  },
+  "8befa424-5651-4317-abf9-8da781a448d8": {
+    "job_id": "8befa424-5651-4317-abf9-8da781a448d8",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:29:26.498921+00:00",
+    "updated_at": "2026-04-24T00:29:26.562584+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-04894d80-0870-417b-9f62-b195b2eab7f5",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:29:26.562584+00:00"
+  },
+  "e4bef968-ee6c-49ea-9f71-468b3950b09d": {
+    "job_id": "e4bef968-ee6c-49ea-9f71-468b3950b09d",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T00:36:38.605407+00:00",
+    "updated_at": "2026-04-24T00:36:38.639763+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-c3cb1c79-f772-4ad5-b2fe-d6343219cbaf",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T00:36:38.639763+00:00"
+  },
+  "721cec41-9f11-482a-a245-03c7f0669866": {
+    "job_id": "721cec41-9f11-482a-a245-03c7f0669866",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T01:05:31.023342+00:00",
+    "updated_at": "2026-04-24T01:05:31.075872+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-a85603a2-c49f-46df-b60d-390fcadfa3dc",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T01:05:31.075872+00:00"
+  },
+  "8746e7d0-1c58-4188-bd89-5e312dbf5fe8": {
+    "job_id": "8746e7d0-1c58-4188-bd89-5e312dbf5fe8",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T01:17:10.413307+00:00",
+    "updated_at": "2026-04-24T01:17:10.492961+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-da9f6f3e-26fd-40d9-8962-98667222d6db",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T01:17:10.492961+00:00"
+  },
+  "d6e38379-32d0-44b8-965c-d208108eaca4": {
+    "job_id": "d6e38379-32d0-44b8-965c-d208108eaca4",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T01:21:03.958755+00:00",
+    "updated_at": "2026-04-24T01:21:04.007370+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-6ba4f523-15d0-4ae4-8691-daf3fe620153",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T01:21:04.007370+00:00"
+  },
+  "96dff6a0-e8d1-4985-b89f-7b6adc5b8be0": {
+    "job_id": "96dff6a0-e8d1-4985-b89f-7b6adc5b8be0",
+    "type": "stock_train",
+    "asset_class": "stock",
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ],
+    "status": "done",
+    "created_at": "2026-04-24T01:27:19.668337+00:00",
+    "updated_at": "2026-04-24T01:27:19.724392+00:00",
+    "heartbeat_at": null,
+    "progress_pct": 100,
+    "error": null,
+    "result": {
+      "model_id": "stock-935b793e-f4e6-4b1e-ad93-58d92c12a124",
+      "best_fold": 0
+    },
+    "finished_at": "2026-04-24T01:27:19.724392+00:00"
   }
 }

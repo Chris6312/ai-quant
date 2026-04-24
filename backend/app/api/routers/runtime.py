@@ -124,9 +124,9 @@ def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
         "active_runtime_symbols": active_runtime_symbols,
         "active_runtime_count": len(active_runtime_symbols),
         "active_runtime_source": (
-            "attached crypto workers"
+            "attached crypto candle scheduler"
             if active_runtime_symbols
-            else "no crypto workers attached yet"
+            else "no crypto candle scheduler attached yet"
         ),
     }
 

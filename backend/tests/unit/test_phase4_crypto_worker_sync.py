@@ -1,13 +1,17 @@
-"""Tests for crypto runtime worker attachment synchronization."""
+"""Tests for crypto runtime candle scheduler synchronization."""
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 
 import pytest
 
 from app.services.crypto_runtime_targets import CryptoRuntimeTarget
 from app.workers.crypto_worker_sync import (
+    CRYPTO_CANDLE_SCHEDULER_SOURCE,
+    CRYPTO_CANDLE_SCHEDULER_SYMBOL,
+    CRYPTO_CANDLE_SCHEDULER_TIMEFRAME,
     CryptoWorkerSyncConfig,
     CryptoWorkerSynchronizer,
 )
@@ -16,9 +20,18 @@ from app.workers.worker_registry import WorkerRegistry
 from app.workers.worker_runtime_state import WorkerHealth, WorkerKey, WorkerStatus
 
 
+@dataclass(slots=True)
+class _FakeDispatcher:
+    calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+
+    def send_task(self, name: str, kwargs: dict[str, object]) -> object:
+        self.calls.append((name, kwargs))
+        return {"task": name}
+
+
 @pytest.mark.asyncio
-async def test_crypto_worker_synchronizer_builds_one_spec_per_target() -> None:
-    """Crypto target sync should dedupe launch specs by worker identity."""
+async def test_crypto_worker_synchronizer_builds_one_scheduler_spec() -> None:
+    """Crypto sync should build one scheduler spec for the whole target set."""
 
     registry = WorkerRegistry(heartbeat_ttl_s=60)
     target = CryptoRuntimeTarget(
@@ -28,21 +41,27 @@ async def test_crypto_worker_synchronizer_builds_one_spec_per_target() -> None:
         lifecycle_manager=WorkerLifecycleManager(registry),
         registry=registry,
         target_provider=lambda: [target, target],
+        dispatcher=_FakeDispatcher(),
     )
 
     specs = synchronizer.build_launch_specs([target, target])
 
-    assert [spec.key.id for spec in specs] == ["crypto:BTC/USD:1Day"]
-    assert specs[0].source == "crypto scope target derivation"
-    assert specs[0].task_name == "worker:crypto:BTC/USD:1Day"
+    assert [spec.key.id for spec in specs] == [
+        f"crypto:{CRYPTO_CANDLE_SCHEDULER_SYMBOL}:{CRYPTO_CANDLE_SCHEDULER_TIMEFRAME}"
+    ]
+    assert specs[0].source == CRYPTO_CANDLE_SCHEDULER_SOURCE
+    assert specs[0].task_name == (
+        f"worker:crypto:{CRYPTO_CANDLE_SCHEDULER_SYMBOL}:{CRYPTO_CANDLE_SCHEDULER_TIMEFRAME}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_crypto_worker_synchronizer_attaches_and_detaches_targets() -> None:
-    """Syncing crypto targets should start new workers and stop removed ones."""
+async def test_crypto_worker_synchronizer_keeps_one_scheduler_for_target_changes() -> None:
+    """Target symbol changes should not create one task per symbol."""
 
     registry = WorkerRegistry(heartbeat_ttl_s=60)
     manager = WorkerLifecycleManager(registry)
+    dispatcher = _FakeDispatcher()
     btc = CryptoRuntimeTarget(
         key=WorkerKey(symbol="BTC/USD", asset_class="crypto", timeframe="1Day")
     )
@@ -58,6 +77,7 @@ async def test_crypto_worker_synchronizer_attaches_and_detaches_targets() -> Non
         registry=registry,
         target_provider=lambda: list(targets),
         config=CryptoWorkerSyncConfig(heartbeat_seconds=0.01),
+        dispatcher=dispatcher,
     )
 
     first = await synchronizer.sync_crypto_targets()
@@ -66,19 +86,22 @@ async def test_crypto_worker_synchronizer_attaches_and_detaches_targets() -> Non
     second = await synchronizer.sync_crypto_targets()
     await asyncio.sleep(0.02)
 
-    assert first.started == 2
+    scheduler_id = f"crypto:{CRYPTO_CANDLE_SCHEDULER_SYMBOL}:{CRYPTO_CANDLE_SCHEDULER_TIMEFRAME}"
+    assert first.started == 1
     assert first.stopped == 0
     assert first.unchanged == 0
-    assert second.started == 1
-    assert second.stopped == 1
+    assert second.started == 0
+    assert second.stopped == 0
     assert second.unchanged == 1
-    assert manager.active_worker_ids == {"crypto:ETH/USD:1Day", "crypto:SOL/USD:1Day"}
+    assert manager.active_worker_ids == {scheduler_id}
+    assert dispatcher.calls
 
-    stopped_snapshot = registry.get(btc.key)
-    assert stopped_snapshot is not None
-    assert stopped_snapshot.status is WorkerStatus.STOPPED
-
-    active_snapshot = registry.get(eth.key)
+    scheduler_key = WorkerKey(
+        symbol=CRYPTO_CANDLE_SCHEDULER_SYMBOL,
+        asset_class="crypto",
+        timeframe=CRYPTO_CANDLE_SCHEDULER_TIMEFRAME,
+    )
+    active_snapshot = registry.get(scheduler_key)
     assert active_snapshot is not None
     assert active_snapshot.status is WorkerStatus.RUNNING
     assert active_snapshot.health is WorkerHealth.HEALTHY

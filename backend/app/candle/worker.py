@@ -44,6 +44,9 @@ class RedisClient(Protocol):
     async def publish(self, channel: str, message: str) -> int:
         """Publish a Redis message."""
 
+    async def aclose(self) -> None:
+        """Close the Redis client."""
+
 
 class CandleSourceClient(Protocol):
     """Define the live candle data contract for workers."""
