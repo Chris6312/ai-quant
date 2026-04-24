@@ -36,6 +36,7 @@ from app.ml.features import (
     build_feature_contract_summary,
     validate_feature_vector,
 )
+from app.ml.freshness import MlFreshnessResult, evaluate_crypto_ml_freshness
 from app.ml.predictor import ModelPredictor
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
 from app.ml.trainer import TrainerConfig, TrainResult, WalkForwardTrainer
@@ -59,23 +60,18 @@ class TrainingStatusRow(Protocol):
     earliest: object
     latest: object
 
-
 class TrainingStatusResult(Protocol):
     def all(self) -> list[TrainingStatusRow]: ...
-
 
 class TrainingDataset(Protocol):
     candles: Sequence[Candle]
     research_lookup: Mapping[str, object]
 
-
 class FloatLike(Protocol):
     def __float__(self) -> float: ...
 
-
 class SortableValue(Protocol):
     def __lt__(self, other: object) -> bool: ...
-
 
 class FoldLike(Protocol):
     fold_index: int
@@ -89,14 +85,11 @@ class FoldLike(Protocol):
     n_test_samples: int
     model_path: str
 
-
 def get_settings() -> Settings:
     return load_settings()
 
-
 def build_engine(settings: Settings) -> AsyncEngine:
     return create_engine(settings)
-
 
 def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return create_session_factory(engine)
@@ -126,7 +119,6 @@ async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
     result = await session.execute(statement)
     return cast(TrainingStatusResult, result)
 
-
 async def train_stock_model_from_db(
     session: AsyncSession,
     *,
@@ -139,10 +131,8 @@ async def train_stock_model_from_db(
         timeframe=timeframe,
     )
 
-
 def load_jobs() -> Sequence[Mapping[str, object]]:
     return job_store.list_jobs()
-
 
 def _new_job(job_type: str, symbols: list[str]) -> Mapping[str, object]:
     job_id = str(uuid4())
@@ -156,7 +146,6 @@ def _new_job(job_type: str, symbols: list[str]) -> Mapping[str, object]:
     job_store.create_job(record)
     return record
 
-
 STOCK_DAILY_CANDLE_TARGET = 1000
 STOCK_DAILY_CANDLE_MINIMUM = 750
 STOCK_DAILY_TIMEFRAME = "1Day"
@@ -164,7 +153,6 @@ STOCK_DAILY_LOOKBACK_DAYS = 1600
 CRYPTO_DAILY_TIMEFRAME = "1Day"
 CRYPTO_FRESHNESS_MAX_AGE_DAYS = 2
 STOCK_FRESHNESS_MAX_AGE_DAYS = 5
-
 
 def _serialize_stock_universe(snapshot: StockUniverseSnapshot) -> dict[str, object]:
     supported = snapshot.supported_symbols
@@ -190,10 +178,8 @@ def _serialize_stock_universe(snapshot: StockUniverseSnapshot) -> dict[str, obje
         ],
     }
 
-
 def _load_stock_universe_snapshot() -> StockUniverseSnapshot:
     return StockUniverseLoader().load()
-
 
 def _build_backfill_job(job_type: str, symbols: list[str]) -> Mapping[str, object]:
     job = _new_job(job_type, symbols)
@@ -222,7 +208,6 @@ def _build_backfill_job(job_type: str, symbols: list[str]) -> Mapping[str, objec
     )
     refreshed = job_store.get_job(job_id)
     return refreshed if refreshed is not None else job
-
 
 async def _backfill_stock_universe(*, target_candles: int) -> Mapping[str, object]:
     settings = get_settings()
@@ -294,7 +279,6 @@ async def _backfill_stock_universe(*, target_candles: int) -> Mapping[str, objec
             return finished
         raise
 
-
 def _coerce_numeric(value: object | None) -> float:
     if value is None:
         return 0.0
@@ -305,7 +289,6 @@ def _coerce_numeric(value: object | None) -> float:
     if hasattr(value, "__float__"):
         return float(cast(FloatLike, value))
     raise TypeError("numeric value could not be coerced to float")
-
 
 async def _load_training_candles(asset_class: str) -> list[Candle]:
     settings = get_settings()
@@ -340,7 +323,6 @@ async def _load_training_candles(asset_class: str) -> list[Candle]:
         )
         for row in rows
     ]
-
 
 async def _build_training_status() -> dict[str, object]:
     settings = get_settings()
@@ -459,7 +441,6 @@ def _build_sample_history(symbol: str, asset_class: str) -> list[Candle]:
         )
     return candles
 
-
 def _build_feature_parity_report() -> Mapping[str, object]:
     engineer = FeatureEngineer()
     stock_features = engineer.build(
@@ -529,7 +510,6 @@ def _build_feature_parity_report() -> Mapping[str, object]:
         "crypto_preview": {name: crypto_features[name] for name in all_features[:5]},
     }
 
-
 def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryRecord]:
     raw_folds = getattr(result, "folds", [])
     if not isinstance(raw_folds, list):
@@ -553,7 +533,6 @@ def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryReco
             }
         )
     return serialized
-
 
 def _register_training_result(
     *,
@@ -591,7 +570,6 @@ def _register_training_result(
     model_registry.register_model(record)
     return record
 
-
 async def _train_crypto_result() -> TrainResult:
     candles = await _load_training_candles("crypto")
     trainer = WalkForwardTrainer(TrainerConfig())
@@ -600,7 +578,6 @@ async def _train_crypto_result() -> TrainResult:
         "crypto",
         FeatureEngineer(),
     )
-
 
 async def _train_stock_result(
     *,
@@ -619,7 +596,6 @@ async def _train_stock_result(
         )
 
     return result, cast(TrainingDataset, dataset_obj)
-
 
 async def _run_registered_training_job(
     *,
@@ -684,7 +660,6 @@ async def _run_registered_training_job(
 
     return record, training_meta
 
-
 async def _run_training_job(
     job_id: str,
     asset_class: str,
@@ -694,7 +669,6 @@ async def _run_training_job(
         latest_job_id=job_id,
     )
 
-
 def _ensure_no_running_job() -> None:
     for job in load_jobs():
         if job.get("status") == "running":
@@ -703,14 +677,12 @@ def _ensure_no_running_job() -> None:
                 detail="another ML job is already running",
             )
 
-
 def _get_active_model_id(asset_class: str) -> str | None:
     model = model_registry.get_active_model(asset_class)
     if model is None:
         return None
     model_id = model.get("model_id")
     return model_id if isinstance(model_id, str) else None
-
 
 def _get_model_importance_rows(model: model_registry.ModelRecord) -> list[dict[str, object]]:
     raw_importances = model.get("feature_importances")
@@ -729,14 +701,12 @@ def _get_model_importance_rows(model: model_registry.ModelRecord) -> list[dict[s
     )
     return rows
 
-
 def _normalize_model_artifact_path(raw_path: str) -> Path:
     normalized = raw_path.replace("\\", "/")
     path = Path(normalized)
     if path.is_absolute():
         return path
     return Path.cwd() / path
-
 
 def _candidate_model_artifact_paths(model: model_registry.ModelRecord) -> list[Path]:
     raw_candidates: list[str] = []
@@ -778,7 +748,6 @@ def _candidate_model_artifact_paths(model: model_registry.ModelRecord) -> list[P
             candidates.append(variant)
     return candidates
 
-
 def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
     candidates = _candidate_model_artifact_paths(model)
     if not candidates:
@@ -787,7 +756,6 @@ def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
         if candidate.exists():
             return str(candidate)
     return str(candidates[0])
-
 
 def _iter_prediction_model_candidates(
     asset_class: str,
@@ -822,7 +790,6 @@ def _iter_prediction_model_candidates(
             [str(candidate) for candidate in _candidate_model_artifact_paths(model)],
         )
 
-
 def _prediction_action(
     asset_class: str,
     direction: str,
@@ -837,7 +804,6 @@ def _prediction_action(
         return "skip"
     return "signal"
 
-
 def _format_driver_value(feature: str, value: float) -> str:
     if feature.startswith("returns_") or feature in {"gap_open", "atr_pct_14"}:
         return f"{value * 100:+.1f}%"
@@ -846,7 +812,6 @@ def _format_driver_value(feature: str, value: float) -> str:
     if feature.startswith("news_sentiment"):
         return f"{value:+.2f}"
     return f"{value:+.2f}"
-
 
 def _select_top_driver(
     features: FeatureVector,
@@ -868,7 +833,6 @@ def _select_top_driver(
     feature_name = ranked[0][0]
     feature_value = features.get(feature_name, 0.0)
     return f"{feature_name} → {_format_driver_value(feature_name, feature_value)}"
-
 
 def _prediction_freshness(
     asset_class: str,
@@ -900,7 +864,6 @@ def _prediction_freshness(
         "is_stale": is_stale,
         "status": "stale" if is_stale else "fresh",
     }
-
 
 async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
     settings = get_settings()
@@ -985,7 +948,26 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
         raise HTTPException(status_code=500, detail="crypto catch-up job could not be finalized")
     return finished
 
+async def _ensure_crypto_ml_can_score() -> MlFreshnessResult:
+    """Block crypto scoring when the ML daily candle lane is stale or incomplete."""
 
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    async with session_factory() as session:
+        freshness = await evaluate_crypto_ml_freshness(session)
+
+    if freshness.can_score:
+        return freshness
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "reason": freshness.block_reason,
+            "message": "Predictions paused: ML data is stale or incomplete.",
+            **freshness.to_api_payload(),
+        },
+    )
 
 async def _build_asset_predictions(
     asset_class: str,
@@ -1107,7 +1089,6 @@ async def _build_asset_predictions(
     )
     return rows[:limit]
 
-
 @router.get("/predictions")
 async def get_predictions(
     limit: int = Query(default=50, ge=1, le=200),
@@ -1117,6 +1098,10 @@ async def get_predictions(
         raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
 
     assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
+    crypto_freshness: MlFreshnessResult | None = None
+    if "crypto" in assets:
+        crypto_freshness = await _ensure_crypto_ml_can_score()
+
     rows_by_asset: dict[str, list[dict[str, object]]] = {}
     for asset in assets:
         rows_by_asset[asset] = await _build_asset_predictions(asset, limit=limit)
@@ -1141,17 +1126,19 @@ async def get_predictions(
             "stock": _get_active_model_id("stock"),
         },
         "freshness_by_asset": {
-            asset: _prediction_freshness(asset, asset_rows)
+            asset: (
+                crypto_freshness.to_api_payload()
+                if asset == "crypto" and crypto_freshness is not None
+                else _prediction_freshness(asset, asset_rows)
+            )
             for asset, asset_rows in rows_by_asset.items()
         },
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
 
-
 @router.get("/jobs")
 def get_jobs() -> list[Mapping[str, object]]:
     return list(load_jobs())
-
 
 @router.get("/jobs/active")
 def get_active_job() -> Mapping[str, object]:
@@ -1160,14 +1147,12 @@ def get_active_job() -> Mapping[str, object]:
             return {"job": job}
     return {"job": None}
 
-
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str) -> Mapping[str, object]:
     job = job_store.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
-
 
 @router.get("/persistence")
 async def get_persistence() -> Mapping[str, object]:
@@ -1183,21 +1168,17 @@ async def get_persistence() -> Mapping[str, object]:
         "persisted_at": datetime.now(tz=UTC).isoformat(),
     }
 
-
 @router.get("/training/status")
 async def get_training_status() -> Mapping[str, object]:
     return await _build_training_status()
-
 
 @router.get("/features/contract")
 def get_feature_contract() -> Mapping[str, object]:
     return build_feature_contract_summary()
 
-
 @router.get("/features/parity")
 def get_feature_parity() -> Mapping[str, object]:
     return _build_feature_parity_report()
-
 
 @router.get("/crypto/universe")
 def get_crypto_universe() -> Mapping[str, object]:
@@ -1206,7 +1187,6 @@ def get_crypto_universe() -> Mapping[str, object]:
         "count": len(KRAKEN_UNIVERSE),
         "source_dir": str(Path("crypto-history")),
     }
-
 
 @router.get("/gainers")
 async def get_gainers(limit: int = Query(default=100, ge=1, le=100)) -> Mapping[str, object]:
@@ -1234,9 +1214,6 @@ async def get_gainers(limit: int = Query(default=100, ge=1, le=100)) -> Mapping[
         response["error"] = error
     return response
 
-
-
-
 @router.get("/stock/universe")
 def get_stock_universe() -> Mapping[str, object]:
     snapshot = _load_stock_universe_snapshot()
@@ -1245,7 +1222,6 @@ def get_stock_universe() -> Mapping[str, object]:
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
 
-
 @router.post("/backfill/stocks/sp500")
 async def backfill_sp500_stock_universe(
     target_candles: int = Query(default=STOCK_DAILY_CANDLE_TARGET, ge=500, le=2000),
@@ -1253,12 +1229,10 @@ async def backfill_sp500_stock_universe(
     _ensure_no_running_job()
     return await _backfill_stock_universe(target_candles=target_candles)
 
-
 @router.post("/backfill/crypto/daily-catchup")
 async def catch_up_crypto_daily() -> Mapping[str, object]:
     _ensure_no_running_job()
     return await _catch_up_crypto_daily_candles()
-
 
 @router.get("/models")
 def get_models(asset_class: str | None = Query(default=None)) -> Mapping[str, object]:
@@ -1275,14 +1249,12 @@ def get_models(asset_class: str | None = Query(default=None)) -> Mapping[str, ob
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
 
-
 @router.get("/models/{model_id}")
 def get_model(model_id: str) -> Mapping[str, object]:
     model = model_registry.get_model(model_id)
     if model is None:
         raise HTTPException(status_code=404, detail="model not found")
     return model
-
 
 @router.get("/models/{model_id}/importances")
 def get_model_importances(model_id: str) -> Mapping[str, object]:
@@ -1298,7 +1270,6 @@ def get_model_importances(model_id: str) -> Mapping[str, object]:
         "importances": sorted_rows,
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
-
 
 @router.post("/train/crypto")
 async def train_crypto() -> Mapping[str, object]:
@@ -1323,7 +1294,6 @@ async def train_crypto() -> Mapping[str, object]:
         "feature_count": record["feature_count"],
         "status": record["status"],
     }
-
 
 @router.post("/train/stock")
 async def train_stock(
@@ -1371,7 +1341,6 @@ async def train_stock(
         "fold_count": record["fold_count"],
         "status": record["status"],
     }
-
 
 @router.get("/health")
 async def ml_health() -> Mapping[str, str]:

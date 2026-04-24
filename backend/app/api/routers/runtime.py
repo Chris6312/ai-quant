@@ -4,20 +4,21 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Protocol, cast
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session
 from app.config.constants import (
-    ALPACA_DEFAULT_TIMEFRAME,
-    ML_CANDLE_USAGE,
     ML_DAILY_WORKER_ID,
     ML_DAILY_WORKER_SOURCE,
 )
 from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_watchlist_symbols
-from app.repositories.candles import CandleRepository
+from app.ml.freshness import (
+    classify_ml_freshness,
+    evaluate_crypto_ml_freshness,
+    ml_candle_date,
+)
 from app.repositories.watchlist import WatchlistRepository
 from app.services.crypto_runtime_targets import list_crypto_runtime_targets
 from app.workers.worker_health_service import WorkerHealthService
@@ -104,7 +105,6 @@ async def get_runtime_workers(
         },
     }
 
-
 def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
     """Return the current crypto universe, watchlist, and active runtime scope."""
 
@@ -139,7 +139,6 @@ def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
             else "no crypto candle scheduler attached yet"
         ),
     }
-
 
 async def _serialize_watchlist_targets(
     session: AsyncSession,
@@ -179,35 +178,7 @@ async def _serialize_watchlist_targets(
 async def _serialize_ml_freshness(session: AsyncSession) -> dict[str, Any]:
     """Return ML-lane candle freshness for the active crypto ML universe."""
 
-    symbols = list_crypto_watchlist_symbols()
-    latest_by_symbol = await CandleRepository(session).get_latest_candle_times(
-        symbols=symbols,
-        timeframe=ALPACA_DEFAULT_TIMEFRAME,
-        usage=ML_CANDLE_USAGE,
-    )
-    latest_values = [value for value in latest_by_symbol.values() if value is not None]
-    latest_candle_at = max(latest_values) if latest_values else None
-    latest_candle_date = _ml_candle_date(latest_candle_at)
-    stale_symbols = [symbol for symbol, value in latest_by_symbol.items() if value is None]
-    if latest_candle_date is not None:
-        stale_symbols.extend(
-            symbol
-            for symbol, value in latest_by_symbol.items()
-            if value is not None and _ml_candle_date(value) != latest_candle_date
-        )
-    freshness = _classify_ml_freshness(
-        latest_candle_at,
-        has_missing_or_stale_symbols=bool(stale_symbols),
-    )
-
-    return {
-        "freshness": freshness,
-        "latest_ml_candle_at": _serialize_datetime(latest_candle_at),
-        "latest_ml_candle_date": _serialize_date(latest_candle_at),
-        "tracked_symbol_count": len(symbols),
-        "symbols_with_ml_candles": len(latest_values),
-        "missing_or_stale_symbols": sorted(set(stale_symbols)),
-    }
+    return (await evaluate_crypto_ml_freshness(session)).to_api_payload()
 
 
 def _classify_ml_freshness(
@@ -216,37 +187,13 @@ def _classify_ml_freshness(
     has_missing_or_stale_symbols: bool = False,
     current_date: date | None = None,
 ) -> str:
-    """Classify daily ML data freshness by candle date, not heartbeat age.
+    """Backward-compatible wrapper around the shared ML freshness classifier."""
 
-    Alpaca daily candles are date-based bars that may be timestamped at midnight UTC.
-    Converting that timestamp into Eastern time can make today's daily bar look like
-    yesterday's bar. For ML-lane daily freshness, the stored candle date is the
-    source of truth.
-    """
-
-    if latest_candle_at is None:
-        return "missing"
-
-    latest_date = _ml_candle_date(latest_candle_at)
-    if latest_date is None:
-        return "missing"
-
-    eastern = ZoneInfo("America/New_York")
-    comparison_date = current_date if current_date is not None else datetime.now(tz=eastern).date()
-    age_days = (comparison_date - latest_date).days
-    if age_days <= 0:
-        return "stale" if has_missing_or_stale_symbols else "fresh"
-    if age_days == 1:
-        return "stale"
-    return "dead"
-
-
-def _ml_candle_date(value: datetime | None) -> date | None:
-    """Return the ML daily candle's stored date without timezone shifting."""
-
-    if value is None:
-        return None
-    return value.date()
+    return classify_ml_freshness(
+        latest_candle_at,
+        has_missing_or_stale_symbols=has_missing_or_stale_symbols,
+        current_date=current_date,
+    )
 
 
 def _serialize_ml_workers(
@@ -330,7 +277,7 @@ def _serialize_datetime(value: datetime | None) -> str | None:
 def _serialize_date(value: datetime | None) -> str | None:
     """Serialize an optional datetime as an ISO date."""
 
-    ml_date = _ml_candle_date(value)
+    ml_date = ml_candle_date(value)
     return ml_date.isoformat() if ml_date is not None else None
 
 
