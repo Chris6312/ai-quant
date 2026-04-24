@@ -134,8 +134,8 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="wl-table">
+    <div style={{ overflowX: 'hidden', minWidth: 0 }}>
+      <table className="wl-table" style={{ tableLayout: 'fixed', width: '100%' }}>
         <thead>
           <tr>
             <th>Symbol</th>
@@ -192,8 +192,8 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="wl-table">
+    <div style={{ overflowX: 'hidden', minWidth: 0 }}>
+      <table className="wl-table" style={{ tableLayout: 'fixed', width: '100%' }}>
         <thead>
           <tr>
             <th>Symbol</th>
@@ -257,8 +257,8 @@ function RuntimeEventTable({ events }: { events: RuntimeWorkerEvent[] }): React.
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="wl-table">
+    <div style={{ overflowX: 'hidden', minWidth: 0 }}>
+      <table className="wl-table" style={{ tableLayout: 'fixed', width: '100%' }}>
         <thead>
           <tr>
             <th>Worker</th>
@@ -270,12 +270,12 @@ function RuntimeEventTable({ events }: { events: RuntimeWorkerEvent[] }): React.
         <tbody>
           {events.map((event, index) => (
             <tr key={`${event.worker_id}:${event.recorded_at}:${index}`}>
-              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{event.worker_id}</td>
+              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={event.worker_id}>{event.worker_id}</td>
               <td>
                 <span style={pillStyle(toneForStatus(event.status))}>{event.status}</span>
               </td>
               <td>{fmtDateTime(event.recorded_at)}</td>
-              <td style={{ color: event.detail ? 'var(--text2)' : 'var(--text3)' }}>
+              <td style={{ color: event.detail ? 'var(--text2)' : 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={event.detail ?? '—'}>
                 {event.detail ?? '—'}
               </td>
             </tr>
@@ -330,7 +330,7 @@ const Runtime: React.FC = () => {
   const cryptoScope = runtime?.crypto_scope;
 
   return (
-    <div className="page active">
+    <div className="page active" style={{ maxWidth: 1500, width: '100%', margin: '0 auto', boxSizing: 'border-box', overflowX: 'hidden' }}>
       <div
         style={{
           display: 'flex',
@@ -450,13 +450,13 @@ const Runtime: React.FC = () => {
             sub: cryptoScope?.target_runtime_source ?? 'Derived target set',
           },
           {
-            label: 'Crypto active',
+            label: 'Crypto scheduler',
             value: cryptoScope?.active_runtime_count ?? '—',
             tone:
               (cryptoScope?.active_runtime_count ?? 0) > 0
                 ? ('green' as Tone)
                 : ('amber' as Tone),
-            sub: cryptoScope?.active_runtime_source ?? 'No crypto workers yet',
+            sub: cryptoScope?.active_runtime_source ?? 'No scheduler yet',
           },
         ].map((item) => (
           <div className="metric-tile" key={item.label}>
@@ -487,7 +487,7 @@ const Runtime: React.FC = () => {
         <div className="card-header">
           <span className="card-title">Crypto scope</span>
           <span style={pillStyle((cryptoScope?.active_runtime_count ?? 0) > 0 ? 'green' : 'amber')}>
-            {cryptoScope?.active_runtime_count ?? 0} / {cryptoScope?.target_runtime_count ?? 0} active
+            {cryptoScope?.active_runtime_count ?? 0} scheduler
           </span>
         </div>
         <div className="card-body" style={{ display: 'grid', gap: 10 }}>
@@ -527,8 +527,8 @@ const Runtime: React.FC = () => {
         </div>
       </div>
 
-      <div className="settings-grid" style={{ marginTop: 16 }}>
-        <div className="settings-col">
+      <div className="settings-grid" style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(300px, 0.8fr)', gap: 16, alignItems: 'start' }}>
+        <div className="settings-col" style={{ minWidth: 0 }}>
           <div className="card">
             <div className="card-header">
               <span className="card-title">Supervisor</span>
@@ -602,7 +602,7 @@ const Runtime: React.FC = () => {
           </div>
         </div>
 
-        <div className="settings-col">
+        <div className="settings-col" style={{ minWidth: 0 }}>
           <div className="card">
             <div className="card-header">
               <span className="card-title">Stock watchlist coverage</span>

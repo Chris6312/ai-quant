@@ -93,7 +93,7 @@ Derive worker launch specs from crypto scope.
 
 * [x] Build active crypto runtime target list from `KRAKEN_UNIVERSE`
 * [x] Make derivation explicit
-* [x] Ensure one `(symbol, timeframe)` per worker
+* [x] Derive one target per `(symbol, timeframe)` while Phase 5 runs one shared scheduler worker
 
 ### Frontend
 
@@ -112,15 +112,19 @@ Start crypto market-data heartbeat.
 
 * [x] Replace `_noop_sync_operation`
 * [x] Enable `WorkerSupervisor`
-* [~] Attach crypto scope heartbeat workers
-  → scope-derived workers attach now; real candle workers remain Phase 5
-* [ ] Start candle workers
+* [x] Replace per-symbol crypto heartbeat workers with one crypto candle scheduler
+* [x] Queue initial Kraken strategy backfill through Celery
+* [x] Queue incremental Kraken trading candle sync through Celery
+* [x] Keep 1D candles separated for ML-lane backfill
+* [~] Start candle workers
+  → one scheduler is active; Celery worker process must be running to execute queued Kraken tasks
 
 ### Validation
 
-* [ ] Candles persist
+* [~] Candles persist
+  → implemented through Celery task path; validate with running Celery + Redis
 * [ ] Redis `candle_closed` fires
-* [ ] Worker heartbeat visible
+* [x] Worker heartbeat visible
 
 ---
 

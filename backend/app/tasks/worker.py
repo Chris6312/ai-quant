@@ -23,13 +23,17 @@ except ImportError:
     def _log_warning(event: str, **context: object) -> None:
         _LOGGER.warning("%s %s", event, context)
 
+
 settings = get_settings()
 
 celery_app = Celery(
     APP_NAME,
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.worker"],
+    include=[
+        "app.tasks.worker",
+        "app.tasks.crypto_candles",
+    ],
 )
 
 celery_app.conf.task_track_started = True
@@ -52,9 +56,6 @@ def retrain_models_task(asset_class: str = "both") -> dict[str, object]:
         asset_class=asset_class,
         message="TODO: wire app.ml.trainer into the weekly retrain task",
     )
-    # TODO: import and call app.ml.trainer.WalkForwardTrainer
-    # TODO: compare validation Sharpe vs deployed model
-    # TODO: deploy a new model when validation improves or the run is forced
     return {
         "status": "stub",
         "asset_class": asset_class,
