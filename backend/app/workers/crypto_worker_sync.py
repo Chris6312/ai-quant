@@ -120,6 +120,16 @@ class CeleryCryptoCandleSchedulerWorker:
             sync_payload.name,
             kwargs=sync_payload.kwargs,
         )
+        timeframes_label = "/".join(due.timeframes)
+        self._registry.mark_candle_close(
+            self._key,
+            due.close_at,
+            recorded_at=now_utc,
+            detail=(
+                f"current candles dispatched for {timeframes_label} "
+                f"close {due.close_at.isoformat()}"
+            ),
+        )
 
         for timeframe in due.timeframes:
             close_id = latest_crypto_close_id(now_utc, timeframe)

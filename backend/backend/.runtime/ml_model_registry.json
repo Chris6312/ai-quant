@@ -1,8 +1,30 @@
 [
   {
-    "model_id": "stock-12563b0b-3d14-496b-87ea-235fe1e21ddd",
+    "model_id": "stock-70b61b24-fca3-4793-b623-50977136444d",
     "asset_class": "stock",
     "status": "active",
+    "artifact_path": "models/stock_fold_0.txt",
+    "trained_at": "2026-04-24T14:27:36.511699+00:00",
+    "fold_count": 0,
+    "best_fold": 0,
+    "validation_accuracy": 0.72,
+    "validation_sharpe": 1.5,
+    "train_samples": 200,
+    "test_samples": 40,
+    "feature_count": 1,
+    "confidence_threshold": 0.6,
+    "latest_job_id": "c2ea975c-40ac-43e5-a663-800f8881ed5c",
+    "feature_importances": {
+      "news_sentiment_7d": 4.0
+    },
+    "folds": [],
+    "created_at": "2026-04-24T14:27:36.511699+00:00",
+    "updated_at": "2026-04-24T14:27:36.511699+00:00"
+  },
+  {
+    "model_id": "stock-12563b0b-3d14-496b-87ea-235fe1e21ddd",
+    "asset_class": "stock",
+    "status": "retired",
     "artifact_path": "models/stock_fold_0.txt",
     "trained_at": "2026-04-24T13:14:18.048060+00:00",
     "fold_count": 0,
@@ -19,7 +41,7 @@
     },
     "folds": [],
     "created_at": "2026-04-24T13:14:18.048060+00:00",
-    "updated_at": "2026-04-24T13:14:18.048060+00:00"
+    "updated_at": "2026-04-24T14:27:36.511699+00:00"
   },
   {
     "model_id": "stock-5694ff30-6470-4d97-974f-dc2559aa7093",

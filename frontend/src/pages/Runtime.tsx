@@ -122,55 +122,125 @@ function toneForStatus(status: string): Tone {
   }
 }
 
+function formatWorkerPurpose(worker: RuntimeWorkerRecord): string {
+  const taskName = worker.task_name ?? '';
+  const workerKey = `${worker.worker_id} ${worker.source} ${taskName}`.toLowerCase();
+
+  if (workerKey.includes('ml_daily') || workerKey.includes('ml daily')) {
+    return 'Crypto ML Daily Fill';
+  }
+  if (workerKey.includes('initial_backfill') || workerKey.includes('backfill')) {
+    return 'Crypto Initial Backfill';
+  }
+  if (worker.asset_class.toLowerCase() === 'crypto') {
+    return 'Crypto Current Candles';
+  }
+  return 'Current Candles';
+}
+
+function formatWorkerTask(worker: RuntimeWorkerRecord): string {
+  const taskName = worker.task_name ?? '';
+
+  if (taskName.includes('ml_daily_backfill')) {
+    return 'ML fill';
+  }
+  if (taskName.includes('initial_backfill')) {
+    return 'backfill';
+  }
+  if (taskName.includes('sync_closed_candles')) {
+    return 'current candles';
+  }
+  if (worker.asset_class.toLowerCase() === 'crypto') {
+    return 'current candles';
+  }
+  return taskName || '—';
+}
+
+function formatWorkerSource(worker: RuntimeWorkerRecord): string {
+  const source = worker.source.trim();
+  if (source.length === 0) {
+    return '—';
+  }
+  return source
+    .split(/[_\s-]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
 function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): React.ReactElement {
   if (workers.length === 0) {
     return (
       <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-        No managed workers are currently registered. This usually means the supervisor is disabled,
-        watchlist-driven workers have not been attached yet, or the runtime has not launched any
-        candle worker tasks in this process.
+        No managed workers are currently registered. For the crypto-first lane, this should show the
+        crypto current-candle scheduler once the supervisor and Celery runtime are active.
       </div>
     );
   }
 
   return (
-    <div style={{ overflowX: 'hidden', minWidth: 0 }}>
-      <table className="wl-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+    <div style={{ overflowX: 'auto', minWidth: 0 }}>
+      <table className="wl-table" style={{ minWidth: 980, tableLayout: 'auto', width: '100%' }}>
         <thead>
           <tr>
-            <th>Symbol</th>
-            <th>Asset</th>
-            <th>Timeframe</th>
-            <th>Source</th>
-            <th>Status</th>
-            <th>Health</th>
-            <th>Heartbeat</th>
-            <th>Age</th>
-            <th>Candle close</th>
-            <th>Task</th>
+            <th style={{ width: '18%' }}>Worker</th>
+            <th style={{ width: '15%' }}>Purpose</th>
+            <th style={{ width: '8%' }}>Asset</th>
+            <th style={{ width: '10%' }}>Timeframes</th>
+            <th style={{ width: '9%' }}>Status</th>
+            <th style={{ width: '9%' }}>Health</th>
+            <th style={{ width: '11%' }}>Heartbeat</th>
+            <th style={{ width: '11%' }}>Candle close</th>
+            <th style={{ width: '10%' }}>Task</th>
             <th>Last error</th>
           </tr>
         </thead>
         <tbody>
           {workers.map((worker) => (
             <tr key={worker.worker_id}>
-              <td style={{ fontWeight: 500 }}>{worker.symbol}</td>
+              <td>
+                <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600 }}>{formatWorkerPurpose(worker)}</span>
+                  <span
+                    style={{
+                      color: 'var(--text3)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 9,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={worker.worker_id}
+                  >
+                    {worker.worker_id}
+                  </span>
+                </div>
+              </td>
+              <td>{formatWorkerSource(worker)}</td>
               <td>{worker.asset_class}</td>
               <td>{worker.timeframe}</td>
-              <td>{worker.source}</td>
               <td>
                 <span style={pillStyle(toneForStatus(worker.status))}>{worker.status}</span>
               </td>
               <td>
                 <span style={pillStyle(toneForHealth(worker.health))}>{worker.health}</span>
               </td>
-              <td>{fmtDateTime(worker.last_heartbeat_at)}</td>
-              <td>{fmtAge(worker.heartbeat_age_s)}</td>
-              <td>{fmtDateTime(worker.last_candle_close_at)}</td>
-              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>
-                {worker.task_name ?? '—'}
+              <td>
+                <div style={{ display: 'grid', gap: 3 }}>
+                  <span>{fmtDateTime(worker.last_heartbeat_at)}</span>
+                  <span style={{ color: 'var(--text3)', fontSize: 10 }}>age {fmtAge(worker.heartbeat_age_s)}</span>
+                </div>
               </td>
-              <td style={{ color: worker.last_error ? 'var(--red)' : 'var(--text3)' }}>
+              <td>{fmtDateTime(worker.last_candle_close_at)}</td>
+              <td>{formatWorkerTask(worker)}</td>
+              <td
+                style={{
+                  color: worker.last_error ? 'var(--red)' : 'var(--text3)',
+                  maxWidth: 280,
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                }}
+              >
                 {worker.last_error ?? '—'}
               </td>
             </tr>
@@ -257,8 +327,8 @@ function RuntimeEventTable({ events }: { events: RuntimeWorkerEvent[] }): React.
   }
 
   return (
-    <div style={{ overflowX: 'hidden', minWidth: 0 }}>
-      <table className="wl-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+    <div style={{ overflowX: 'auto', minWidth: 0 }}>
+      <table className="wl-table" style={{ minWidth: 760, tableLayout: 'auto', width: '100%' }}>
         <thead>
           <tr>
             <th>Worker</th>
@@ -527,108 +597,109 @@ const Runtime: React.FC = () => {
         </div>
       </div>
 
-      <div className="settings-grid" style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(300px, 0.8fr)', gap: 16, alignItems: 'start' }}>
-        <div className="settings-col" style={{ minWidth: 0 }}>
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Supervisor</span>
-              <span
-                style={pillStyle(
-                  supervisor?.running ? 'green' : supervisor?.enabled ? 'amber' : 'muted',
-                )}
+      <div className="settings-grid" style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr', gap: 16, alignItems: 'start' }}>
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Supervisor</span>
+            <span
+              style={pillStyle(
+                supervisor?.running ? 'green' : supervisor?.enabled ? 'amber' : 'muted',
+              )}
+            >
+              {loading
+                ? 'Loading'
+                : supervisor?.running
+                  ? 'Running'
+                  : supervisor?.enabled
+                    ? 'Idle'
+                    : 'Disabled'}
+            </span>
+          </div>
+          <div className="card-body" style={{ display: 'grid', gap: 10 }}>
+            {[
+              ['Name', supervisor?.name ?? '—'],
+              ['Enabled', supervisor ? (supervisor.enabled ? 'Yes' : 'No') : '—'],
+              ['Interval', supervisor ? `${supervisor.interval_seconds}s` : '—'],
+              ['Iterations', supervisor?.iteration_count ?? '—'],
+              ['Last started', fmtDateTime(supervisor?.last_started_at ?? null)],
+              ['Last finished', fmtDateTime(supervisor?.last_finished_at ?? null)],
+              ['Last success', fmtDateTime(supervisor?.last_success_at ?? null)],
+              ['Last error', supervisor?.last_error ?? '—'],
+              [
+                'Last result',
+                supervisor?.last_result
+                  ? `start ${supervisor.last_result.started} · stop ${supervisor.last_result.stopped} · unchanged ${supervisor.last_result.unchanged}`
+                  : '—',
+              ],
+            ].map(([label, value]) => (
+              <div
+                key={String(label)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  paddingBottom: 8,
+                  borderBottom: '0.5px solid var(--border)',
+                  fontSize: 11,
+                }}
               >
-                {loading
-                  ? 'Loading'
-                  : supervisor?.running
-                    ? 'Running'
-                    : supervisor?.enabled
-                      ? 'Idle'
-                      : 'Disabled'}
-              </span>
-            </div>
-            <div className="card-body" style={{ display: 'grid', gap: 10 }}>
-              {[
-                ['Name', supervisor?.name ?? '—'],
-                ['Enabled', supervisor ? (supervisor.enabled ? 'Yes' : 'No') : '—'],
-                ['Interval', supervisor ? `${supervisor.interval_seconds}s` : '—'],
-                ['Iterations', supervisor?.iteration_count ?? '—'],
-                ['Last started', fmtDateTime(supervisor?.last_started_at ?? null)],
-                ['Last finished', fmtDateTime(supervisor?.last_finished_at ?? null)],
-                ['Last success', fmtDateTime(supervisor?.last_success_at ?? null)],
-                ['Last error', supervisor?.last_error ?? '—'],
-                [
-                  'Last result',
-                  supervisor?.last_result
-                    ? `start ${supervisor.last_result.started} · stop ${supervisor.last_result.stopped} · unchanged ${supervisor.last_result.unchanged}`
-                    : '—',
-                ],
-              ].map(([label, value]) => (
-                <div
-                  key={String(label)}
+                <span style={{ color: 'var(--text3)' }}>{label}</span>
+                <span
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    paddingBottom: 8,
-                    borderBottom: '0.5px solid var(--border)',
-                    fontSize: 11,
+                    color: label === 'Last error' && value !== '—' ? 'var(--red)' : 'var(--text)',
+                    textAlign: 'right',
+                    maxWidth: '65%',
                   }}
                 >
-                  <span style={{ color: 'var(--text3)' }}>{label}</span>
-                  <span
-                    style={{
-                      color: label === 'Last error' && value !== '—' ? 'var(--red)' : 'var(--text)',
-                      textAlign: 'right',
-                      maxWidth: '65%',
-                    }}
-                  >
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="card-header">
-              <span className="card-title">Managed workers</span>
-              <span style={pillStyle((summary?.total_workers ?? 0) > 0 ? 'green' : 'muted')}>
-                {summary?.total_workers ?? 0} registered
-              </span>
-            </div>
-            <div className="card-body">
-              <RuntimeWorkerTable workers={runtime?.workers ?? []} />
-            </div>
+                  {value}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="settings-col" style={{ minWidth: 0 }}>
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Stock watchlist coverage</span>
-              <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
-                {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} attached
-              </span>
-            </div>
-            <div className="card-body" style={{ display: 'grid', gap: 10 }}>
-              <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-                {coverage?.scope_note ??
-                  'The stock watchlist is tracked separately from crypto scope so attachment gaps stay visible.'}
-              </div>
-              <RuntimeTargetTable targets={watchlistTargets} />
-            </div>
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Managed workers</span>
+            <span style={pillStyle((summary?.total_workers ?? 0) > 0 ? 'green' : 'muted')}>
+              {summary?.total_workers ?? 0} registered
+            </span>
           </div>
+          <div className="card-body" style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
+              Crypto Phase 5 currently uses one registered scheduler worker for trading-lane candle
+              sync. ML daily candle sync is intentionally deferred to Phase 8 and should not appear as
+              a live worker yet.
+            </div>
+            <RuntimeWorkerTable workers={runtime?.workers ?? []} />
+          </div>
+        </div>
 
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="card-header">
-              <span className="card-title">Recent lifecycle events</span>
-              <span style={pillStyle((runtime?.recent_events.length ?? 0) > 0 ? 'blue' : 'muted')}>
-                {runtime?.recent_events.length ?? 0} shown
-              </span>
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Recent lifecycle events</span>
+            <span style={pillStyle((runtime?.recent_events.length ?? 0) > 0 ? 'blue' : 'muted')}>
+              {runtime?.recent_events.length ?? 0} shown
+            </span>
+          </div>
+          <div className="card-body">
+            <RuntimeEventTable events={runtime?.recent_events ?? []} />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Stock watchlist coverage</span>
+            <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
+              {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} attached
+            </span>
+          </div>
+          <div className="card-body" style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
+              {coverage?.scope_note ??
+                'The stock watchlist is tracked separately from crypto scope so attachment gaps stay visible.'}
             </div>
-            <div className="card-body">
-              <RuntimeEventTable events={runtime?.recent_events ?? []} />
-            </div>
+            <RuntimeTargetTable targets={watchlistTargets} />
           </div>
         </div>
       </div>

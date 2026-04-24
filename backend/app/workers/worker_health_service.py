@@ -37,7 +37,10 @@ class WorkerHealthService:
         """Return a summarized runtime view for managed workers."""
 
         workers = self._registry.list_snapshots()
-        recent_events = self._registry.list_events()[-event_limit:]
+        visible_events = [
+            event for event in self._registry.list_events() if event.detail != "heartbeat"
+        ]
+        recent_events = visible_events[-event_limit:] if event_limit > 0 else []
         healthy_workers = 0
         stale_workers = 0
         inactive_workers = 0

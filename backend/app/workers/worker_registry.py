@@ -119,6 +119,7 @@ class WorkerRegistry:
         candle_close_at: datetime,
         *,
         recorded_at: datetime | None = None,
+        detail: str | None = None,
     ) -> WorkerSnapshot:
         """Update the latest observed candle close time for the worker."""
 
@@ -131,6 +132,12 @@ class WorkerRegistry:
             last_candle_close_at=candle_close_at,
         )
         entry.snapshot = snapshot
+        self._record_event(
+            key.id,
+            WorkerStatus.RUNNING,
+            now,
+            detail=detail or f"candle close {candle_close_at.isoformat()}",
+        )
         return snapshot
 
     def mark_stopping(

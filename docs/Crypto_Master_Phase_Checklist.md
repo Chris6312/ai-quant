@@ -117,15 +117,29 @@ Start crypto market-data heartbeat.
 * [x] Queue incremental Kraken trading candle sync through Celery
 * [x] Schedule incremental sync only 20 seconds after each candle close
 * [x] Keep 1D candles separated for ML-lane backfill
-* [~] Start candle workers
-  → one scheduler is active; Celery worker process must be running to execute queued Kraken tasks
+* [x] Start candle workers
+  → one crypto scheduler worker is active and Celery executes queued Kraken tasks
+* [x] Confirm scheduler dispatches only due timeframes
+  → live runtime showed 5m + 15m during missed-window recovery and 5m-only at the next 5m close
+* [x] Align Celery task contract with scheduler metadata
+  → `requested_at` and `candle_close_at` are accepted by the sync task
+
+### Frontend
+
+* [x] Show crypto scheduler worker without symbol/table overflow noise
+* [x] Show last candle close as a first-class runtime column
+* [x] Move recent lifecycle events below managed workers at full page width
+* [x] Keep ML daily worker visibility out of Phase 5 because that worker is deferred to Phase 8
 
 ### Validation
 
-* [~] Candles persist
-  → implemented through Celery task path; validate with running Celery + Redis
+* [x] Candles persist
+  → validated through running Celery + Kraken runtime sync path
 * [ ] Redis `candle_closed` fires
+  → still requires explicit pub/sub validation after persistence
 * [x] Worker heartbeat visible
+* [x] Static and unit test gates passed
+  → `ruff check app tests`, `python -m mypy app`, and `pytest -q tests` passed with 96 tests
 
 ---
 
@@ -175,14 +189,18 @@ Store truth instead of rebuilding it.
 
 ---
 
-# Phase 8 — Crypto ML API Replacement
+# Phase 8 — Crypto ML API Replacement + ML Daily Candle Worker
 
 ## Goal
 
-ML page uses real data.
+ML page uses real data and daily ML candles are synced by a dedicated ML-lane worker.
 
 ### Backend
 
+* [ ] Implement ML daily candle sync worker
+  → daily 1D candles, `usage="ml"`, separate from trading-lane candle scheduler
+* [ ] Add ML daily worker runtime visibility
+* [ ] Keep ML daily sync isolated from crypto current-candle trading tasks
 * [ ] Replace `/ml/predictions`
 * [ ] Add `/ml/predictions/{id}/shap`
 * [ ] Use persisted data
