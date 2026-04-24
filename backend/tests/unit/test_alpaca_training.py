@@ -50,15 +50,18 @@ class _FakeRepository:
     def __init__(self) -> None:
         self.rows: list[object] = []
         self.latest_times: dict[str, datetime | None] = {"AAPL": None, "MSFT": None}
+        self.latest_usage: str | None = None
 
     async def get_latest_candle_times(
         self,
         symbols: list[str],
         timeframe: str,
         source: str | None = None,
+        usage: str | None = None,
     ) -> dict[str, datetime | None]:
         """Return latest candle timestamps for a batch."""
 
+        self.latest_usage = usage
         return {symbol: self.latest_times.get(symbol) for symbol in symbols}
 
     async def bulk_upsert(self, rows: list[object]) -> None:
@@ -137,6 +140,7 @@ async def test_sync_universe_persists_new_rows() -> None:
     assert len(repository.rows) == 2
     assert all(row.source == "alpaca_training" for row in repository.rows)
     assert all(row.usage == ML_CANDLE_USAGE for row in repository.rows)
+    assert repository.latest_usage == ML_CANDLE_USAGE
 
 
 

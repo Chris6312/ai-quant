@@ -248,6 +248,7 @@ class AlpacaTrainingFetcher:
                 symbols,
                 timeframe,
                 source=ALPACA_DEFAULT_SOURCE,
+                usage=ML_CANDLE_USAGE,
             )
             start = self._calculate_start(symbols, latest_times)
             end = datetime.now(UTC)

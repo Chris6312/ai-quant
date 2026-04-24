@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,12 +26,16 @@ class CandleRepository(BaseRepository):
         symbol: str,
         timeframe: str,
         source: str | None = None,
+        usage: str | None = None,
     ) -> datetime | None:
-        """Return the latest stored candle time for a symbol and timeframe."""
+        """Return the latest stored candle time for a symbol, timeframe, and lane."""
 
         conditions = [CandleRow.symbol == symbol, CandleRow.timeframe == timeframe]
         if source is not None:
             conditions.append(CandleRow.source == source)
+        if usage is not None:
+            self._validate_usage(usage)
+            conditions.append(CandleRow.usage == usage)
 
         statement = select(func.max(CandleRow.time)).where(*conditions)
         result = await self.execute(statement)
@@ -42,14 +46,18 @@ class CandleRepository(BaseRepository):
         symbols: Sequence[str],
         timeframe: str,
         source: str | None = None,
+        usage: str | None = None,
     ) -> dict[str, datetime | None]:
-        """Return the latest candle time per symbol for a timeframe."""
+        """Return latest candle time per symbol for a timeframe and optional lane."""
 
         if not symbols:
             return {}
         conditions = [CandleRow.symbol.in_(symbols), CandleRow.timeframe == timeframe]
         if source is not None:
             conditions.append(CandleRow.source == source)
+        if usage is not None:
+            self._validate_usage(usage)
+            conditions.append(CandleRow.usage == usage)
         statement = (
             select(CandleRow.symbol, func.max(CandleRow.time))
             .where(*conditions)
@@ -64,21 +72,29 @@ class CandleRepository(BaseRepository):
     async def bulk_upsert(self, rows: Sequence[CandleRow]) -> None:
         """Upsert candles one row at a time for the initial scaffold."""
 
-        valid_usages = {ML_CANDLE_USAGE, TRADING_CANDLE_USAGE}
         for row in rows:
-            if row.usage not in valid_usages:
-                raise ValueError(
-                    f"candle usage must be one of {sorted(valid_usages)}; got {row.usage!r}"
-                )
+            if row.usage is None:
+                raise ValueError("candle usage must be explicit; got None")
+            self._validate_usage(row.usage)
             await self.session.merge(row)
         await self.session.commit()
 
-    async def list_recent(self, symbol: str, timeframe: str, limit: int = 100) -> list[CandleRow]:
-        """Return the most recent candles for a symbol and timeframe."""
+    async def list_recent(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 100,
+        usage: str | None = TRADING_CANDLE_USAGE,
+    ) -> list[CandleRow]:
+        """Return the most recent candles for a symbol, timeframe, and lane."""
 
+        conditions = [CandleRow.symbol == symbol, CandleRow.timeframe == timeframe]
+        if usage is not None:
+            self._validate_usage(usage)
+            conditions.append(CandleRow.usage == usage)
         statement = (
             select(CandleRow)
-            .where(and_(CandleRow.symbol == symbol, CandleRow.timeframe == timeframe))
+            .where(*conditions)
             .order_by(CandleRow.time.desc())
             .limit(limit)
         )
@@ -92,3 +108,12 @@ class CandleRepository(BaseRepository):
         await self.session.commit()
         cursor_result = cast(CursorResult[object], result)
         return int(cursor_result.rowcount or 0)
+
+    def _validate_usage(self, usage: str) -> None:
+        """Validate a candle usage lane."""
+
+        valid_usages = {ML_CANDLE_USAGE, TRADING_CANDLE_USAGE}
+        if usage not in valid_usages:
+            raise ValueError(
+                f"candle usage must be one of {sorted(valid_usages)}; got {usage!r}"
+            )

@@ -157,9 +157,9 @@ Make ML candle data a first-class, correctly sourced, consistently fresh lane wi
 * [x] Keep trading candle tasks on the default queue
 * [x] Sync crypto 1D ML candles through Alpaca training fetcher
 * [x] Persist ML sync rows with `usage="ml"`
-* [ ] Verify current candle schema usage separation: trading vs ml
+* [x] Verify current candle schema usage separation: trading vs ml
 * [ ] Confirm existing candles are migrated or tagged correctly
-* [ ] Ensure ML reads the intended candle lane
+* [x] Ensure ML reads the intended candle lane
 * [ ] Confirm crypto ML data is fresh enough for scoring
 
 ### Frontend

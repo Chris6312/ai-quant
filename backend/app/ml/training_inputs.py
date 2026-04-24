@@ -11,7 +11,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.constants import ALPACA_DEFAULT_SOURCE
+from app.config.constants import ALPACA_DEFAULT_SOURCE, ML_CANDLE_USAGE
 from app.db.models import (
     CandleRow,
     CongressTradeRow,
@@ -69,6 +69,7 @@ class StockTrainingInputAssembler:
             .where(CandleRow.asset_class == "stock")
             .where(CandleRow.source == ALPACA_DEFAULT_SOURCE)
             .where(CandleRow.timeframe == timeframe)
+            .where(CandleRow.usage == ML_CANDLE_USAGE)
             .order_by(CandleRow.symbol.asc(), CandleRow.time.asc())
         )
         if symbols is not None:

@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import get_candle_repository
+from app.config.constants import TRADING_CANDLE_USAGE
 from app.db.models import CandleRow
 from app.repositories.candles import CandleRepository
 
@@ -51,16 +52,23 @@ KRAKEN_TICKER_PAIR_MAP: dict[str, str] = {
     "FIL/USD": "FILUSD",
 }
 
+
 @router.get("")
 async def list_candles(
     symbol: Annotated[str, Query(min_length=1)],
     timeframe: Annotated[str, Query(min_length=1)],
     repository: Annotated[CandleRepository, Depends(get_candle_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    usage: Annotated[str, Query(pattern="^(trading|ml)$")] = TRADING_CANDLE_USAGE,
 ) -> list[dict[str, object]]:
-    """Return recent candles for a symbol and timeframe."""
+    """Return recent candles for a symbol, timeframe, and candle lane."""
 
-    rows = await repository.list_recent(symbol=symbol, timeframe=timeframe, limit=limit)
+    rows = await repository.list_recent(
+        symbol=symbol,
+        timeframe=timeframe,
+        limit=limit,
+        usage=usage,
+    )
     return [_serialize_candle(row) for row in rows]
 
 
@@ -192,4 +200,5 @@ def _serialize_candle(row: CandleRow) -> dict[str, object]:
         "close": float(row.close) if row.close is not None else None,
         "volume": float(row.volume) if row.volume is not None else None,
         "source": row.source,
+        "usage": row.usage,
     }
