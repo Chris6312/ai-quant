@@ -13,7 +13,12 @@ from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_wa
 from app.repositories.watchlist import WatchlistRepository
 from app.services.crypto_runtime_targets import list_crypto_runtime_targets
 from app.workers.worker_health_service import WorkerHealthService
-from app.workers.worker_runtime_state import WorkerKey, WorkerLifecycleEvent, WorkerSnapshot
+from app.workers.worker_runtime_state import (
+    WorkerKey,
+    WorkerLifecycleEvent,
+    WorkerSnapshot,
+    WorkerStatus,
+)
 from app.workers.worker_supervisor import WorkerSupervisor
 
 router = APIRouter(prefix="/runtime", tags=["runtime"])
@@ -97,7 +102,12 @@ def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
     watchlist_symbols = list_crypto_watchlist_symbols()
     crypto_targets = list_crypto_runtime_targets()
     active_runtime_symbols = sorted(
-        {worker.key.symbol for worker in workers if worker.key.asset_class == "crypto"}
+        {
+            worker.key.symbol
+            for worker in workers
+            if worker.key.asset_class == "crypto"
+            and worker.status in {WorkerStatus.STARTING, WorkerStatus.RUNNING}
+        }
     )
     return {
         "universe_symbols": universe_symbols,

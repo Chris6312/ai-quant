@@ -22,8 +22,9 @@ from app.api.routers.watchlist import router as watchlist_router
 from app.config.constants import APP_NAME, APP_VERSION
 from app.config.settings import get_settings
 from app.core.logging import configure_logging
+from app.workers.crypto_worker_sync import CryptoWorkerSynchronizer
 from app.workers.worker_health_service import WorkerHealthService
-from app.workers.worker_lifecycle import WorkerSyncResult
+from app.workers.worker_lifecycle import WorkerLifecycleManager
 from app.workers.worker_registry import WorkerRegistry
 from app.workers.worker_supervisor import WorkerSupervisor
 
@@ -53,6 +54,7 @@ class _AppStateProtocol(Protocol):
     """Typed view of app.state for worker runtime services."""
 
     worker_registry: WorkerRegistry
+    worker_lifecycle_manager: WorkerLifecycleManager
     worker_health_service: WorkerHealthService
     worker_supervisor: WorkerSupervisor
     settings: Any
@@ -71,12 +73,6 @@ def _load_instrumentator() -> type[Any]:
         return _NoOpInstrumentator
 
 
-async def _noop_sync_operation() -> WorkerSyncResult:
-    """Fallback sync operation until the live supervisor wiring is attached."""
-
-    return WorkerSyncResult(started=0, stopped=0, unchanged=0)
-
-
 InstrumentatorClass = _load_instrumentator()
 
 
@@ -89,16 +85,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     state = cast(_AppStateProtocol, app.state)
     state.worker_registry = WorkerRegistry()
+    state.worker_lifecycle_manager = WorkerLifecycleManager(state.worker_registry)
     state.worker_health_service = WorkerHealthService(state.worker_registry)
+
+    crypto_synchronizer = CryptoWorkerSynchronizer(
+        lifecycle_manager=state.worker_lifecycle_manager,
+        registry=state.worker_registry,
+    )
     state.worker_supervisor = WorkerSupervisor(
-        name="watchlist-worker-sync",
+        name="crypto-worker-sync",
         interval_seconds=30,
-        sync_operation=_noop_sync_operation,
-        enabled=False,
+        sync_operation=crypto_synchronizer.sync_crypto_targets,
+        enabled=True,
     )
     state.settings = settings
-    yield
 
+    await state.worker_supervisor.run_once()
+    await state.worker_supervisor.start()
+    try:
+        yield
+    finally:
+        await state.worker_supervisor.stop()
+        await state.worker_lifecycle_manager.shutdown_all()
 
 
 def create_app() -> FastAPI:

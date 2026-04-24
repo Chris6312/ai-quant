@@ -93,7 +93,7 @@ Derive worker launch specs from crypto scope.
 
 * [x] Build active crypto runtime target list from `KRAKEN_UNIVERSE`
 * [x] Make derivation explicit
-* [ ] Ensure one `(symbol, timeframe)` per worker
+* [x] Ensure one `(symbol, timeframe)` per worker
 
 ### Frontend
 
@@ -110,9 +110,10 @@ Start crypto market-data heartbeat.
 
 ### Backend
 
-* [ ] Replace `_noop_sync_operation`
-* [ ] Enable `WorkerSupervisor`
-* [ ] Attach real crypto workers
+* [x] Replace `_noop_sync_operation`
+* [x] Enable `WorkerSupervisor`
+* [~] Attach crypto scope heartbeat workers
+  → scope-derived workers attach now; real candle workers remain Phase 5
 * [ ] Start candle workers
 
 ### Validation

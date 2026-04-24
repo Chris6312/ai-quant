@@ -1,4 +1,4 @@
-"""Helpers for deriving crypto runtime worker targets from backend truth."""
+"""Crypto runtime target derivation."""
 
 from __future__ import annotations
 
@@ -7,34 +7,35 @@ from dataclasses import dataclass
 from app.config.crypto_scope import list_crypto_watchlist_symbols
 from app.workers.worker_runtime_state import WorkerKey
 
-CRYPTO_RUNTIME_TIMEFRAME = "1Day"
 CRYPTO_TARGET_SOURCE = "crypto scope target derivation"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class CryptoRuntimeTarget:
-    """One derived crypto runtime target."""
-
     key: WorkerKey
-    source: str = CRYPTO_TARGET_SOURCE
 
 
 def list_crypto_runtime_targets() -> list[CryptoRuntimeTarget]:
-    """Return the desired crypto runtime targets for the current phase.
+    """Return derived crypto runtime targets.
 
-    For the crypto-first rollout, the crypto watchlist mirrors the canonical
-    universe. Runtime target derivation is explicit and deterministic so the UI
-    can distinguish universe size from intended worker targets and attached
-    worker state.
+    Phase 3/4 rule:
+    crypto universe == crypto watchlist == runtime targets
     """
+
+    symbols = list_crypto_watchlist_symbols()
 
     return [
         CryptoRuntimeTarget(
             key=WorkerKey(
                 symbol=symbol,
                 asset_class="crypto",
-                timeframe=CRYPTO_RUNTIME_TIMEFRAME,
+                timeframe="1Day",
             )
         )
-        for symbol in list_crypto_watchlist_symbols()
+        for symbol in symbols
     ]
+
+
+def list_crypto_runtime_target_symbols() -> list[str]:
+    """Convenience helper for symbol-only access."""
+    return [target.key.symbol for target in list_crypto_runtime_targets()]
