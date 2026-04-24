@@ -45,16 +45,16 @@ Make crypto symbol scope visible and usable across the app.
 
 ### Backend
 
-* [ ] Add endpoint(s) exposing crypto universe / active set
+* [x] Add endpoint(s) exposing crypto universe / active set
 * [ ] Add crypto watchlist/promoted layer (optional, likely skip for Phase 1)
-* [ ] Ensure runtime target derivation uses crypto scope
+* [x] Ensure runtime target derivation uses crypto scope
 
 ### Frontend
 
-* [ ] Research page shows crypto symbols from backend
-* [ ] Avoid empty page when stock watchlist is empty
-* [ ] Runtime page shows crypto scope counts
-* [ ] Runtime page shows active crypto targets
+* [x] Research page shows crypto symbols from backend
+* [x] Avoid empty page when stock watchlist is empty
+* [x] Runtime page shows crypto scope counts
+* [x] Runtime page shows active crypto targets
 * [ ] ML page clarifies crypto-first behavior
 
 ---
@@ -91,13 +91,14 @@ Derive worker launch specs from crypto scope.
 
 ### Backend
 
-* [ ] Build active crypto runtime target list from `KRAKEN_UNIVERSE`
-* [ ] Make derivation explicit
+* [x] Build active crypto runtime target list from `KRAKEN_UNIVERSE`
+* [x] Make derivation explicit
 * [ ] Ensure one `(symbol, timeframe)` per worker
 
 ### Frontend
 
-* [ ] Show universe vs active runtime count
+* [x] Show universe vs active runtime count
+* [x] Show universe vs target runtime vs active runtime count
 
 ---
 

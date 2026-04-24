@@ -219,14 +219,18 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
               </td>
               <td>
                 {target.worker_status ? (
-                  <span style={pillStyle(toneForStatus(target.worker_status))}>{target.worker_status}</span>
+                  <span style={pillStyle(toneForStatus(target.worker_status))}>
+                    {target.worker_status}
+                  </span>
                 ) : (
                   '—'
                 )}
               </td>
               <td>
                 {target.worker_health ? (
-                  <span style={pillStyle(toneForHealth(target.worker_health))}>{target.worker_health}</span>
+                  <span style={pillStyle(toneForHealth(target.worker_health))}>
+                    {target.worker_health}
+                  </span>
                 ) : (
                   '—'
                 )}
@@ -402,19 +406,58 @@ const Runtime: React.FC = () => {
           }}
         >
           {supervisor?.enabled
-            ? 'Supervisor is enabled. Stock coverage and crypto scope are now split cleanly below so the UI does not blur research watchlists with crypto runtime truth.'
-            : 'Supervisor is currently disabled. The stock coverage table still shows missing stock attachments, while the crypto scope card shows the backend-truth universe and currently attached crypto workers.'}
+            ? 'Supervisor is enabled. Stock coverage and crypto scope are split cleanly below so the UI does not blur research watchlists, intended crypto targets, and attached runtime workers.'
+            : 'Supervisor is currently disabled. The stock coverage table still shows missing stock attachments, while the crypto scope card now separates backend universe truth, derived crypto targets, and attached crypto workers.'}
         </div>
       )}
 
       <div className="metrics-row" style={{ marginTop: 14 }}>
         {[
-          { label: 'Total workers', value: summary?.total_workers ?? '—', tone: 'muted' as Tone, sub: 'Registry snapshot' },
-          { label: 'Healthy', value: summary?.healthy_workers ?? '—', tone: 'green' as Tone, sub: 'Fresh heartbeats' },
-          { label: 'Stale', value: summary?.stale_workers ?? '—', tone: 'amber' as Tone, sub: 'Needs attention' },
-          { label: 'Stock targets', value: coverage?.watchlist_targets ?? '—', tone: 'blue' as Tone, sub: 'Active stock watchlist symbols' },
-          { label: 'Crypto universe', value: cryptoScope?.universe_count ?? '—', tone: 'blue' as Tone, sub: cryptoScope?.universe_source ?? 'Backend truth' },
-          { label: 'Crypto active', value: cryptoScope?.active_runtime_count ?? '—', tone: (cryptoScope?.active_runtime_count ?? 0) > 0 ? 'green' as Tone : 'amber' as Tone, sub: cryptoScope?.active_runtime_source ?? 'No crypto workers yet' },
+          {
+            label: 'Total workers',
+            value: summary?.total_workers ?? '—',
+            tone: 'muted' as Tone,
+            sub: 'Registry snapshot',
+          },
+          {
+            label: 'Healthy',
+            value: summary?.healthy_workers ?? '—',
+            tone: 'green' as Tone,
+            sub: 'Fresh heartbeats',
+          },
+          {
+            label: 'Stale',
+            value: summary?.stale_workers ?? '—',
+            tone: 'amber' as Tone,
+            sub: 'Needs attention',
+          },
+          {
+            label: 'Stock targets',
+            value: coverage?.watchlist_targets ?? '—',
+            tone: 'blue' as Tone,
+            sub: 'Active stock watchlist symbols',
+          },
+          {
+            label: 'Crypto universe',
+            value: cryptoScope?.universe_count ?? '—',
+            tone: 'blue' as Tone,
+            sub: cryptoScope?.universe_source ?? 'Backend truth',
+          },
+          {
+            label: 'Crypto targets',
+            value: cryptoScope?.target_runtime_count ?? '—',
+            tone: 'blue' as Tone,
+            sub: cryptoScope?.target_runtime_source ?? 'Derived target set',
+          },
+          {
+            label: 'Crypto active',
+            value: cryptoScope?.active_runtime_count ?? '—',
+            tone:
+              (cryptoScope?.active_runtime_count ?? 0) > 0
+                ? ('green' as Tone)
+                : ('amber' as Tone),
+            sub: cryptoScope?.active_runtime_source ?? 'No crypto workers yet',
+          },
         ].map((item) => (
           <div className="metric-tile" key={item.label}>
             <div className="metric-eyebrow">{item.label}</div>
@@ -444,12 +487,14 @@ const Runtime: React.FC = () => {
         <div className="card-header">
           <span className="card-title">Crypto scope</span>
           <span style={pillStyle((cryptoScope?.active_runtime_count ?? 0) > 0 ? 'green' : 'amber')}>
-            {cryptoScope?.active_runtime_count ?? 0} / {cryptoScope?.universe_count ?? 0} active
+            {cryptoScope?.active_runtime_count ?? 0} / {cryptoScope?.target_runtime_count ?? 0} active
           </span>
         </div>
         <div className="card-body" style={{ display: 'grid', gap: 10 }}>
           <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-            Crypto universe and crypto watchlist currently mirror the backend canonical universe. Active runtime stays separate and only counts attached crypto workers.
+            Crypto universe and crypto watchlist currently mirror the backend canonical universe.
+            Runtime target derivation is now explicit, and attached runtime stays separate so the
+            page can distinguish what exists, what should be targeted, and what is actually running.
           </div>
           <div style={{ display: 'grid', gap: 8, fontSize: 11 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -461,16 +506,23 @@ const Runtime: React.FC = () => {
               <span>{cryptoScope?.watchlist_source ?? '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ color: 'var(--text3)' }}>Target derivation</span>
+              <span>{cryptoScope?.target_runtime_source ?? '—'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ color: 'var(--text3)' }}>Active runtime source</span>
               <span>{cryptoScope?.active_runtime_source ?? '—'}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {(cryptoScope?.watchlist_symbols ?? []).map((symbol) => (
-              <span key={symbol} style={pillStyle('blue')}>
-                {symbol}
-              </span>
-            ))}
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ fontSize: 11, color: 'var(--text3)' }}>Derived crypto runtime targets</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {(cryptoScope?.target_runtime_symbols ?? []).map((symbol) => (
+                <span key={symbol} style={pillStyle('blue')}>
+                  {symbol}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -480,8 +532,18 @@ const Runtime: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <span className="card-title">Supervisor</span>
-              <span style={pillStyle(supervisor?.running ? 'green' : supervisor?.enabled ? 'amber' : 'muted')}>
-                {loading ? 'Loading' : supervisor?.running ? 'Running' : supervisor?.enabled ? 'Idle' : 'Disabled'}
+              <span
+                style={pillStyle(
+                  supervisor?.running ? 'green' : supervisor?.enabled ? 'amber' : 'muted',
+                )}
+              >
+                {loading
+                  ? 'Loading'
+                  : supervisor?.running
+                    ? 'Running'
+                    : supervisor?.enabled
+                      ? 'Idle'
+                      : 'Disabled'}
               </span>
             </div>
             <div className="card-body" style={{ display: 'grid', gap: 10 }}>
@@ -526,65 +588,49 @@ const Runtime: React.FC = () => {
               ))}
             </div>
           </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-header">
+              <span className="card-title">Managed workers</span>
+              <span style={pillStyle((summary?.total_workers ?? 0) > 0 ? 'green' : 'muted')}>
+                {summary?.total_workers ?? 0} registered
+              </span>
+            </div>
+            <div className="card-body">
+              <RuntimeWorkerTable workers={runtime?.workers ?? []} />
+            </div>
+          </div>
         </div>
 
         <div className="settings-col">
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Phase 4 visibility notes</span>
-              <span style={pillStyle('blue')}>UI</span>
+              <span className="card-title">Stock watchlist coverage</span>
+              <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
+                {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} attached
+              </span>
             </div>
-            <div className="card-body" style={{ display: 'grid', gap: 8, fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              <div>The worker table shows only real registry entries from this backend process.</div>
-              <div>The watchlist coverage table answers a different question: which active stock watchlist symbols should have workers attached right now.</div>
-              <div>This page is read-only on purpose. No start, stop, or restart controls are exposed in Phase 4.</div>
-              <div>Health reflects registry timestamps: healthy, stale, inactive, and error.</div>
-              <div>Recent events are capped to the latest {EVENT_LIMIT} entries from the backend API.</div>
+            <div className="card-body" style={{ display: 'grid', gap: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
+                {coverage?.scope_note ??
+                  'The stock watchlist is tracked separately from crypto scope so attachment gaps stay visible.'}
+              </div>
+              <RuntimeTargetTable targets={watchlistTargets} />
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-header">
+              <span className="card-title">Recent lifecycle events</span>
+              <span style={pillStyle((runtime?.recent_events.length ?? 0) > 0 ? 'blue' : 'muted')}>
+                {runtime?.recent_events.length ?? 0} shown
+              </span>
+            </div>
+            <div className="card-body">
+              <RuntimeEventTable events={runtime?.recent_events ?? []} />
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-header">
-          <span className="card-title">Stock watchlist worker coverage</span>
-          <span style={pillStyle((coverage?.unattached_workers ?? 0) > 0 ? 'amber' : 'green')}>
-            {coverage?.attached_workers ?? 0} / {coverage?.watchlist_targets ?? 0} stock targets attached
-          </span>
-        </div>
-        {loading && !runtime ? (
-          <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)' }}>Loading coverage snapshot…</div>
-        ) : (
-          <RuntimeTargetTable targets={watchlistTargets} />
-        )}
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-header">
-          <span className="card-title">Managed workers</span>
-          <span style={pillStyle(summary?.total_workers ? 'green' : 'muted')}>
-            {summary?.total_workers ?? 0} tracked
-          </span>
-        </div>
-        {loading && !runtime ? (
-          <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)' }}>Loading worker snapshot…</div>
-        ) : (
-          <RuntimeWorkerTable workers={runtime?.workers ?? []} />
-        )}
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-header">
-          <span className="card-title">Recent lifecycle events</span>
-          <span style={pillStyle((runtime?.recent_events.length ?? 0) > 0 ? 'amber' : 'muted')}>
-            {runtime?.recent_events.length ?? 0} events
-          </span>
-        </div>
-        {loading && !runtime ? (
-          <div style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text3)' }}>Loading event history…</div>
-        ) : (
-          <RuntimeEventTable events={runtime?.recent_events ?? []} />
-        )}
       </div>
     </div>
   );

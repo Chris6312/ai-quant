@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_session
 from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_watchlist_symbols
 from app.repositories.watchlist import WatchlistRepository
+from app.services.crypto_runtime_targets import list_crypto_runtime_targets
 from app.workers.worker_health_service import WorkerHealthService
 from app.workers.worker_runtime_state import WorkerKey, WorkerLifecycleEvent, WorkerSnapshot
 from app.workers.worker_supervisor import WorkerSupervisor
@@ -94,6 +95,7 @@ def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
 
     universe_symbols = list_crypto_universe_symbols()
     watchlist_symbols = list_crypto_watchlist_symbols()
+    crypto_targets = list_crypto_runtime_targets()
     active_runtime_symbols = sorted(
         {worker.key.symbol for worker in workers if worker.key.asset_class == "crypto"}
     )
@@ -104,6 +106,11 @@ def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
         "watchlist_symbols": watchlist_symbols,
         "watchlist_count": len(watchlist_symbols),
         "watchlist_source": "crypto universe",
+        "target_runtime_symbols": [target.key.symbol for target in crypto_targets],
+        "target_runtime_count": len(crypto_targets),
+        "target_runtime_source": (
+            "derived from crypto watchlist" if crypto_targets else "no crypto targets derived"
+        ),
         "active_runtime_symbols": active_runtime_symbols,
         "active_runtime_count": len(active_runtime_symbols),
         "active_runtime_source": (

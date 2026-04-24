@@ -90,7 +90,15 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
     assert payload["workers"][0]["status"] == WorkerStatus.RUNNING.value
     assert payload["workers"][0]["health"] == "healthy"
     assert payload["crypto_scope"]["universe_count"] >= 1
-    assert payload["crypto_scope"]["watchlist_count"] == payload["crypto_scope"]["universe_count"]
+    assert (
+        payload["crypto_scope"]["watchlist_count"]
+        == payload["crypto_scope"]["universe_count"]
+    )
+    assert (
+        payload["crypto_scope"]["target_runtime_count"]
+        == payload["crypto_scope"]["watchlist_count"]
+    )
+    assert payload["crypto_scope"]["target_runtime_source"] == "derived from crypto watchlist"
     assert payload["crypto_scope"]["active_runtime_count"] == 0
     assert payload["watchlist_targets"] == [
         {
@@ -132,6 +140,7 @@ def test_runtime_workers_endpoint_honors_event_limit() -> None:
     assert payload["coverage"]["watchlist_targets"] == 1
     assert payload["coverage"]["attached_workers"] == 0
     assert payload["coverage"]["unattached_workers"] == 1
+    assert payload["crypto_scope"]["target_runtime_count"] >= 1
     assert payload["crypto_scope"]["active_runtime_count"] == 0
 
 
@@ -146,7 +155,7 @@ def _build_runtime_app() -> FastAPI:
 
     app.state.worker_supervisor = WorkerSupervisor(
         name="watchlist-sync",
-        interval_seconds=30.0,
+        interval_seconds=30,
         sync_operation=_sync,
         enabled=False,
     )

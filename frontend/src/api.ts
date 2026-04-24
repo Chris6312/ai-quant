@@ -97,6 +97,9 @@ export type RuntimeCryptoScope = {
   watchlist_symbols: string[];
   watchlist_count: number;
   watchlist_source: string;
+  target_runtime_symbols: string[];
+  target_runtime_count: number;
+  target_runtime_source: string;
   active_runtime_symbols: string[];
   active_runtime_count: number;
   active_runtime_source: string;
