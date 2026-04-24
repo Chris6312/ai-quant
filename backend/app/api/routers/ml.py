@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from lightgbm.basic import LightGBMError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import Result
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -25,11 +25,14 @@ from app.config.crypto_scope import (
 )
 from app.config.settings import Settings
 from app.config.settings import get_settings as load_settings
-from app.db.models import CandleRow
+from app.db.models import CandleRow, PredictionRow, PredictionShapRow
 from app.db.session import build_engine as create_engine
 from app.db.session import build_session_factory as create_session_factory
+from app.exceptions import ResearchParseError
 from app.ml import job_store, model_registry
+from app.ml.crypto_csv_ingestion import CryptoCsvTrainingIngestor
 from app.ml.features import (
+    ALL_FEATURES,
     FeatureEngineer,
     FeatureVector,
     ResearchInputs,
@@ -49,9 +52,16 @@ from app.repositories.candles import CandleRepository
 router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
 
+
+_CRYPTO_ALPACA_REQUEST_ALIASES: dict[str, str] = {
+    "XDG/USD": "DOGE/USD",
+}
+
+
 class GainersFetcher(Protocol):
     async def get_top_gainers(self, *, limit: int) -> list[dict[str, object]]: ...
-    
+
+
 class TrainingStatusRow(Protocol):
     symbol: object
     asset_class: object
@@ -153,6 +163,21 @@ STOCK_DAILY_LOOKBACK_DAYS = 1600
 CRYPTO_DAILY_TIMEFRAME = "1Day"
 CRYPTO_FRESHNESS_MAX_AGE_DAYS = 2
 STOCK_FRESHNESS_MAX_AGE_DAYS = 5
+
+def _crypto_csv_source_dir() -> Path:
+    """Return the repo-level crypto-history folder used for manual ML CSV imports."""
+
+    cwd = Path.cwd()
+    repo_history_dir = cwd.parent / "crypto-history"
+    nested_history_dir = cwd / "backend" / "crypto-history"
+    candidates = [
+        cwd / "crypto-history",
+        repo_history_dir if cwd.name == "backend" else nested_history_dir,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 def _serialize_stock_universe(snapshot: StockUniverseSnapshot) -> dict[str, object]:
     supported = snapshot.supported_symbols
@@ -733,19 +758,18 @@ def _candidate_model_artifact_paths(model: model_registry.ModelRecord) -> list[P
     seen: set[Path] = set()
     for raw_path in raw_candidates:
         candidate = _normalize_model_artifact_path(raw_path)
-        variants = [candidate]
-        if candidate.suffix.lower() == ".txt":
-            variants.append(candidate.with_suffix(".lgbm"))
-        elif candidate.suffix.lower() == ".lgbm":
-            variants.append(candidate.with_suffix(".txt"))
-        else:
-            variants.append(candidate.with_suffix(".lgbm"))
-            variants.append(candidate.with_suffix(".txt"))
-        for variant in variants:
-            if variant in seen:
-                continue
-            seen.add(variant)
-            candidates.append(variant)
+        if candidate.suffix.lower() != ".lgbm":
+            logger.info(
+                "Ignoring unsupported %s model artifact candidate for model_id=%s path=%s",
+                model.get("asset_class", "unknown"),
+                model.get("model_id"),
+                candidate,
+            )
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        candidates.append(candidate)
     return candidates
 
 def _resolve_model_artifact_path(model: model_registry.ModelRecord) -> str:
@@ -865,12 +889,141 @@ def _prediction_freshness(
         "status": "stale" if is_stale else "fresh",
     }
 
+async def _import_crypto_csv_candles() -> Mapping[str, object]:
+    csv_dir = _crypto_csv_source_dir()
+    if not csv_dir.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"crypto CSV folder not found: {csv_dir}",
+        )
+
+    csv_files = sorted(csv_dir.glob("*_1440.csv"))
+    if not csv_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"no Kraken 1D crypto CSV files found in {csv_dir}; expected *_1440.csv",
+        )
+
+    symbols = [file.stem for file in csv_files]
+    job = _build_backfill_job("crypto_csv_import", symbols)
+    job_id = str(job["job_id"])
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+
+    try:
+        async with session_factory() as session:
+            repository = CandleRepository(session)
+            ingestor = CryptoCsvTrainingIngestor(
+                repository=repository,
+                csv_dir=csv_dir,
+            )
+            summaries = await ingestor.ingest_files(csv_files)
+            await session.commit()
+    except ResearchParseError as exc:
+        job_store.update_job(
+            job_id,
+            status_message="Crypto CSV import failed validation",
+            progress_pct=0,
+        )
+        finished = job_store.finish_job(job_id, status="error", error=str(exc))
+        if finished is not None:
+            return finished
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        job_store.update_job(
+            job_id,
+            status_message="Crypto CSV import failed",
+            progress_pct=0,
+        )
+        finished = job_store.finish_job(job_id, status="error", error=str(exc))
+        if finished is not None:
+            return finished
+        raise
+
+    rows_read = sum(summary.rows_read for summary in summaries)
+    rows_written = sum(summary.rows_written for summary in summaries)
+    imported_symbols = [summary.symbol for summary in summaries]
+    job_store.update_job(
+        job_id,
+        done_symbols=len(imported_symbols),
+        total_symbols=len(symbols),
+        done_batches=len(imported_symbols),
+        total_batches=len(symbols),
+        current_symbol=None,
+        progress_pct=100,
+        status_message="Crypto CSV import completed",
+        current_timeframe=CRYPTO_DAILY_TIMEFRAME,
+        rows_fetched=rows_written,
+    )
+    finished = job_store.finish_job(
+        job_id,
+        status="done",
+        result={
+            "source_dir": str(csv_dir),
+            "source": CRYPTO_CSV_TRAINING_SOURCE,
+            "timeframe": CRYPTO_DAILY_TIMEFRAME,
+            "files_seen": len(csv_files),
+            "symbols_imported": imported_symbols,
+            "rows_read": rows_read,
+            "rows_written": rows_written,
+        },
+    )
+    if finished is None:
+        raise HTTPException(status_code=500, detail="crypto CSV import job could not be finalized")
+    return finished
+
+
+async def _list_existing_crypto_ml_symbols(session: AsyncSession) -> list[str]:
+    statement = (
+        select(CandleRow.symbol)
+        .where(
+            CandleRow.asset_class == "crypto",
+            CandleRow.timeframe == CRYPTO_DAILY_TIMEFRAME,
+            CandleRow.usage == ML_CANDLE_USAGE,
+        )
+        .distinct()
+        .order_by(CandleRow.symbol)
+    )
+    result = await session.scalars(statement)
+    return [str(symbol) for symbol in result.all()]
+
+
+def _build_crypto_catchup_request_symbols(
+    storage_symbols: Sequence[str],
+) -> tuple[list[str], dict[str, str]]:
+    request_symbols: list[str] = []
+    storage_symbol_by_request_symbol: dict[str, str] = {}
+
+    for storage_symbol in storage_symbols:
+        request_symbol = _CRYPTO_ALPACA_REQUEST_ALIASES.get(
+            storage_symbol, storage_symbol
+        )
+        request_symbols.append(request_symbol)
+        storage_symbol_by_request_symbol[request_symbol] = storage_symbol
+
+    return request_symbols, storage_symbol_by_request_symbol
+
+
 async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
     settings = get_settings()
     engine = build_engine(settings)
     session_factory = build_session_factory(engine)
-    symbols = list(KRAKEN_UNIVERSE)
-    job = _build_backfill_job("crypto_daily_catchup", symbols)
+
+    async with session_factory() as session:
+        storage_symbols = await _list_existing_crypto_ml_symbols(session)
+
+    if not storage_symbols:
+        raise HTTPException(
+            status_code=409,
+            detail="crypto ML catch-up requires existing 1D ML candles from CSV import",
+        )
+
+    request_symbols, storage_symbol_by_request_symbol = _build_crypto_catchup_request_symbols(
+        storage_symbols
+    )
+    job = _build_backfill_job("crypto_daily_catchup", storage_symbols)
     job_id = str(job["job_id"])
 
     total_rows = 0
@@ -885,9 +1038,9 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
             job_id,
             done_symbols=min(
                 done_batches * AlpacaTrainingFetcher.max_symbols_per_request,
-                len(symbols),
+                len(storage_symbols),
             ),
-            total_symbols=len(symbols),
+            total_symbols=len(storage_symbols),
             done_batches=done_batches,
             total_batches=total_batches,
             current_symbol=None,
@@ -905,9 +1058,11 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
                 api_key=settings.alpaca_api_key,
                 api_secret=settings.alpaca_api_secret,
                 lookback_days=30,
+                storage_symbol_by_request_symbol=storage_symbol_by_request_symbol,
+                latest_source=None,
             )
             total_rows = await fetcher.sync_universe(
-                symbols,
+                request_symbols,
                 [CRYPTO_DAILY_TIMEFRAME],
                 asset_class="crypto",
                 progress_callback=_on_progress,
@@ -925,10 +1080,10 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
 
     job_store.update_job(
         job_id,
-        done_symbols=len(symbols),
-        total_symbols=len(symbols),
-        done_batches=ceil(len(symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
-        total_batches=ceil(len(symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
+        done_symbols=len(storage_symbols),
+        total_symbols=len(storage_symbols),
+        done_batches=ceil(len(storage_symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
+        total_batches=ceil(len(storage_symbols) / AlpacaTrainingFetcher.max_symbols_per_request),
         current_symbol=None,
         progress_pct=100,
         status_message="Crypto 1Day Alpaca refresh completed",
@@ -939,7 +1094,7 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
         status="done",
         result={
             "rows_written": total_rows,
-            "symbols_checked": len(symbols),
+            "symbols_checked": len(storage_symbols),
             "timeframe": CRYPTO_DAILY_TIMEFRAME,
             "source": ALPACA_DEFAULT_SOURCE,
         },
@@ -969,6 +1124,237 @@ async def _ensure_crypto_ml_can_score() -> MlFreshnessResult:
         },
     )
 
+
+def _prediction_gate_outcome(action: str) -> str:
+    if action == "signal":
+        return "passed"
+    return "blocked"
+
+
+def _prediction_signal_event(row: Mapping[str, object]) -> dict[str, object] | None:
+    if row.get("action") != "signal":
+        return None
+    return {
+        "event_type": "ml_prediction_signal",
+        "prediction_id": row.get("prediction_id"),
+        "model_id": row.get("model_id"),
+        "symbol": row.get("symbol"),
+        "asset_class": row.get("asset_class"),
+        "direction": row.get("direction"),
+        "confidence": row.get("confidence"),
+        "candle_time": row.get("candle_time"),
+    }
+
+
+
+
+def _prediction_api_row_from_db(row: PredictionRow) -> dict[str, object]:
+    """Serialize one persisted prediction row for the ML API."""
+
+    return {
+        "prediction_id": row.id,
+        "model_id": row.model_id,
+        "symbol": row.symbol,
+        "asset_class": row.asset_class,
+        "direction": row.direction,
+        "confidence": row.confidence,
+        "class_probabilities": {
+            "down": row.probability_down,
+            "flat": row.probability_flat,
+            "up": row.probability_up,
+        },
+        "top_driver": row.top_driver or "n/a",
+        "candle_time": row.candle_time.isoformat(),
+        "action": row.action,
+        "confidence_threshold": row.confidence_threshold,
+    }
+
+
+def _prediction_empty_freshness() -> dict[str, object]:
+    """Return a stable no-data freshness payload for persisted prediction reads."""
+
+    return {
+        "latest_candle_time": None,
+        "lag_days": None,
+        "is_stale": True,
+        "status": "no_data",
+    }
+
+
+async def _read_persisted_prediction_snapshot(
+    *,
+    limit: int,
+    asset_class: str | None,
+) -> Mapping[str, object]:
+    """Read the latest persisted prediction rows without rebuilding them."""
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
+
+    async with session_factory() as session:
+        statement = select(PredictionRow)
+        if asset_class is not None:
+            statement = statement.where(PredictionRow.asset_class == asset_class)
+        statement = statement.order_by(
+            PredictionRow.created_at.desc(),
+            PredictionRow.confidence.desc(),
+            PredictionRow.symbol.asc(),
+        ).limit(limit)
+        result = await session.scalars(statement)
+        prediction_rows = list(result.all())
+
+    api_rows = [_prediction_api_row_from_db(row) for row in prediction_rows]
+    freshness_by_asset: dict[str, object] = {}
+    for asset in assets:
+        asset_rows = [row for row in api_rows if row["asset_class"] == asset]
+        freshness_by_asset[asset] = _prediction_freshness(asset, asset_rows)
+        if not asset_rows:
+            freshness_by_asset[asset] = _prediction_empty_freshness()
+
+    return {
+        "predictions": api_rows,
+        "count": len(api_rows),
+        "active_model_ids": {
+            "crypto": _get_active_model_id("crypto"),
+            "stock": _get_active_model_id("stock"),
+        },
+        "freshness_by_asset": freshness_by_asset,
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "source": "persisted",
+    }
+
+
+async def generate_prediction_snapshot(
+    *,
+    limit: int = 200,
+    asset_class: str | None = None,
+) -> Mapping[str, object]:
+    """Generate and persist prediction rows on demand or from the ML worker."""
+
+    if asset_class is not None and asset_class not in {"crypto", "stock"}:
+        raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
+
+    assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
+    crypto_freshness: MlFreshnessResult | None = None
+    if "crypto" in assets:
+        crypto_freshness = await _ensure_crypto_ml_can_score()
+
+    rows_by_asset: dict[str, list[dict[str, object]]] = {}
+    for asset in assets:
+        rows_by_asset[asset] = await _build_asset_predictions(asset, limit=limit)
+
+    rows: list[dict[str, object]] = []
+    for asset_rows in rows_by_asset.values():
+        rows.extend(asset_rows)
+
+    rows.sort(
+        key=lambda row: (
+            _coerce_numeric(row.get("confidence")),
+            str(row.get("symbol") or ""),
+        ),
+        reverse=True,
+    )
+    visible_rows = rows[:limit]
+    persisted_count = await _persist_prediction_snapshot(visible_rows)
+    api_rows = [_prediction_api_row(row) for row in visible_rows]
+    return {
+        "predictions": api_rows,
+        "count": len(api_rows),
+        "persisted_count": persisted_count,
+        "active_model_ids": {
+            "crypto": _get_active_model_id("crypto"),
+            "stock": _get_active_model_id("stock"),
+        },
+        "freshness_by_asset": {
+            asset: (
+                crypto_freshness.to_api_payload()
+                if asset == "crypto" and crypto_freshness is not None
+                else _prediction_freshness(asset, asset_rows)
+            )
+            for asset, asset_rows in rows_by_asset.items()
+        },
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "source": "generated",
+    }
+
+async def _persist_prediction_snapshot(
+    rows: Sequence[Mapping[str, object]],
+) -> int:
+    if not rows:
+        return 0
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    persisted = 0
+
+    async with session_factory() as session:
+        for row in rows:
+            prediction_id = str(row["prediction_id"])
+            probabilities = row.get("class_probabilities")
+            if not isinstance(probabilities, Mapping):
+                continue
+            candle_time = datetime.fromisoformat(str(row["candle_time"]))
+            if candle_time.tzinfo is None:
+                candle_time = candle_time.replace(tzinfo=UTC)
+            action = str(row.get("action") or "skip")
+            signal_event = _prediction_signal_event(row)
+            prediction_row = PredictionRow(
+                id=prediction_id,
+                symbol=str(row["symbol"]),
+                asset_class=str(row["asset_class"]),
+                model_id=cast(str | None, row.get("model_id")),
+                direction=str(row["direction"]),
+                confidence=_coerce_numeric(row.get("confidence")),
+                probability_down=_coerce_numeric(probabilities.get("down")),
+                probability_flat=_coerce_numeric(probabilities.get("flat")),
+                probability_up=_coerce_numeric(probabilities.get("up")),
+                confidence_threshold=_coerce_numeric(row.get("confidence_threshold")),
+                gate_outcome=_prediction_gate_outcome(action),
+                action=action,
+                top_driver=cast(str | None, row.get("top_driver")),
+                candle_time=candle_time,
+                feature_version="v1",
+                signal_event_published=signal_event is not None,
+                signal_event=signal_event,
+                created_at=datetime.now(tz=UTC),
+            )
+            await session.merge(prediction_row)
+            await session.execute(
+                delete(PredictionShapRow).where(
+                    PredictionShapRow.prediction_id == prediction_id
+                )
+            )
+            shap_values = row.get("shap_values")
+            feature_values = row.get("feature_values")
+            if isinstance(shap_values, Mapping) and isinstance(feature_values, Mapping):
+                ranked_shap = sorted(
+                    (
+                        (str(feature), _coerce_numeric(value))
+                        for feature, value in shap_values.items()
+                    ),
+                    key=lambda item: abs(item[1]),
+                    reverse=True,
+                )
+                for rank, (feature, shap_value) in enumerate(ranked_shap, start=1):
+                    session.add(
+                        PredictionShapRow(
+                            id=f"{prediction_id}:{feature}",
+                            prediction_id=prediction_id,
+                            feature=feature,
+                            feature_value=_coerce_numeric(feature_values.get(feature)),
+                            shap_value=shap_value,
+                            abs_value=abs(shap_value),
+                            rank=rank,
+                            created_at=datetime.now(tz=UTC),
+                        )
+                    )
+            persisted += 1
+        await session.commit()
+
+    return persisted
 async def _build_asset_predictions(
     asset_class: str,
     *,
@@ -1048,6 +1434,7 @@ async def _build_asset_predictions(
         if prediction is None:
             continue
         candle_time = history[-1].time.isoformat()
+        shap_values = predictor.explain(features, class_index=prediction.class_index)
         action = _prediction_action(
             asset_class,
             prediction.direction,
@@ -1071,6 +1458,8 @@ async def _build_asset_predictions(
                 "candle_time": candle_time,
                 "action": action,
                 "confidence_threshold": threshold,
+                "feature_values": {name: float(features[name]) for name in ALL_FEATURES},
+                "shap_values": shap_values,
             }
         )
 
@@ -1089,6 +1478,15 @@ async def _build_asset_predictions(
     )
     return rows[:limit]
 
+
+def _prediction_api_row(row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in row.items()
+        if key not in {"feature_values", "shap_values"}
+    }
+
+
 @router.get("/predictions")
 async def get_predictions(
     limit: int = Query(default=50, ge=1, le=200),
@@ -1096,45 +1494,18 @@ async def get_predictions(
 ) -> Mapping[str, object]:
     if asset_class is not None and asset_class not in {"crypto", "stock"}:
         raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
-
-    assets = [asset_class] if asset_class is not None else ["crypto", "stock"]
-    crypto_freshness: MlFreshnessResult | None = None
-    if "crypto" in assets:
-        crypto_freshness = await _ensure_crypto_ml_can_score()
-
-    rows_by_asset: dict[str, list[dict[str, object]]] = {}
-    for asset in assets:
-        rows_by_asset[asset] = await _build_asset_predictions(asset, limit=limit)
-
-    rows: list[dict[str, object]] = []
-    for asset_rows in rows_by_asset.values():
-        rows.extend(asset_rows)
-
-    rows.sort(
-        key=lambda row: (
-            _coerce_numeric(row.get("confidence")),
-            str(row.get("symbol") or ""),
-        ),
-        reverse=True,
+    return await _read_persisted_prediction_snapshot(
+        limit=limit,
+        asset_class=asset_class,
     )
-    visible_rows = rows[:limit]
-    return {
-        "predictions": visible_rows,
-        "count": len(visible_rows),
-        "active_model_ids": {
-            "crypto": _get_active_model_id("crypto"),
-            "stock": _get_active_model_id("stock"),
-        },
-        "freshness_by_asset": {
-            asset: (
-                crypto_freshness.to_api_payload()
-                if asset == "crypto" and crypto_freshness is not None
-                else _prediction_freshness(asset, asset_rows)
-            )
-            for asset, asset_rows in rows_by_asset.items()
-        },
-        "generated_at": datetime.now(tz=UTC).isoformat(),
-    }
+
+
+@router.post("/predictions/run")
+async def run_predictions(
+    limit: int = Query(default=200, ge=1, le=500),
+    asset_class: str | None = Query(default=None),
+) -> Mapping[str, object]:
+    return await generate_prediction_snapshot(limit=limit, asset_class=asset_class)
 
 @router.get("/jobs")
 def get_jobs() -> list[Mapping[str, object]]:
@@ -1185,7 +1556,7 @@ def get_crypto_universe() -> Mapping[str, object]:
     return {
         "symbols": list(KRAKEN_UNIVERSE),
         "count": len(KRAKEN_UNIVERSE),
-        "source_dir": str(Path("crypto-history")),
+        "source_dir": str(_crypto_csv_source_dir()),
     }
 
 @router.get("/gainers")
@@ -1221,6 +1592,11 @@ def get_stock_universe() -> Mapping[str, object]:
         **_serialize_stock_universe(snapshot),
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
+
+@router.post("/import/crypto-csv")
+async def import_crypto_csv() -> Mapping[str, object]:
+    _ensure_no_running_job()
+    return await _import_crypto_csv_candles()
 
 @router.post("/backfill/stocks/sp500")
 async def backfill_sp500_stock_universe(

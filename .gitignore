@@ -25,3 +25,4 @@ backend/.runtime/
 # Generated ML artifacts and runtime state
 backend/models/*.lgbm
 backend/backend/.runtime/*.json
+backend/backend/

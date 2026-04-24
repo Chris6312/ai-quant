@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import get_session
 from app.api.routers.runtime import _classify_ml_freshness
 from app.api.routers.runtime import router as runtime_router
-from app.config.crypto_scope import list_crypto_watchlist_symbols
+from app.config.crypto_scope import list_crypto_ml_symbols
 from app.workers import (
     WorkerHealthService,
     WorkerKey,
@@ -54,7 +54,7 @@ class _FakeSession:
     async def execute(self, statement: object) -> _FakeLatestCandleResult:
         del statement
         return _FakeLatestCandleResult(
-            [(symbol, self._latest_candle_at) for symbol in list_crypto_watchlist_symbols()]
+            [(symbol, self._latest_candle_at) for symbol in list_crypto_ml_symbols()]
         )
 
     async def scalars(self, statement: object) -> _FakeScalarResult:
@@ -109,6 +109,8 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
     assert payload["ml_workers"][0]["worker_id"] == "ml:crypto:1D"
     assert payload["ml_workers"][0]["task_name"] == "tasks.ml_candles.daily_sync"
     assert payload["ml_workers"][0]["freshness"] == "fresh"
+    assert payload["ml_workers"][0]["can_score"] is True
+    assert payload["ml_workers"][0]["block_reason"] is None
     assert payload["ml_workers"][0]["latest_ml_candle_date"] is not None
     assert payload["crypto_scope"]["universe_count"] >= 1
     assert (

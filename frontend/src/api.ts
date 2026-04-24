@@ -469,6 +469,8 @@ export type MlPredictionFreshness = {
 export type MlPredictionsResponse = {
   predictions: MlPredictionRow[];
   count: number;
+  persisted_count?: number;
+  source?: 'persisted' | 'generated';
   active_model_ids: {
     crypto: string | null;
     stock: string | null;
@@ -545,15 +547,24 @@ export const getMlPredictions = (limit = 50, assetClass?: 'crypto' | 'stock') =>
   return requestJson<MlPredictionsResponse>(`/ml/predictions?${query.toString()}`);
 };
 
+export const runMlPredictions = (limit = 200, assetClass?: 'crypto' | 'stock') => {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (assetClass) {
+    query.set('asset_class', assetClass);
+  }
+  return requestJson<MlPredictionsResponse>(`/ml/predictions/run?${query.toString()}`, {
+    method: 'POST',
+  });
+};
+
 export const trainMlModel = (assetClass: 'crypto' | 'stock'): Promise<TrainModelResponse> =>
   requestJson<TrainModelResponse>(`/ml/train/${assetClass}`, {
     method: 'POST',
   });
 
-export const backfillCrypto = (): Promise<MlJob> =>
-  requestJson<MlJob>('/ml/backfill/crypto', {
+export const importCryptoCsv = (): Promise<MlJob> =>
+  requestJson<MlJob>('/ml/import/crypto-csv', {
     method: 'POST',
-    body: JSON.stringify({}),
   });
 
 export const catchUpCryptoDaily = () =>

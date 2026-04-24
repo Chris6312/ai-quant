@@ -25,23 +25,15 @@ class _FakeRepository:
 async def test_crypto_csv_ingestor_reads_kraken_daily_files_only_and_deduplicates_rows(
     tmp_path: Path,
 ) -> None:
-    """CSV ingestion should read only Kraken 1440 files."""
+    """CSV ingestion should read Kraken daily files and deduplicate by timestamp."""
 
     csv_dir = tmp_path / "crypto-history"
     csv_dir.mkdir()
 
-    (csv_dir / "xbtusd_1.csv").write_text(
-        "\n".join(
-            [
-                "1538141100,0.3,0.3,0.3,0.3,0.3,1,1",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
     (csv_dir / "xbtusd_1440.csv").write_text(
         "\n".join(
             [
+                "timestamp,open,high,low,close,vwap,volume,count",
                 "1767052800,90000,91000,89000,90500,90250,1000,10",
                 "1767139200,90500,91500,90000,91000,90750,1200,11",
                 "1767139200,90501,91501,90001,91001,90751,1300,12",
@@ -77,8 +69,8 @@ async def test_crypto_csv_ingestor_reads_kraken_daily_files_only_and_deduplicate
 
 
 @pytest.mark.asyncio
-async def test_crypto_csv_ingestor_ignores_non_1440_files(tmp_path: Path) -> None:
-    """CSV ingestion should skip non-daily Kraken timeframe files."""
+async def test_crypto_csv_ingestor_rejects_non_daily_files(tmp_path: Path) -> None:
+    """CSV ingestion should fail loudly on non-daily Kraken timeframe files."""
 
     csv_dir = tmp_path / "crypto-history"
     csv_dir.mkdir()
@@ -95,9 +87,9 @@ async def test_crypto_csv_ingestor_ignores_non_1440_files(tmp_path: Path) -> Non
     repository = _FakeRepository()
     ingestor = CryptoCsvTrainingIngestor(repository=repository, csv_dir=csv_dir)
 
-    summaries = await ingestor.ingest_all()
+    with pytest.raises(Exception, match="invalid_timeframe"):
+        await ingestor.ingest_all()
 
-    assert summaries == []
     assert repository.rows == []
 
 
@@ -121,8 +113,62 @@ async def test_crypto_csv_ingestor_requires_kraken_positional_columns(
 
     ingestor = CryptoCsvTrainingIngestor(repository=_FakeRepository(), csv_dir=csv_dir)
 
-    with pytest.raises(Exception, match="fewer than 7 columns"):
+    with pytest.raises(Exception, match="missing_columns"):
         await ingestor.ingest_all()
+
+
+@pytest.mark.asyncio
+async def test_crypto_csv_ingestor_reads_headerless_seven_column_kraken_files(
+    tmp_path: Path,
+) -> None:
+    """Kraken headerless 7-column files should use column 6 as volume."""
+
+    csv_dir = tmp_path / "crypto-history"
+    csv_dir.mkdir()
+
+    (csv_dir / "adausd_1440.csv").write_text(
+        "1767052800,0.30,0.35,0.29,0.33,9876.5,44",
+        encoding="utf-8",
+    )
+
+    repository = _FakeRepository()
+    ingestor = CryptoCsvTrainingIngestor(repository=repository, csv_dir=csv_dir)
+
+    summaries = await ingestor.ingest_all()
+
+    assert summaries[0].symbol == "ADA/USD"
+    assert len(repository.rows) == 1
+    first_row = repository.rows[0]
+    assert first_row.volume == 9876.5
+    assert first_row.usage == "ml"
+
+
+@pytest.mark.asyncio
+async def test_crypto_csv_ingestor_daily_import_ignores_intraday_files(
+    tmp_path: Path,
+) -> None:
+    """Manual ML CSV import should load only Kraken 1440 files from mixed folders."""
+
+    csv_dir = tmp_path / "crypto-history"
+    csv_dir.mkdir()
+
+    (csv_dir / "aaveusd_1.csv").write_text(
+        "1767052800,300,310,290,305,100,4",
+        encoding="utf-8",
+    )
+    (csv_dir / "aaveusd_1440.csv").write_text(
+        "1767052800,300,310,290,305,100,4",
+        encoding="utf-8",
+    )
+
+    repository = _FakeRepository()
+    ingestor = CryptoCsvTrainingIngestor(repository=repository, csv_dir=csv_dir)
+
+    summaries = await ingestor.ingest_daily_files()
+
+    assert [summary.symbol for summary in summaries] == ["AAVE/USD"]
+    assert len(repository.rows) == 1
+    assert repository.rows[0].timeframe == "1Day"
 
 
 def test_job_store_persists_jobs_to_disk(

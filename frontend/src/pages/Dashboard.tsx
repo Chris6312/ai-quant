@@ -8,6 +8,15 @@ type Props = { mode: 'paper' | 'live' };
 const fmt$ = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const fmtCryptoUsd = (n: number) => {
+  const fractionDigits = Math.abs(n) > 0 && Math.abs(n) < 0.01 ? 8 : 2;
+
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+};
+
 function useKrakenTicker(symbols: readonly string[], intervalMs = 30000) {
   const [tickers, setTickers] = React.useState<KrakenTicker[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -72,7 +81,7 @@ function TickerRow({ ticker, loading }: { ticker?: KrakenTicker; loading: boolea
         {symbol.replace('/USD', '')}
       </span>
       <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-        {loading ? '—' : lastPrice !== null ? `$${fmt$(lastPrice)}` : '—'}
+        {loading ? '—' : lastPrice !== null ? `$${fmtCryptoUsd(lastPrice)}` : '—'}
       </span>
       <span
         style={{
@@ -282,7 +291,7 @@ const Dashboard: React.FC<Props> = ({ mode }) => {
           <div className="card-body">
             <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>Current price</div>
             <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--text)' }}>
-              {tickerLoading ? '—' : btcTicker ? `$${fmt$(btcTicker.last_price)}` : '—'}
+              {tickerLoading ? '—' : btcTicker ? `$${fmtCryptoUsd(btcTicker.last_price)}` : '—'}
             </div>
             <div
               style={{

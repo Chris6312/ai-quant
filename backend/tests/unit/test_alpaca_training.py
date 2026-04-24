@@ -51,6 +51,7 @@ class _FakeRepository:
         self.rows: list[object] = []
         self.latest_times: dict[str, datetime | None] = {"AAPL": None, "MSFT": None}
         self.latest_usage: str | None = None
+        self.latest_source: str | None = None
 
     async def get_latest_candle_times(
         self,
@@ -62,6 +63,7 @@ class _FakeRepository:
         """Return latest candle timestamps for a batch."""
 
         self.latest_usage = usage
+        self.latest_source = source
         return {symbol: self.latest_times.get(symbol) for symbol in symbols}
 
     async def bulk_upsert(self, rows: list[object]) -> None:
@@ -143,6 +145,43 @@ async def test_sync_universe_persists_new_rows() -> None:
     assert repository.latest_usage == ML_CANDLE_USAGE
 
 
+@pytest.mark.asyncio
+async def test_sync_universe_can_store_crypto_alias_under_canonical_symbol() -> None:
+    """Crypto catch-up should request Alpaca aliases without creating new ML symbols."""
+
+    payload = {
+        "bars": {
+            "DOGE/USD": [
+                {
+                    "t": "2026-04-18T00:00:00Z",
+                    "o": 0.1,
+                    "h": 0.11,
+                    "l": 0.09,
+                    "c": 0.105,
+                    "v": 1_000_000.0,
+                }
+            ],
+        }
+    }
+    client = _FakeClient(payload)
+    repository = _FakeRepository()
+    repository.latest_times = {"XDG/USD": datetime(2026, 4, 17, tzinfo=UTC)}
+    fetcher = AlpacaTrainingFetcher(
+        repository=repository,
+        client=client,
+        storage_symbol_by_request_symbol={"DOGE/USD": "XDG/USD"},
+        latest_source=None,
+    )
+
+    total_rows = await fetcher.sync_universe(
+        ["DOGE/USD"], ["1Day"], asset_class="crypto"
+    )
+
+    assert total_rows == 1
+    assert repository.latest_source is None
+    assert repository.rows[0].symbol == "XDG/USD"
+    assert client.calls[0]["params"]["symbols"] == "DOGE/USD"
+
 
 @pytest.mark.asyncio
 async def test_fetch_batch_parses_crypto_payload() -> None:
@@ -177,3 +216,40 @@ async def test_fetch_batch_parses_crypto_payload() -> None:
     assert candle.symbol == "BTC/USD"
     assert candle.asset_class == "crypto"
     assert client.calls[0]["url"].endswith("/v1beta3/crypto/us/bars")
+
+
+@pytest.mark.asyncio
+async def test_sync_universe_can_store_compact_crypto_alias_under_canonical_symbol() -> None:
+    """Alpaca may return compact DOGEUSD while storage remains canonical XDG/USD."""
+
+    payload = {
+        "bars": {
+            "DOGEUSD": [
+                {
+                    "t": "2026-04-18T00:00:00Z",
+                    "o": 0.1,
+                    "h": 0.11,
+                    "l": 0.09,
+                    "c": 0.105,
+                    "v": 1_000_000.0,
+                }
+            ],
+        }
+    }
+    client = _FakeClient(payload)
+    repository = _FakeRepository()
+    repository.latest_times = {"XDG/USD": datetime(2026, 4, 17, tzinfo=UTC)}
+    fetcher = AlpacaTrainingFetcher(
+        repository=repository,
+        client=client,
+        storage_symbol_by_request_symbol={"DOGE/USD": "XDG/USD"},
+        latest_source=None,
+    )
+
+    total_rows = await fetcher.sync_universe(
+        ["DOGE/USD"], ["1Day"], asset_class="crypto"
+    )
+
+    assert total_rows == 1
+    assert repository.rows[0].symbol == "XDG/USD"
+    assert client.calls[0]["params"]["symbols"] == "DOGE/USD"

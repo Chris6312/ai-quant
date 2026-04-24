@@ -159,9 +159,9 @@ Make ML candle data a first-class, correctly sourced, consistently fresh lane wi
 * [x] Persist ML sync rows with `usage="ml"`
 * [x] Align crypto universe with Kraken/Alpaca-supported overlap for Phase 6 ML freshness
 * [x] Verify current candle schema usage separation: trading vs ml
-* [ ] Confirm existing candles are migrated or tagged correctly
+* [x] Confirm existing candles are migrated or tagged correctly
 * [x] Ensure ML reads the intended candle lane
-* [ ] Confirm crypto ML data is fresh enough for scoring
+* [x] Confirm crypto ML data is fresh enough for scoring
 
 ### Frontend
 
@@ -170,7 +170,7 @@ Make ML candle data a first-class, correctly sourced, consistently fresh lane wi
 
 ### Execution mode
 
-* [ ] Daily ML sync only; no intraday ML polling
+* [x] Daily ML sync only; no intraday ML polling
 
 ---
 
@@ -182,17 +182,17 @@ Store truth instead of rebuilding it.
 
 ### Database
 
-* [ ] Create `predictions` table
-* [ ] Create `prediction_shap` table
+* [x] Create `predictions` table
+* [x] Create `prediction_shap` table
 
 ### Backend
 
-* [ ] Persist prediction records
-* [ ] Persist probabilities
-* [ ] Persist gate outcome
-* [ ] Persist model identity
-* [ ] Persist SHAP
-* [ ] Publish signal event
+* [x] Persist prediction records
+* [x] Persist probabilities
+* [x] Persist gate outcome
+* [x] Persist model identity
+* [x] Persist SHAP
+* [x] Publish signal event
 
 ---
 

@@ -61,6 +61,27 @@ def _coerce_params(params: Mapping[str, object]) -> dict[str, HttpValue]:
     return result
 
 
+def _bar_key_candidates(symbol: str) -> tuple[str, ...]:
+    compact_symbol = symbol.replace("/", "")
+    if compact_symbol == symbol:
+        return (symbol,)
+    return (symbol, compact_symbol)
+
+
+def _get_raw_bars_for_symbol(
+    bars: Mapping[str, object],
+    symbol: str,
+) -> Sequence[object]:
+    for key in _bar_key_candidates(symbol):
+        raw_list = bars.get(key)
+        if isinstance(raw_list, Sequence) and not isinstance(
+            raw_list,
+            (str, bytes, bytearray),
+        ):
+            return raw_list
+    return []
+
+
 class AlpacaTrainingFetcher:
     max_symbols_per_request: int = ALPACA_BATCH_MAX_SYMBOLS
 
@@ -71,10 +92,16 @@ class AlpacaTrainingFetcher:
         api_key: str | None = None,
         api_secret: str | None = None,
         lookback_days: int = ALPACA_SYNC_LOOKBACK_DAYS,
+        storage_symbol_by_request_symbol: Mapping[str, str] | None = None,
+        latest_source: str | None = ALPACA_DEFAULT_SOURCE,
     ) -> None:
         self.repository = repository
         self.client = client
         self.lookback_days = lookback_days
+        self.storage_symbol_by_request_symbol = dict(
+            storage_symbol_by_request_symbol or {}
+        )
+        self.latest_source = latest_source
         self.headers: dict[str, str] | None = None
 
         if api_key and api_secret:
@@ -157,10 +184,11 @@ class AlpacaTrainingFetcher:
         rows: list[CandleRow] = []
 
         for symbol, candles in batch.items():
+            storage_symbol = self.storage_symbol_by_request_symbol.get(symbol, symbol)
             for candle in candles:
                 rows.append(
                     CandleRow(
-                        symbol=symbol,
+                        symbol=storage_symbol,
                         asset_class=candle.asset_class,
                         timeframe=timeframe,
                         time=candle.time,
@@ -213,7 +241,7 @@ class AlpacaTrainingFetcher:
         result: dict[str, list[Candle]] = {}
 
         for symbol in symbols:
-            raw_list = bars.get(symbol, [])
+            raw_list = _get_raw_bars_for_symbol(bars, symbol)
             candles: list[Candle] = []
 
             for raw in raw_list:
@@ -244,12 +272,22 @@ class AlpacaTrainingFetcher:
 
         done_batches = 0
         for timeframe in timeframes:
-            latest_times = await self.repository.get_latest_candle_times(
-                symbols,
+            storage_symbols = [
+                self.storage_symbol_by_request_symbol.get(symbol, symbol)
+                for symbol in symbols
+            ]
+            latest_times_by_storage_symbol = await self.repository.get_latest_candle_times(
+                storage_symbols,
                 timeframe,
-                source=ALPACA_DEFAULT_SOURCE,
+                source=self.latest_source,
                 usage=ML_CANDLE_USAGE,
             )
+            latest_times = {
+                symbol: latest_times_by_storage_symbol.get(
+                    self.storage_symbol_by_request_symbol.get(symbol, symbol)
+                )
+                for symbol in symbols
+            }
             start = self._calculate_start(symbols, latest_times)
             end = datetime.now(UTC)
 

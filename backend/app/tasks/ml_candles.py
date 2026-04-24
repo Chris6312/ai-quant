@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.brokers.alpaca import AlpacaTrainingFetcher
 from app.config.constants import (
@@ -19,12 +20,19 @@ from app.config.constants import (
 )
 from app.config.crypto_scope import list_crypto_watchlist_symbols
 from app.config.settings import get_settings
+from app.db.models import CandleRow
 from app.db.session import build_engine, build_session_factory
 from app.repositories.candles import CandleRepository
 from app.tasks.worker import celery_app
 
 CRYPTO_ML_TIMEFRAMES: tuple[str, ...] = (ALPACA_DEFAULT_TIMEFRAME,)
 CRYPTO_ML_LOOKBACK_DAYS = ALPACA_SYNC_LOOKBACK_DAYS
+_CRYPTO_ALPACA_REQUEST_ALIASES: dict[str, str] = {
+    "XDG/USD": "DOGE/USD",
+}
+_CRYPTO_STORAGE_ALIASES: dict[str, str] = {
+    "DOGE/USD": "XDG/USD",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +73,47 @@ def ml_daily_sync_task(
     }
 
 
+async def _list_existing_crypto_ml_symbols(
+    session: AsyncSession,
+    requested_symbols: Sequence[str],
+) -> list[str]:
+    requested_storage_symbols = {
+        _CRYPTO_STORAGE_ALIASES.get(symbol, symbol) for symbol in requested_symbols
+    }
+    if not requested_storage_symbols:
+        return []
+
+    statement = (
+        select(CandleRow.symbol)
+        .where(
+            CandleRow.asset_class == "crypto",
+            CandleRow.timeframe.in_(CRYPTO_ML_TIMEFRAMES),
+            CandleRow.usage == ML_CANDLE_USAGE,
+            CandleRow.symbol.in_(requested_storage_symbols),
+        )
+        .distinct()
+        .order_by(CandleRow.symbol)
+    )
+    result = await session.scalars(statement)
+    return [str(symbol) for symbol in result.all()]
+
+
+def _build_crypto_sync_request_symbols(
+    storage_symbols: Sequence[str],
+) -> tuple[list[str], dict[str, str]]:
+    request_symbols: list[str] = []
+    storage_symbol_by_request_symbol: dict[str, str] = {}
+
+    for storage_symbol in storage_symbols:
+        request_symbol = _CRYPTO_ALPACA_REQUEST_ALIASES.get(
+            storage_symbol, storage_symbol
+        )
+        request_symbols.append(request_symbol)
+        storage_symbol_by_request_symbol[request_symbol] = storage_symbol
+
+    return request_symbols, storage_symbol_by_request_symbol
+
+
 async def _run_ml_sync(
     *,
     symbols: Sequence[str],
@@ -94,15 +143,24 @@ async def _run_ml_sync_with_session_factory(
 ) -> int:
     settings = get_settings()
     async with session_factory() as session:
+        storage_symbols = await _list_existing_crypto_ml_symbols(session, symbols)
+        if not storage_symbols:
+            return 0
+
+        request_symbols, storage_symbol_by_request_symbol = _build_crypto_sync_request_symbols(
+            storage_symbols
+        )
         repository = CandleRepository(session)
         fetcher = AlpacaTrainingFetcher(
             repository=repository,
             api_key=settings.alpaca_api_key,
             api_secret=settings.alpaca_api_secret,
             lookback_days=lookback_days,
+            storage_symbol_by_request_symbol=storage_symbol_by_request_symbol,
+            latest_source=None,
         )
         return await fetcher.sync_universe(
-            symbols=symbols,
+            symbols=request_symbols,
             timeframes=timeframes,
             asset_class="crypto",
         )

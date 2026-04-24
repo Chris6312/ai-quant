@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  backfillCrypto,
+  importCryptoCsv,
   catchUpCryptoDaily,
   backfillSp500Stocks,
   getCryptoUniverse,
@@ -13,6 +13,7 @@ import {
   getStockUniverse,
   getTopGainers,
   requestJson,
+  runMlPredictions,
   trainMlModel,
   type CryptoUniverseResponse,
   type FeatureParityResponse,
@@ -141,6 +142,13 @@ const SHAP_ROWS = [
   { name: 'volume_ratio_20 = 0.82', val: -0.09 },
   { name: 'atr_pct_14 = 1.8%', val: -0.06 },
 ];
+
+const formatLagDays = (lagDays: number | null | undefined): string => {
+  if (typeof lagDays !== 'number' || !Number.isFinite(lagDays)) {
+    return '';
+  }
+  return ' lag ' + lagDays.toFixed(1) + 'd';
+};
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) {
@@ -409,6 +417,7 @@ const MachineLearning: React.FC = () => {
   const [isRefreshingGainers, setIsRefreshingGainers] = useState(false);
   const [isTrainingCrypto, setIsTrainingCrypto] = useState(false);
   const [isTrainingStock, setIsTrainingStock] = useState(false);
+  const [isRunningPredictions, setIsRunningPredictions] = useState(false);
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
 
   const loadPageData = useCallback(async () => {
@@ -705,6 +714,24 @@ const MachineLearning: React.FC = () => {
     }
   };
 
+  const handleRunPredictions = async (): Promise<void> => {
+    try {
+      setIsRunningPredictions(true);
+      const response = await runMlPredictions(200, 'crypto');
+      setPredictionsResponse(response);
+      setPredictionError(null);
+      setBanner({
+        tone: 'success',
+        message: `Persisted ${response.persisted_count ?? response.count} crypto prediction rows.`,
+      });
+      await loadPageData();
+    } catch (error) {
+      setBanner({ tone: 'error', message: `Prediction run failed: ${normalizeError(error)}` });
+    } finally {
+      setIsRunningPredictions(false);
+    }
+  };
+
   const handleBackfillSp500 = async (): Promise<void> => {
     try {
       setIsBackfillingSp500(true);
@@ -726,11 +753,16 @@ const MachineLearning: React.FC = () => {
   const handleImportCrypto = async (): Promise<void> => {
     try {
       setIsImportingCrypto(true);
-      const job = await backfillCrypto();
-      setBanner({ tone: 'success', message: `Crypto CSV import started: ${job.job_id}` });
+      const job = await importCryptoCsv();
+      setBanner({
+        tone: job.status === 'done' ? 'success' : 'error',
+        message: job.status === 'done'
+          ? `Crypto CSV import completed: ${job.rows_fetched} ML candles merged.`
+          : `Crypto CSV import failed: ${job.error ?? 'unknown error'}`,
+      });
       await loadPageData();
     } catch (error) {
-      setBanner({ tone: 'error', message: `Crypto CSV import failed to start: ${normalizeError(error)}` });
+      setBanner({ tone: 'error', message: `Crypto CSV import request failed: ${normalizeError(error)}` });
     } finally {
       setIsImportingCrypto(false);
     }
@@ -1016,6 +1048,13 @@ const MachineLearning: React.FC = () => {
               Crypto 1D {cryptoPredictionFreshness.is_stale ? 'stale' : 'fresh'}
             </Badge>
           )}
+          <ActionButton
+            tone="blue"
+            disabled={isRunningPredictions || !activeCryptoModel}
+            onClick={() => { void handleRunPredictions(); }}
+          >
+            {isRunningPredictions ? 'Running predictions…' : 'Run predictions'}
+          </ActionButton>
           {stockPredictionFreshness && (
             <Badge v={stockPredictionFreshness.is_stale ? 'red' : 'amber'}>
               Stock 1D {stockPredictionFreshness.is_stale ? 'stale' : 'fresh'}
@@ -1027,13 +1066,13 @@ const MachineLearning: React.FC = () => {
             {cryptoPredictionFreshness && (
               <span>
                 Crypto latest 1D candle: {cryptoPredictionFreshness.latest_candle_time ? formatTimestamp(cryptoPredictionFreshness.latest_candle_time) : 'n/a'}
-                {cryptoPredictionFreshness.lag_days !== null ? ` · lag ${cryptoPredictionFreshness.lag_days.toFixed(1)}d` : ''}
+                {formatLagDays(cryptoPredictionFreshness.lag_days)}
               </span>
             )}
             {stockPredictionFreshness && (
               <span>
                 Stock latest 1D candle: {stockPredictionFreshness.latest_candle_time ? formatTimestamp(stockPredictionFreshness.latest_candle_time) : 'n/a'}
-                {stockPredictionFreshness.lag_days !== null ? ` · lag ${stockPredictionFreshness.lag_days.toFixed(1)}d` : ''}
+                {formatLagDays(stockPredictionFreshness.lag_days)}
               </span>
             )}
           </div>
@@ -1157,7 +1196,7 @@ const MachineLearning: React.FC = () => {
         <div style={{ padding: 16, display: 'flex', gap: 24, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
             {[
-              { label: 'Crypto coverage', value: formatNumber(cryptoCandles), color: S.blue, sub: `${cryptoSymbols} symbols · ${cryptoUniverse?.scope_source ?? 'KRAKEN_UNIVERSE'}` },
+              { label: 'Crypto coverage', value: formatNumber(cryptoCandles), color: S.blue, sub: `${cryptoSymbols} ML symbols · *_1440.csv + catch-up` },
               { label: 'Stock coverage', value: formatNumber(stockCandles), color: S.amber, sub: `${stockSymbols} symbols in training set` },
               { label: 'Target per symbol', value: String(stockUniverse?.target_candles_per_symbol ?? 1000), color: S.text, sub: '1D candles to pull for stock ML' },
               { label: 'Minimum usable', value: String(stockUniverse?.minimum_candles_per_symbol ?? 750), color: S.text, sub: 'clean candles required for training' },

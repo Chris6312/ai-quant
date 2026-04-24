@@ -468,3 +468,31 @@ async def test_training_status_cache_rebuilds_after_expiration(
     assert calls == 2
     assert second["total_candles"] == 99
     assert second["generated_at"] != first["generated_at"]
+
+
+def test_crypto_csv_import_endpoint_uses_manual_csv_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The crypto CSV button should target the manual CSV import endpoint."""
+
+    async def fake_import() -> dict[str, object]:
+        return {
+            "job_id": "csv-import-job",
+            "type": "crypto_csv_import",
+            "asset_class": "crypto",
+            "status": "done",
+            "rows_fetched": 12,
+            "result": {"rows_written": 12},
+        }
+
+    monkeypatch.setattr(ml_router, "load_jobs", lambda: [])
+    monkeypatch.setattr(ml_router, "_import_crypto_csv_candles", fake_import)
+
+    client = TestClient(app)
+    response = client.post("/ml/import/crypto-csv")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"] == "csv-import-job"
+    assert payload["type"] == "crypto_csv_import"
+    assert payload["status"] == "done"

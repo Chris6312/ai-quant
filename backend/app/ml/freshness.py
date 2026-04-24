@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.constants import ALPACA_DEFAULT_TIMEFRAME, ML_CANDLE_USAGE
-from app.config.crypto_scope import list_crypto_watchlist_symbols
+from app.config.crypto_scope import list_crypto_ml_symbols
 from app.repositories.candles import CandleRepository
 
 
@@ -87,9 +87,9 @@ async def evaluate_crypto_ml_freshness(
     *,
     current_date: date | None = None,
 ) -> MlFreshnessResult:
-    """Evaluate whether crypto ML daily candles are complete enough for scoring."""
+    """Evaluate whether canonical crypto ML daily candles are complete enough for scoring."""
 
-    symbols = list_crypto_watchlist_symbols()
+    symbols = list_crypto_ml_symbols()
     latest_by_symbol = await CandleRepository(session).get_latest_candle_times(
         symbols=symbols,
         timeframe=ALPACA_DEFAULT_TIMEFRAME,

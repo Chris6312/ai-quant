@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from app.api.routers import ml as ml_router
 from app.config.constants import CELERY_DEFAULT_QUEUE, CELERY_ML_QUEUE
+from app.config.crypto_scope import canonicalize_crypto_ml_symbol, list_crypto_ml_symbols
 from app.ml.freshness import MlFreshnessResult, classify_ml_freshness
 from app.tasks.ml_candles import build_ml_daily_sync_payload
 from app.tasks.worker import celery_app
@@ -143,3 +144,14 @@ async def test_prediction_guard_allows_fresh_crypto_ml(
     result = await ml_router._ensure_crypto_ml_can_score()
 
     assert result == fresh_result
+
+
+def test_crypto_ml_symbols_normalize_doge_to_xdg() -> None:
+    """The ML lane stores Dogecoin under the Kraken canonical XDG/USD symbol."""
+
+    symbols = list_crypto_ml_symbols()
+
+    assert canonicalize_crypto_ml_symbol("DOGE/USD") == "XDG/USD"
+    assert "XDG/USD" in symbols
+    assert "DOGE/USD" not in symbols
+    assert len(symbols) == 15

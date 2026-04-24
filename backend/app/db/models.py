@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -146,6 +147,63 @@ class PositionRow(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
+
+class PredictionRow(Base):
+    """Persisted ML prediction snapshot."""
+
+    __tablename__ = "predictions"
+    __table_args__ = (
+        Index("ix_predictions_asset_created", "asset_class", "created_at"),
+        Index("ix_predictions_symbol_candle", "symbol", "candle_time"),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_id: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    probability_down: Mapped[float] = mapped_column(Float, nullable=False)
+    probability_flat: Mapped[float] = mapped_column(Float, nullable=False)
+    probability_up: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    gate_outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    top_driver: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    candle_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    feature_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_event_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    signal_event: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+
+
+class PredictionShapRow(Base):
+    """Persisted per-feature LightGBM contribution values for a prediction."""
+
+    __tablename__ = "prediction_shap"
+    __table_args__ = (
+        Index("ix_prediction_shap_prediction_abs", "prediction_id", "abs_value"),
+    )
+
+    id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    prediction_id: Mapped[str] = mapped_column(
+        ForeignKey("predictions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature: Mapped[str] = mapped_column(String(64), nullable=False)
+    feature_value: Mapped[float] = mapped_column(Float, nullable=False)
+    shap_value: Mapped[float] = mapped_column(Float, nullable=False)
+    abs_value: Mapped[float] = mapped_column(Float, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
 class TradeRow(Base):
     """Completed trade record for P&L accounting."""
 

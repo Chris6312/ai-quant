@@ -8,7 +8,7 @@ import lightgbm as lgbm
 import numpy as np
 from numpy.typing import NDArray
 
-from app.ml.features import FeatureVector, ordered_feature_row
+from app.ml.features import ALL_FEATURES, FeatureVector, ordered_feature_row
 
 FloatArray = NDArray[np.float64]
 
@@ -20,6 +20,7 @@ class PredictionResult:
     direction: str
     confidence: float
     class_probs: tuple[float, float, float]
+    class_index: int
 
 
 class ModelPredictor:
@@ -49,7 +50,26 @@ class ModelPredictor:
             direction=direction,
             confidence=confidence,
             class_probs=class_probs,
+            class_index=class_index,
         )
+
+    def explain(
+        self,
+        features: FeatureVector,
+        *,
+        class_index: int,
+    ) -> dict[str, float]:
+        """Return LightGBM contribution values for the predicted class."""
+
+        row = np.asarray([self._vectorize(features)], dtype=float)
+        raw_contribs = np.asarray(self._booster.predict(row, pred_contrib=True), dtype=float)
+        contribs = self._extract_class_contributions(raw_contribs, class_index)
+        if contribs is None:
+            return {}
+        return {
+            feature_name: float(contrib)
+            for feature_name, contrib in zip(ALL_FEATURES, contribs, strict=True)
+        }
 
     def _vectorize(self, features: FeatureVector) -> list[float]:
         """Convert a feature dictionary into an ordered numeric row."""
@@ -73,6 +93,40 @@ class ModelPredictor:
             return None
 
         return (float(row[0]), float(row[1]), float(row[2]))
+
+    def _extract_class_contributions(
+        self,
+        contributions: FloatArray,
+        class_index: int,
+    ) -> FloatArray | None:
+        """Normalize LightGBM contribution output into one feature vector."""
+
+        feature_count_with_bias = len(ALL_FEATURES) + 1
+        if contributions.ndim == 3 and contributions.shape[0] >= 1:
+            if class_index >= contributions.shape[1]:
+                return None
+            class_contributions = np.asarray(
+                contributions[0, class_index, :-1],
+                dtype=np.float64,
+            )
+            return class_contributions
+
+        if contributions.ndim != 2 or contributions.shape[0] < 1:
+            return None
+
+        row = contributions[0]
+        if row.shape[0] == feature_count_with_bias:
+            direct_contributions = np.asarray(row[:-1], dtype=np.float64)
+            return direct_contributions
+
+        expected_multiclass_width = 3 * feature_count_with_bias
+        if row.shape[0] == expected_multiclass_width:
+            start = class_index * feature_count_with_bias
+            end = start + len(ALL_FEATURES)
+            multiclass_contributions = np.asarray(row[start:end], dtype=np.float64)
+            return multiclass_contributions
+
+        return None
 
     def _direction_for_class(self, class_index: int) -> str:
         """Map class index to trading direction."""

@@ -28,6 +28,26 @@ KRAKEN_UNIVERSE: Final[tuple[str, ...]] = (
 )
 """Canonical crypto universe for the runtime Kraken lane."""
 
+
+CRYPTO_ML_SYMBOL_ALIASES: Final[dict[str, str]] = {
+    "DOGE/USD": "XDG/USD",
+}
+"""Storage aliases for the ML candle lane. Runtime can still display DOGE/USD."""
+
+
+def canonicalize_crypto_ml_symbol(symbol: str) -> str:
+    """Return the canonical storage symbol for crypto ML candles and scoring."""
+
+    normalized = symbol.upper()
+    return CRYPTO_ML_SYMBOL_ALIASES.get(normalized, normalized)
+
+
+def list_crypto_ml_symbols() -> list[str]:
+    """Return canonical crypto symbols expected in the ML candle lane."""
+
+    symbols = {canonicalize_crypto_ml_symbol(symbol) for symbol in KRAKEN_UNIVERSE}
+    return sorted(symbols)
+
 CRYPTO_SCOPE_MODEL: Final[dict[str, str]] = {
     "crypto_universe": (
         "Canonical crypto symbol set for the current crypto-first rollout. "

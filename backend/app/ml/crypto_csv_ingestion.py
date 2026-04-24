@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,9 @@ from app.config.constants import CRYPTO_CSV_TRAINING_SOURCE, ML_CANDLE_USAGE
 from app.db.models import CandleRow
 from app.exceptions import ResearchParseError
 from app.repositories.candles import CandleRepository
+
+_DAILY_KRAKEN_INTERVAL = "1440"
+_HEADER_TOKENS = {"date", "time", "timestamp", "unix", "open_time"}
 
 
 @dataclass(slots=True)
@@ -54,7 +58,8 @@ class CryptoCsvTrainingIngestor:
             return float(raw_value.strip())
         except ValueError as exc:
             raise ResearchParseError(
-                f"invalid {field_name} value '{raw_value}' in {file_name}"
+                f"invalid_csv_format: invalid {field_name} value "
+                f"'{raw_value}' in {file_name}"
             ) from exc
 
     def _parse_timestamp(
@@ -67,18 +72,50 @@ class CryptoCsvTrainingIngestor:
             unix_seconds = int(raw_value.strip())
         except ValueError as exc:
             raise ResearchParseError(
-                f"invalid timestamp value '{raw_value}' in {file_name}"
+                f"invalid_csv_format: invalid timestamp value "
+                f"'{raw_value}' in {file_name}"
             ) from exc
 
         return datetime.fromtimestamp(unix_seconds, tz=UTC)
 
-    def _symbol_from_filename(self, csv_path: Path) -> str:
+    def _filename_parts(self, csv_path: Path) -> tuple[str, str]:
         stem = csv_path.stem
-        if stem.endswith("_1440"):
-            stem = stem[:-5]
-        return self._normalize_symbol(stem)
+        symbol_stem, separator, interval = stem.rpartition("_")
+        if separator == "" or not interval.isdigit():
+            raise ResearchParseError(
+                f"invalid_timeframe: {csv_path.name} must use Kraken naming "
+                "<SYMBOL>_<INTERVAL>.csv"
+            )
+        return symbol_stem, interval
+
+    def _symbol_from_filename(self, csv_path: Path) -> str:
+        symbol_stem, _ = self._filename_parts(csv_path)
+        return self._normalize_symbol(symbol_stem)
+
+    def _ensure_daily_file(self, csv_path: Path) -> None:
+        _, interval = self._filename_parts(csv_path)
+        if interval != _DAILY_KRAKEN_INTERVAL:
+            raise ResearchParseError(
+                f"invalid_timeframe: {csv_path.name} has Kraken interval "
+                f"{interval}; expected {_DAILY_KRAKEN_INTERVAL} for 1D ML candles"
+            )
+
+    def _is_header_row(self, row: list[str]) -> bool:
+        first_cell = row[0].strip().lower()
+        return first_cell in _HEADER_TOKENS
+
+    def _volume_index(self, row: list[str], *, file_name: str, line_number: int) -> int:
+        if len(row) == 7:
+            return 5
+        if len(row) >= 8:
+            return 6
+        raise ResearchParseError(
+            f"missing_columns: {file_name} row {line_number} has fewer than 7 columns"
+        )
 
     def _read_csv(self, csv_path: Path) -> tuple[str, list[CandleRow], int]:
+        self._ensure_daily_file(csv_path)
+
         dedup: dict[datetime, CandleRow] = {}
         rows_seen = 0
 
@@ -89,12 +126,14 @@ class CryptoCsvTrainingIngestor:
             for line_number, row in enumerate(reader, start=1):
                 if not row or not any(cell.strip() for cell in row):
                     continue
+                if self._is_header_row(row):
+                    continue
 
-                if len(row) < 7:
-                    raise ResearchParseError(
-                        f"{csv_path.name} row {line_number} has fewer than 7 columns"
-                    )
-
+                volume_index = self._volume_index(
+                    row,
+                    file_name=csv_path.name,
+                    line_number=line_number,
+                )
                 timestamp = self._parse_timestamp(row[0], file_name=csv_path.name)
                 rows_seen += 1
                 dedup[timestamp] = CandleRow(
@@ -124,7 +163,7 @@ class CryptoCsvTrainingIngestor:
                         file_name=csv_path.name,
                     ),
                     volume=self._parse_float(
-                        row[6],
+                        row[volume_index],
                         field_name="volume",
                         file_name=csv_path.name,
                     ),
@@ -133,10 +172,10 @@ class CryptoCsvTrainingIngestor:
 
         return symbol, list(dedup.values()), rows_seen
 
-    async def ingest_all(self) -> list[IngestSummary]:
+    async def ingest_files(self, csv_files: Sequence[Path]) -> list[IngestSummary]:
         summaries: list[IngestSummary] = []
 
-        for csv_file in sorted(self.csv_dir.glob("*_1440.csv")):
+        for csv_file in csv_files:
             symbol, rows, rows_seen = self._read_csv(csv_file)
 
             if hasattr(self.repository, "bulk_upsert"):
@@ -158,3 +197,13 @@ class CryptoCsvTrainingIngestor:
             )
 
         return summaries
+
+    async def ingest_daily_files(self) -> list[IngestSummary]:
+        """Ingest only Kraken daily 1D files and ignore intraday files in the folder."""
+
+        return await self.ingest_files(sorted(self.csv_dir.glob("*_1440.csv")))
+
+    async def ingest_all(self) -> list[IngestSummary]:
+        """Ingest every CSV file, preserving strict timeframe validation for tests/tools."""
+
+        return await self.ingest_files(sorted(self.csv_dir.glob("*.csv")))

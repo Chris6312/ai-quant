@@ -17,6 +17,8 @@ from app.db.models import (  # noqa: F401
     CongressTradeRow,
     InsiderTradeRow,
     PositionRow,
+    PredictionRow,
+    PredictionShapRow,
     ResearchSignalRow,
     WatchlistRow,
 )
