@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Protocol, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session
+from app.config.constants import (
+    ML_DAILY_WORKER_ID,
+    ML_DAILY_WORKER_SOURCE,
+)
 from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_watchlist_symbols
 from app.repositories.watchlist import WatchlistRepository
 from app.services.crypto_runtime_targets import list_crypto_runtime_targets
@@ -78,6 +82,7 @@ async def get_runtime_workers(
         },
         "crypto_scope": _serialize_crypto_scope(snapshot.workers),
         "workers": workers,
+        "ml_workers": _serialize_ml_workers(snapshot.workers),
         "watchlist_targets": targets,
         "recent_events": [_serialize_event(event) for event in snapshot.recent_events],
         "supervisor": {
@@ -164,6 +169,37 @@ async def _serialize_watchlist_targets(
         )
 
     return targets
+
+
+def _serialize_ml_workers(workers: list[WorkerSnapshot]) -> list[dict[str, Any]]:
+    """Return configured ML worker visibility without mixing it into candle workers."""
+
+    existing = next(
+        (worker for worker in workers if worker.key.id == ML_DAILY_WORKER_ID),
+        None,
+    )
+    if existing is not None:
+        return [_serialize_worker(existing)]
+
+    return [
+        {
+            "worker_id": ML_DAILY_WORKER_ID,
+            "symbol": "crypto",
+            "asset_class": "ml",
+            "timeframe": "1D",
+            "source": ML_DAILY_WORKER_SOURCE,
+            "status": "configured",
+            "health": "inactive",
+            "started_at": datetime.now(tz=UTC).isoformat(),
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+            "last_heartbeat_at": None,
+            "last_candle_close_at": None,
+            "last_error": None,
+            "task_name": "tasks.ml_candles.daily_sync",
+            "heartbeat_ttl_s": 0,
+            "heartbeat_age_s": None,
+        }
+    ]
 
 
 def _serialize_worker(worker: WorkerSnapshot) -> dict[str, Any]:

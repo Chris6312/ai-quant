@@ -129,7 +129,7 @@ Start crypto market-data heartbeat.
 * [x] Show crypto scheduler worker without symbol/table overflow noise
 * [x] Show last candle close as a first-class runtime column
 * [x] Move recent lifecycle events below managed workers at full page width
-* [x] Keep ML daily worker visibility out of Phase 5 because that worker is deferred to Phase 8
+* [x] Keep ML daily worker visibility out of Phase 5 because that worker moved into Phase 6
 
 ### Validation
 
@@ -143,27 +143,33 @@ Start crypto market-data heartbeat.
 
 ---
 
-# Phase 6 — Crypto Signal Orchestrator
+# Phase 6 — ML / Candle Convergence
 
 ## Goal
 
-Turn candle-close into inference.
+Make ML candle data a first-class, correctly sourced, consistently fresh lane without interfering with trading candles.
 
 ### Backend
 
-* [ ] Create `SignalOrchestrator`
-* [ ] Subscribe to `candle_closed:*`
-* [ ] Load trading-lane candles
-* [ ] Convert → `Candle`
-* [x] FeatureEngineer already exists
-* [x] ModelPredictor already exists
-* [ ] Wire them into orchestrator
-* [ ] Apply gates
-* [ ] Call risk/sizer/portfolio
+* [x] Add dedicated ML Celery task module
+* [x] Route ML tasks to separate `ml` Celery queue
+* [x] Schedule daily ML candle sync at 08:40 ET
+* [x] Keep trading candle tasks on the default queue
+* [x] Sync crypto 1D ML candles through Alpaca training fetcher
+* [x] Persist ML sync rows with `usage="ml"`
+* [ ] Verify current candle schema usage separation: trading vs ml
+* [ ] Confirm existing candles are migrated or tagged correctly
+* [ ] Ensure ML reads the intended candle lane
+* [ ] Confirm crypto ML data is fresh enough for scoring
+
+### Frontend
+
+* [x] Add ML worker visibility to Runtime page
+* [x] Keep heartbeat noise out of visible lifecycle events
 
 ### Execution mode
 
-* [ ] Paper-only execution first
+* [ ] Daily ML sync only; no intraday ML polling
 
 ---
 
@@ -189,18 +195,14 @@ Store truth instead of rebuilding it.
 
 ---
 
-# Phase 8 — Crypto ML API Replacement + ML Daily Candle Worker
+# Phase 8 — Crypto ML API Replacement
 
 ## Goal
 
-ML page uses real data and daily ML candles are synced by a dedicated ML-lane worker.
+ML page uses real persisted prediction data after the ML candle lane is stable.
 
 ### Backend
 
-* [ ] Implement ML daily candle sync worker
-  → daily 1D candles, `usage="ml"`, separate from trading-lane candle scheduler
-* [ ] Add ML daily worker runtime visibility
-* [ ] Keep ML daily sync isolated from crypto current-candle trading tasks
 * [ ] Replace `/ml/predictions`
 * [ ] Add `/ml/predictions/{id}/shap`
 * [ ] Use persisted data

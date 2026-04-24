@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.candle.backfill import BackfillService
 from app.candle.kraken_rest import KrakenRestCandleClient
-from app.config.constants import ML_CANDLE_USAGE, TRADING_CANDLE_USAGE
+from app.config.constants import TRADING_CANDLE_USAGE
 from app.config.crypto_scope import list_crypto_watchlist_symbols
 from app.config.settings import get_settings
 from app.db.session import build_engine, build_session_factory
@@ -20,10 +20,8 @@ from app.repositories.candles import CandleRepository
 from app.tasks.worker import celery_app
 
 CRYPTO_TRADING_TIMEFRAMES: tuple[str, ...] = ("5m", "15m", "1h", "4h")
-CRYPTO_ML_TIMEFRAMES: tuple[str, ...] = ("1d",)
 CRYPTO_STRATEGY_BACKFILL_DAYS = 90
 CRYPTO_INCREMENTAL_LOOKBACK_DAYS = 3
-CRYPTO_ML_BACKFILL_DAYS = 730
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,32 +85,6 @@ def crypto_sync_closed_candles_task(
         timeframes=requested_timeframes,
         rows=row_count,
         usage=TRADING_CANDLE_USAGE,
-    )
-
-
-@celery_app.task(name="tasks.crypto_candles.ml_daily_backfill")
-def crypto_ml_daily_backfill_task(
-    symbols: list[str] | None = None,
-    lookback_days: int = CRYPTO_ML_BACKFILL_DAYS,
-) -> dict[str, object]:
-    """Backfill Kraken daily ML-lane candles separately from trading candles."""
-
-    requested_symbols = symbols or list_crypto_watchlist_symbols()
-    requested_timeframes = list(CRYPTO_ML_TIMEFRAMES)
-    row_count = asyncio.run(
-        _run_backfill(
-            symbols=requested_symbols,
-            timeframes=requested_timeframes,
-            lookback_days=lookback_days,
-            usage=ML_CANDLE_USAGE,
-        )
-    )
-    return _task_result(
-        task="ml_daily_backfill",
-        symbols=requested_symbols,
-        timeframes=requested_timeframes,
-        rows=row_count,
-        usage=ML_CANDLE_USAGE,
     )
 
 

@@ -89,6 +89,8 @@ def test_runtime_workers_endpoint_returns_registry_snapshot() -> None:
     assert payload["workers"][0]["worker_id"] == "stock:AAPL:1Day"
     assert payload["workers"][0]["status"] == WorkerStatus.RUNNING.value
     assert payload["workers"][0]["health"] == "healthy"
+    assert payload["ml_workers"][0]["worker_id"] == "ml:crypto:1D"
+    assert payload["ml_workers"][0]["task_name"] == "tasks.ml_candles.daily_sync"
     assert payload["crypto_scope"]["universe_count"] >= 1
     assert (
         payload["crypto_scope"]["watchlist_count"]

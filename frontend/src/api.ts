@@ -123,6 +123,7 @@ export type RuntimeWorkersResponse = {
   coverage: RuntimeCoverageSummary;
   crypto_scope: RuntimeCryptoScope;
   workers: RuntimeWorkerRecord[];
+  ml_workers: RuntimeWorkerRecord[];
   watchlist_targets: RuntimeWatchlistTarget[];
   recent_events: RuntimeWorkerEvent[];
   supervisor: RuntimeSupervisorSnapshot;

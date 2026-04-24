@@ -60,22 +60,6 @@ function fmtDateTime(value: string | null): string {
   });
 }
 
-function fmtAge(value: number | null): string {
-  if (value === null || Number.isNaN(value)) {
-    return '—';
-  }
-  if (value < 1) {
-    return '<1s';
-  }
-  if (value < 60) {
-    return `${Math.round(value)}s`;
-  }
-  if (value < 3600) {
-    return `${Math.round(value / 60)}m`;
-  }
-  return `${(value / 3600).toFixed(1)}h`;
-}
-
 function pillStyle(tone: Tone): React.CSSProperties {
   return {
     ...toneStyle[tone],
@@ -122,11 +106,28 @@ function toneForStatus(status: string): Tone {
   }
 }
 
+function isMlWorker(worker: RuntimeWorkerRecord): boolean {
+  const taskName = worker.task_name ?? '';
+  const workerKey = `${worker.worker_id} ${worker.source} ${taskName}`.toLowerCase();
+  return workerKey.includes('ml_daily') || workerKey.includes('ml daily') || workerKey.includes('ml_candles');
+}
+
+function workerLane(worker: RuntimeWorkerRecord): string {
+  return isMlWorker(worker) ? 'ml' : 'trading';
+}
+
+function formatWorkerAsset(worker: RuntimeWorkerRecord): string {
+  if (isMlWorker(worker) && worker.asset_class.toLowerCase() === 'ml') {
+    return 'crypto';
+  }
+  return worker.asset_class;
+}
+
 function formatWorkerPurpose(worker: RuntimeWorkerRecord): string {
   const taskName = worker.task_name ?? '';
   const workerKey = `${worker.worker_id} ${worker.source} ${taskName}`.toLowerCase();
 
-  if (workerKey.includes('ml_daily') || workerKey.includes('ml daily')) {
+  if (isMlWorker(worker)) {
     return 'Crypto ML Daily Fill';
   }
   if (workerKey.includes('initial_backfill') || workerKey.includes('backfill')) {
@@ -183,14 +184,15 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
       <table className="wl-table" style={{ minWidth: 980, tableLayout: 'auto', width: '100%' }}>
         <thead>
           <tr>
-            <th style={{ width: '18%' }}>Worker</th>
+            <th style={{ width: '17%' }}>Worker</th>
+            <th style={{ width: '8%' }}>Lane</th>
             <th style={{ width: '15%' }}>Purpose</th>
             <th style={{ width: '8%' }}>Asset</th>
-            <th style={{ width: '10%' }}>Timeframes</th>
+            <th style={{ width: '9%' }}>Timeframes</th>
             <th style={{ width: '9%' }}>Status</th>
             <th style={{ width: '9%' }}>Health</th>
-            <th style={{ width: '11%' }}>Heartbeat</th>
-            <th style={{ width: '11%' }}>Candle close</th>
+            <th style={{ width: '10%' }}>Updated</th>
+            <th style={{ width: '10%' }}>Candle close</th>
             <th style={{ width: '10%' }}>Task</th>
             <th>Last error</th>
           </tr>
@@ -216,8 +218,11 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
                   </span>
                 </div>
               </td>
+              <td>
+                <span style={pillStyle(isMlWorker(worker) ? 'blue' : 'green')}>{workerLane(worker)}</span>
+              </td>
               <td>{formatWorkerSource(worker)}</td>
-              <td>{worker.asset_class}</td>
+              <td>{formatWorkerAsset(worker)}</td>
               <td>{worker.timeframe}</td>
               <td>
                 <span style={pillStyle(toneForStatus(worker.status))}>{worker.status}</span>
@@ -225,12 +230,7 @@ function RuntimeWorkerTable({ workers }: { workers: RuntimeWorkerRecord[] }): Re
               <td>
                 <span style={pillStyle(toneForHealth(worker.health))}>{worker.health}</span>
               </td>
-              <td>
-                <div style={{ display: 'grid', gap: 3 }}>
-                  <span>{fmtDateTime(worker.last_heartbeat_at)}</span>
-                  <span style={{ color: 'var(--text3)', fontSize: 10 }}>age {fmtAge(worker.heartbeat_age_s)}</span>
-                </div>
-              </td>
+              <td>{fmtDateTime(worker.updated_at)}</td>
               <td>{fmtDateTime(worker.last_candle_close_at)}</td>
               <td>{formatWorkerTask(worker)}</td>
               <td
@@ -272,7 +272,6 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
             <th>Attachment</th>
             <th>Worker status</th>
             <th>Worker health</th>
-            <th>Last heartbeat</th>
             <th>Last error</th>
           </tr>
         </thead>
@@ -305,7 +304,6 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
                   '—'
                 )}
               </td>
-              <td>{fmtDateTime(target.last_heartbeat_at)}</td>
               <td style={{ color: target.last_error ? 'var(--red)' : 'var(--text3)' }}>
                 {target.last_error ?? '—'}
               </td>
@@ -397,6 +395,18 @@ const Runtime: React.FC = () => {
   const summary = runtime?.summary;
   const coverage = runtime?.coverage;
   const watchlistTargets = runtime?.watchlist_targets ?? [];
+  const mlWorkers = runtime?.ml_workers ?? [];
+  const tradingWorkers = runtime?.workers ?? [];
+  const managedWorkersById = new Map<string, RuntimeWorkerRecord>();
+
+  for (const worker of [...tradingWorkers, ...mlWorkers]) {
+    managedWorkersById.set(worker.worker_id, worker);
+  }
+
+  const managedWorkers = Array.from(managedWorkersById.values());
+  const combinedWorkerCount = managedWorkers.length;
+  const combinedHealthyCount = managedWorkers.filter((worker) => worker.health === 'healthy').length;
+  const combinedStaleCount = managedWorkers.filter((worker) => worker.health === 'stale').length;
   const cryptoScope = runtime?.crypto_scope;
 
   return (
@@ -413,7 +423,7 @@ const Runtime: React.FC = () => {
         <div>
           <div style={{ fontSize: 18, color: 'var(--text)', fontWeight: 500 }}>Worker runtime</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
-            Live visibility into the worker registry, supervisor, stock watchlist coverage, and crypto scope truth.
+            Live visibility into the worker registry, ML queue, supervisor, stock watchlist coverage, and crypto scope truth.
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -485,19 +495,19 @@ const Runtime: React.FC = () => {
         {[
           {
             label: 'Total workers',
-            value: summary?.total_workers ?? '—',
+            value: runtime ? combinedWorkerCount : (summary?.total_workers ?? '—'),
             tone: 'muted' as Tone,
             sub: 'Registry snapshot',
           },
           {
             label: 'Healthy',
-            value: summary?.healthy_workers ?? '—',
+            value: runtime ? combinedHealthyCount : (summary?.healthy_workers ?? '—'),
             tone: 'green' as Tone,
-            sub: 'Fresh heartbeats',
+            sub: 'Fresh worker state',
           },
           {
             label: 'Stale',
-            value: summary?.stale_workers ?? '—',
+            value: runtime ? combinedStaleCount : (summary?.stale_workers ?? '—'),
             tone: 'amber' as Tone,
             sub: 'Needs attention',
           },
@@ -661,17 +671,17 @@ const Runtime: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">Managed workers</span>
-            <span style={pillStyle((summary?.total_workers ?? 0) > 0 ? 'green' : 'muted')}>
-              {summary?.total_workers ?? 0} registered
+            <span style={pillStyle(combinedWorkerCount > 0 ? 'green' : 'muted')}>
+              {combinedWorkerCount} registered
             </span>
           </div>
           <div className="card-body" style={{ display: 'grid', gap: 10 }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              Crypto Phase 5 currently uses one registered scheduler worker for trading-lane candle
-              sync. ML daily candle sync is intentionally deferred to Phase 8 and should not appear as
-              a live worker yet.
+              Managed workers include both the trading candle scheduler and the ML daily candle
+              sync lane. Heartbeat noise is filtered out of the visible lifecycle table so fills,
+              dispatches, errors, and other meaningful events remain readable.
             </div>
-            <RuntimeWorkerTable workers={runtime?.workers ?? []} />
+            <RuntimeWorkerTable workers={managedWorkers} />
           </div>
         </div>
 

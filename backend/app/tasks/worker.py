@@ -5,7 +5,7 @@ from __future__ import annotations
 from celery import Celery
 from celery.schedules import crontab
 
-from app.config.constants import APP_NAME
+from app.config.constants import APP_NAME, CELERY_DEFAULT_QUEUE, CELERY_ML_QUEUE
 from app.config.settings import get_settings
 
 try:
@@ -15,6 +15,7 @@ try:
 
     def _log_warning(event: str, **context: object) -> None:
         _LOGGER.warning(event, **context)
+
 except ImportError:
     import logging
 
@@ -33,18 +34,32 @@ celery_app = Celery(
     include=[
         "app.tasks.worker",
         "app.tasks.crypto_candles",
+        "app.tasks.ml_candles",
     ],
 )
 
-celery_app.conf.task_track_started = True
-celery_app.conf.worker_send_task_events = True
-celery_app.conf.beat_schedule = {
-    "retrain-weekly": {
-        "task": "tasks.retrain_models",
-        "schedule": crontab(hour=2, minute=0, day_of_week=0),
-        "args": ["both"],
-    }
-}
+celery_app.conf.update(
+    task_track_started=True,
+    worker_send_task_events=True,
+    task_default_queue=CELERY_DEFAULT_QUEUE,
+    task_routes={
+        "tasks.crypto_candles.*": {"queue": CELERY_DEFAULT_QUEUE},
+        "tasks.ml_candles.*": {"queue": CELERY_ML_QUEUE},
+        "tasks.retrain_models": {"queue": CELERY_ML_QUEUE},
+    },
+    timezone="America/New_York",
+    beat_schedule={
+        "ml-daily-candle-sync": {
+            "task": "tasks.ml_candles.daily_sync",
+            "schedule": crontab(hour=8, minute=40),
+        },
+        "retrain-weekly": {
+            "task": "tasks.retrain_models",
+            "schedule": crontab(hour=2, minute=0, day_of_week=0),
+            "args": ["both"],
+        },
+    },
+)
 
 
 @celery_app.task(name="tasks.retrain_models")
