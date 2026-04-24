@@ -115,6 +115,7 @@ Start crypto market-data heartbeat.
 * [x] Replace per-symbol crypto heartbeat workers with one crypto candle scheduler
 * [x] Queue initial Kraken strategy backfill through Celery
 * [x] Queue incremental Kraken trading candle sync through Celery
+* [x] Schedule incremental sync only 20 seconds after each candle close
 * [x] Keep 1D candles separated for ML-lane backfill
 * [~] Start candle workers
   → one scheduler is active; Celery worker process must be running to execute queued Kraken tasks

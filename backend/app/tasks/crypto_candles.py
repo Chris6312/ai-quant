@@ -65,6 +65,8 @@ def crypto_initial_backfill_task(
 def crypto_sync_closed_candles_task(
     symbols: list[str] | None = None,
     timeframes: list[str] | None = None,
+    requested_at: str | None = None,
+    candle_close_at: str | None = None,
     lookback_days: int = CRYPTO_INCREMENTAL_LOOKBACK_DAYS,
 ) -> dict[str, object]:
     """Refresh recent Kraken trading-lane candles after candle close."""
@@ -182,24 +184,42 @@ def _task_result(
     }
 
 
+def build_crypto_initial_backfill_payload(symbols: Sequence[str]) -> CeleryTaskPayload:
+    """Return the one-shot strategy candle backfill task payload."""
+
+    return CeleryTaskPayload(
+        name="tasks.crypto_candles.initial_backfill",
+        kwargs={
+            "symbols": list(symbols),
+            "timeframes": list(CRYPTO_TRADING_TIMEFRAMES),
+            "lookback_days": CRYPTO_STRATEGY_BACKFILL_DAYS,
+        },
+    )
+
+
+def build_crypto_sync_task_payload(
+    symbols: Sequence[str],
+    timeframes: Sequence[str],
+) -> CeleryTaskPayload:
+    """Return the incremental closed-candle sync task for due timeframes only."""
+
+    return CeleryTaskPayload(
+        name="tasks.crypto_candles.sync_closed_candles",
+        kwargs={
+            "symbols": list(symbols),
+            "timeframes": list(timeframes),
+            "lookback_days": CRYPTO_INCREMENTAL_LOOKBACK_DAYS,
+        },
+    )
+
+
 def build_crypto_celery_task_payloads(symbols: Sequence[str]) -> list[CeleryTaskPayload]:
-    """Return the Celery work items the runtime scheduler should submit."""
+    """Return startup task payloads used by compatibility tests and wiring."""
 
     return [
-        CeleryTaskPayload(
-            name="tasks.crypto_candles.initial_backfill",
-            kwargs={
-                "symbols": list(symbols),
-                "timeframes": list(CRYPTO_TRADING_TIMEFRAMES),
-                "lookback_days": CRYPTO_STRATEGY_BACKFILL_DAYS,
-            },
-        ),
-        CeleryTaskPayload(
-            name="tasks.crypto_candles.sync_closed_candles",
-            kwargs={
-                "symbols": list(symbols),
-                "timeframes": list(CRYPTO_TRADING_TIMEFRAMES),
-                "lookback_days": CRYPTO_INCREMENTAL_LOOKBACK_DAYS,
-            },
+        build_crypto_initial_backfill_payload(symbols),
+        build_crypto_sync_task_payload(
+            symbols=symbols,
+            timeframes=CRYPTO_TRADING_TIMEFRAMES,
         ),
     ]

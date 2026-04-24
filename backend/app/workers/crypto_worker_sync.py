@@ -5,13 +5,22 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
 
+from app.candle.crypto_scheduler import (
+    get_pending_strategy_timeframes,
+    latest_crypto_close_id,
+    next_crypto_candle_dispatch_at,
+)
 from app.services.crypto_runtime_targets import (
     CryptoRuntimeTarget,
     list_crypto_runtime_targets,
 )
-from app.tasks.crypto_candles import build_crypto_celery_task_payloads
+from app.tasks.crypto_candles import (
+    build_crypto_initial_backfill_payload,
+    build_crypto_sync_task_payload,
+)
 from app.tasks.worker import celery_app
 from app.workers.worker_lifecycle import (
     ManagedWorker,
@@ -76,31 +85,50 @@ class CeleryCryptoCandleSchedulerWorker:
         self._heartbeat_seconds = heartbeat_seconds
         self._dispatcher = dispatcher or CeleryAppTaskDispatcher()
         self._initial_backfill_dispatched = False
+        self._last_sync_close_ids: dict[str, str] = {}
 
     async def run(self) -> None:
         """Emit heartbeats and submit Celery candle tasks until cancelled."""
 
         while True:
             self._registry.mark_heartbeat(self._key)
-            await self._dispatch_candle_tasks()
-            await asyncio.sleep(self._heartbeat_seconds)
+            await self._dispatch_candle_tasks(datetime.now(UTC))
+            sleep_seconds = self._next_sleep_seconds()
+            await asyncio.sleep(min(self._heartbeat_seconds, sleep_seconds))
 
-    async def _dispatch_candle_tasks(self) -> None:
-        payloads = build_crypto_celery_task_payloads(self._target_symbols)
-        if not self._initial_backfill_dispatched and payloads:
-            initial_backfill = payloads[0]
+    async def _dispatch_candle_tasks(self, now: datetime) -> None:
+        if not self._initial_backfill_dispatched:
+            initial_backfill = build_crypto_initial_backfill_payload(self._target_symbols)
             self._dispatcher.send_task(
                 initial_backfill.name,
                 kwargs=initial_backfill.kwargs,
             )
             self._initial_backfill_dispatched = True
 
-        if len(payloads) > 1:
-            sync_payload = payloads[1]
-            self._dispatcher.send_task(
-                sync_payload.name,
-                kwargs=sync_payload.kwargs,
-            )
+        due = get_pending_strategy_timeframes(now, self._last_sync_close_ids)
+        if due is None:
+            return
+
+        sync_payload = build_crypto_sync_task_payload(
+            symbols=self._target_symbols,
+            timeframes=due.timeframes,
+        )
+        now_utc = now.astimezone(UTC)
+        sync_payload.kwargs["requested_at"] = now_utc.isoformat()
+        sync_payload.kwargs["candle_close_at"] = due.close_at.isoformat()
+        self._dispatcher.send_task(
+            sync_payload.name,
+            kwargs=sync_payload.kwargs,
+        )
+
+        for timeframe in due.timeframes:
+            close_id = latest_crypto_close_id(now_utc, timeframe)
+            if close_id is not None:
+                self._last_sync_close_ids[timeframe] = close_id
+
+    def _next_sleep_seconds(self) -> float:
+        now = datetime.now(UTC)
+        return max(0.0, (next_crypto_candle_dispatch_at(now) - now).total_seconds())
 
 
 class CryptoWorkerSynchronizer:

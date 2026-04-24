@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
+from app.candle.crypto_scheduler import due_crypto_timeframes, next_crypto_candle_dispatch_at
 from app.candle.kraken_rest import KrakenRestCandleSourceClient
 from app.models.domain import Candle
 from app.services.crypto_runtime_targets import CryptoRuntimeTarget
@@ -101,3 +102,38 @@ async def test_kraken_rest_client_fetches_confirmed_candle() -> None:
         volume=100.0,
         source="kraken",
     )
+
+
+def test_crypto_scheduler_calculates_due_timeframes_after_close_delay() -> None:
+    """Scheduler should queue only timeframes that closed 20 seconds ago."""
+
+    assert due_crypto_timeframes(
+        datetime(2026, 4, 23, 9, 5, 20, tzinfo=UTC)
+    ) == ["5m"]
+    assert due_crypto_timeframes(datetime(2026, 4, 23, 9, 15, 20, tzinfo=UTC)) == [
+        "5m",
+        "15m",
+    ]
+    assert due_crypto_timeframes(datetime(2026, 4, 23, 10, 0, 20, tzinfo=UTC)) == [
+        "5m",
+        "15m",
+        "1h",
+    ]
+    assert due_crypto_timeframes(datetime(2026, 4, 23, 12, 0, 20, tzinfo=UTC)) == [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+    ]
+    assert due_crypto_timeframes(datetime(2026, 4, 23, 12, 0, 19, tzinfo=UTC)) == []
+
+
+def test_crypto_scheduler_calculates_next_dispatch_after_close_delay() -> None:
+    """Scheduler should sleep until the next candle close plus 20 seconds."""
+
+    assert next_crypto_candle_dispatch_at(
+        datetime(2026, 4, 23, 9, 2, 0, tzinfo=UTC)
+    ) == datetime(2026, 4, 23, 9, 5, 20, tzinfo=UTC)
+    assert next_crypto_candle_dispatch_at(
+        datetime(2026, 4, 23, 9, 5, 20, tzinfo=UTC)
+    ) == datetime(2026, 4, 23, 9, 10, 20, tzinfo=UTC)
