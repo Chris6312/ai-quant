@@ -6,9 +6,10 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import unescape
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -42,6 +43,11 @@ SYMBOL_KEYWORDS: Mapping[str, tuple[str, ...]] = {
     "SHIB/USD": ("shib", "shiba inu"),
     "XTZ/USD": ("xtz", "tezos"),
 }
+
+TRACKING_QUERY_PREFIXES: tuple[str, ...] = ("utm_",)
+TRACKING_QUERY_KEYS: frozenset[str] = frozenset(
+    {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src"}
+)
 
 RSS_NAMESPACES: dict[str, str] = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -84,6 +90,7 @@ DEFAULT_RSS_SOURCES: tuple[RssSource, ...] = (
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WORD_RE = re.compile(r"[a-z0-9]+(?:/[a-z0-9]+)?")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 
 class CryptoRssClient:
@@ -136,6 +143,51 @@ def filter_relevant_articles(
         )
         matches.append(SymbolArticleMatches(symbol=canonical_symbol, articles=symbol_articles))
     return matches
+
+
+def prepare_articles_for_scoring(
+    matches: Sequence[SymbolArticleMatches],
+    *,
+    now: datetime | None = None,
+    max_age_days: int = 14,
+    min_text_chars: int = 40,
+    max_articles_per_symbol: int = 25,
+) -> list[SymbolArticleMatches]:
+    """Apply deduplication and quality filters before expensive sentiment scoring."""
+
+    reference_time = now or datetime.now(tz=UTC)
+    prepared: list[SymbolArticleMatches] = []
+    for match in matches:
+        filtered = (
+            article
+            for article in match.articles
+            if _passes_prescoring_filter(
+                article,
+                now=reference_time,
+                max_age_days=max_age_days,
+                min_text_chars=min_text_chars,
+            )
+        )
+        deduped = deduplicate_articles(filtered)
+        ordered = tuple(
+            sorted(deduped, key=lambda article: article.published_at, reverse=True)[
+                :max_articles_per_symbol
+            ]
+        )
+        prepared.append(SymbolArticleMatches(symbol=match.symbol, articles=ordered))
+    return prepared
+
+
+def deduplicate_articles(articles: Iterable[RssArticle]) -> tuple[RssArticle, ...]:
+    """Remove RSS syndication duplicates while preserving the richest article body."""
+
+    selected: dict[str, RssArticle] = {}
+    for article in articles:
+        key = _dedupe_key(article)
+        current = selected.get(key)
+        if current is None or _article_text_length(article) > _article_text_length(current):
+            selected[key] = article
+    return tuple(selected.values())
 
 
 def summarize_article_matches(matches: Sequence[SymbolArticleMatches]) -> dict[str, object]:
@@ -241,3 +293,61 @@ def _keyword_matches(searchable: str, tokens: set[str], keyword: str) -> bool:
     if " " in lowered:
         return lowered in searchable
     return lowered in tokens
+
+
+def _passes_prescoring_filter(
+    article: RssArticle,
+    *,
+    now: datetime,
+    max_age_days: int,
+    min_text_chars: int,
+) -> bool:
+    if not article.url.strip():
+        return False
+    if _article_text_length(article) < min_text_chars:
+        return False
+    earliest = now - timedelta(days=max_age_days)
+    latest = now + timedelta(days=1)
+    return earliest <= article.published_at <= latest
+
+
+def _article_text_length(article: RssArticle) -> int:
+    return len(f"{article.title} {article.summary}".strip())
+
+
+def _dedupe_key(article: RssArticle) -> str:
+    normalized_url = normalize_article_url(article.url)
+    if normalized_url:
+        return f"url:{normalized_url}"
+    title_key = _NON_ALNUM_RE.sub("-", article.title.lower()).strip("-")
+    published_key = article.published_at.isoformat(timespec="minutes")
+    return f"fallback:{article.source.lower()}:{published_key}:{title_key}"
+
+
+def normalize_article_url(url: str) -> str:
+    """Return a stable URL key without common tracking parameters."""
+
+    stripped = url.strip()
+    if not stripped:
+        return ""
+    parts = urlsplit(stripped)
+    filtered_query = tuple(
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not _is_tracking_query_key(key)
+    )
+    normalized_path = parts.path.rstrip("/") or "/"
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            normalized_path,
+            urlencode(filtered_query),
+            "",
+        )
+    )
+
+
+def _is_tracking_query_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in TRACKING_QUERY_KEYS or lowered.startswith(TRACKING_QUERY_PREFIXES)

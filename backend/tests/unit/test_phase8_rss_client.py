@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.research.rss_client import (
     RssArticle,
+    deduplicate_articles,
     filter_relevant_articles,
+    normalize_article_url,
     parse_rss_document,
+    prepare_articles_for_scoring,
     summarize_article_matches,
 )
 
@@ -95,3 +100,76 @@ def test_summarize_article_matches_returns_compact_counts() -> None:
     assert summary["per_symbol"] == {
         "SOL/USD": {"article_count": 1, "sources": ["Example"]}
     }
+
+
+def test_normalize_article_url_removes_tracking_parameters() -> None:
+    """Dedupe keys should not be split by common tracking parameters."""
+
+    normalized = normalize_article_url(
+        "HTTPS://Example.Test/news/btc/?utm_source=x&ref=feed&id=123#section"
+    )
+
+    assert normalized == "https://example.test/news/btc?id=123"
+
+
+def test_deduplicate_articles_prefers_longer_summary_for_same_url() -> None:
+    """Duplicate RSS syndications should collapse before scoring."""
+
+    published_at = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    short = RssArticle(
+        title="Bitcoin ETF inflows rise",
+        url="https://example.test/btc?utm_campaign=rss",
+        published_at=published_at,
+        source="Example",
+        summary="BTC rises.",
+    )
+    long = RssArticle(
+        title="Bitcoin ETF inflows rise",
+        url="https://example.test/btc",
+        published_at=published_at,
+        source="Example",
+        summary="BTC rises as ETF inflows improve across crypto markets.",
+    )
+
+    deduped = deduplicate_articles([short, long])
+
+    assert deduped == (long,)
+
+
+def test_prepare_articles_for_scoring_filters_short_stale_and_duplicates() -> None:
+    """Pre-scoring should keep FinBERT away from weak RSS noise."""
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    fresh = RssArticle(
+        title="Solana volume rises after ecosystem update",
+        url="https://example.test/sol",
+        published_at=now,
+        source="Example",
+        summary="SOL liquidity improves as crypto market breadth expands.",
+    )
+    duplicate = RssArticle(
+        title="Solana volume rises after ecosystem update",
+        url="https://example.test/sol?utm_source=rss",
+        published_at=now,
+        source="Example",
+        summary="SOL liquidity improves.",
+    )
+    short = RssArticle(
+        title="SOL",
+        url="https://example.test/sol-short",
+        published_at=now,
+        source="Example",
+        summary="Up.",
+    )
+    stale = RssArticle(
+        title="Solana stale update with enough words",
+        url="https://example.test/sol-stale",
+        published_at=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
+        source="Example",
+        summary="SOL article is too old for daily sentiment scoring.",
+    )
+    matches = filter_relevant_articles([fresh, duplicate, short, stale], ["SOL/USD"])
+
+    prepared = prepare_articles_for_scoring(matches, now=now)
+
+    assert [article.url for article in prepared[0].articles] == ["https://example.test/sol"]

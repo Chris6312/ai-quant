@@ -214,6 +214,9 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Document planned in-house `crypto_research_score` components
 * [x] Add crypto daily sentiment persistence contract
 * [x] Route news sentiment scaffold to isolated research queue
+* [x] Add RSS ingestion client for Coinbase and CoinDesk feeds
+* [x] Add symbol filtering for crypto RSS articles
+* [x] Add RSS deduplication and pre-scoring quality filter
 
 ### Frontend
 

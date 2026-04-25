@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+from pytest import MonkeyPatch
+
 from app.config.constants import CELERY_RESEARCH_QUEUE
 from app.db.models import CryptoDailySentimentRow
 from app.tasks.news_sentiment import (
@@ -64,24 +66,58 @@ def test_news_sentiment_task_uses_research_queue() -> None:
     assert routes["tasks.news_sentiment.*"] == {"queue": CELERY_RESEARCH_QUEUE}
 
 
-def test_news_sentiment_task_scaffold_returns_pipeline_contract() -> None:
-    """The first news slice should expose the agreed ingestion order without doing IO."""
+def test_news_sentiment_task_returns_rss_ingestion_snapshot(monkeypatch: MonkeyPatch) -> None:
+    """The research task should fetch RSS and stop before scoring/storage."""
+
+    from app.research.rss_client import RssArticle
+
+    class FakeRssClient:
+        async def fetch_articles(self) -> list[RssArticle]:
+            return [
+                RssArticle(
+                    title="Bitcoin ETF inflows rise",
+                    url="https://example.test/btc",
+                    published_at=datetime(2026, 4, 24, 12, 0, tzinfo=UTC),
+                    source="Example",
+                    summary="BTC and crypto markets moved higher after inflows improved.",
+                ),
+                RssArticle(
+                    title="Macro rates update",
+                    url="https://example.test/macro",
+                    published_at=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
+                    source="Example",
+                    summary="No symbol-specific digital asset details.",
+                ),
+            ]
+
+    monkeypatch.setattr("app.tasks.news_sentiment.CryptoRssClient", FakeRssClient)
 
     result = daily_crypto_news_sentiment_task(
         symbols=["BTC/USD", "XDG/USD"],
         sentiment_date="2026-04-24",
     )
 
-    assert result["status"] == "scaffold"
+    assert result["status"] == "rss_ingestion_ready"
     assert result["asset_class"] == "crypto"
     assert result["sentiment_date"] == "2026-04-24"
     assert result["symbols"] == ["BTC/USD", "XDG/USD"]
+    assert result["raw_article_count"] == 2
+    assert result["prepared_match_summary"] == {
+        "symbol_count": 2,
+        "matched_article_count": 1,
+        "per_symbol": {
+            "BTC/USD": {"article_count": 1, "sources": ["Example"]},
+            "XDG/USD": {"article_count": 0, "sources": []},
+        },
+    }
     assert result["pipeline"] == [
-        "rss",
+        "rss_fetch",
+        "symbol_filter",
+        "dedupe",
+        "pre_scoring_filter",
         "gdelt",
         "structured_api",
         "fallback_api",
-        "dedupe",
         "finbert",
         "daily_storage",
     ]

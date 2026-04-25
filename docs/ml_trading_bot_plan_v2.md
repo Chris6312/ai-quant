@@ -1084,8 +1084,9 @@ Execution order:
 3. Structured news API, such as GNews or NewsData
 4. Fallback API only when coverage is weak
 5. Deduplication
-6. FinBERT scoring
-7. Daily sentiment storage
+6. Pre-scoring quality filter
+7. FinBERT scoring
+8. Daily sentiment storage
 
 Storage contract:
 
@@ -1099,6 +1100,15 @@ Worker policy:
 - News ingestion should run on a dedicated Celery research queue.
 - It should not share the ML candle/prediction queue.
 - It should not block live trading candle workers.
+
+Slice 11/12 RSS policy:
+
+- Coinbase and CoinDesk RSS are the first source layer.
+- RSS articles are normalized before any scoring.
+- Articles are filtered by canonical crypto symbol aliases.
+- Duplicate URLs and common tracking parameters are collapsed before scoring.
+- Very short, stale, future-dated, or URL-less articles are rejected before FinBERT.
+- RSS ingestion stops before DB sentiment writes until scoring is implemented.
 
 Planned in-house crypto research score components:
 
