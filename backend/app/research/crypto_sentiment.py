@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Protocol
+from typing import Protocol, TypedDict, cast
 
 from app.db.models import CryptoDailySentimentRow
 from app.research.rss_client import RssArticle
@@ -38,6 +38,24 @@ NEGATIVE_TERMS: frozenset[str] = frozenset(
         "selloff",
     }
 )
+FINBERT_MAX_TEXT_CHARS: int = 512
+
+
+class FinbertRawScore(TypedDict):
+    """Single label score returned by a HuggingFace text-classification pipeline."""
+
+    label: str
+    score: float
+
+
+FinbertPipelineResult = list[list[FinbertRawScore]]
+
+
+class FinbertClassifier(Protocol):
+    """Callable text classifier compatible with HuggingFace pipeline output."""
+
+    def __call__(self, text: str) -> FinbertPipelineResult:
+        """Score text and return one list of label scores."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +92,7 @@ class CryptoArticleSentimentScorer(Protocol):
 
 
 class LexiconCryptoSentimentScorer:
-    """Deterministic fallback scorer until the FinBERT runtime dependency is added."""
+    """Deterministic fallback scorer when FinBERT dependencies are unavailable."""
 
     async def score_article(self, article: RssArticle) -> CryptoArticleSentiment:
         """Score an article with a small finance/crypto term lexicon."""
@@ -97,6 +115,44 @@ class LexiconCryptoSentimentScorer:
             compound_score=positive - negative,
             source=article.source,
         )
+
+
+class FinbertCryptoSentimentScorer:
+    """FinBERT-backed scorer loaded lazily behind the article scorer contract."""
+
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        classifier: FinbertClassifier | None = None,
+        max_text_chars: int = FINBERT_MAX_TEXT_CHARS,
+    ) -> None:
+        self.model_name = model_name
+        self.classifier = classifier
+        self.max_text_chars = max_text_chars
+
+    async def score_article(self, article: RssArticle) -> CryptoArticleSentiment:
+        """Score one article using FinBERT probabilities."""
+
+        classifier = self._get_classifier()
+        text = _article_text(article, max_chars=self.max_text_chars)
+        scores = classifier(text)
+        score_map = _normalize_finbert_scores(scores)
+        positive = score_map["positive"]
+        neutral = score_map["neutral"]
+        negative = score_map["negative"]
+        return CryptoArticleSentiment(
+            positive_score=positive,
+            neutral_score=neutral,
+            negative_score=negative,
+            compound_score=round(positive - negative, 12),
+            source=article.source,
+        )
+
+    def _get_classifier(self) -> FinbertClassifier:
+        if self.classifier is None:
+            self.classifier = _load_finbert_classifier(self.model_name)
+        return self.classifier
 
 
 async def build_daily_crypto_sentiment_aggregate(
@@ -179,6 +235,66 @@ def aggregate_to_summary(aggregate: CryptoDailySentimentAggregate) -> Mapping[st
     }
 
 
+def _load_finbert_classifier(model_name: str) -> FinbertClassifier:
+    try:
+        from transformers import pipeline
+    except ImportError as exc:
+        message = (
+            "FinBERT scoring requires the optional transformers runtime dependency. "
+            "Install transformers and torch in the research worker environment."
+        )
+        raise RuntimeError(message) from exc
+
+    pipeline_factory = cast(Callable[..., FinbertClassifier], pipeline)
+    return pipeline_factory(
+        "text-classification",
+        model=model_name,
+        top_k=None,
+        truncation=True,
+    )
+
+
+def _normalize_finbert_scores(scores: FinbertPipelineResult) -> dict[str, float]:
+    if not scores:
+        raise ValueError("FinBERT returned no sentiment scores")
+
+    first_result = scores[0]
+    raw_map = {_normalize_label(score["label"]): float(score["score"]) for score in first_result}
+    missing_labels = {"positive", "neutral", "negative"} - raw_map.keys()
+    if missing_labels:
+        missing = ", ".join(sorted(missing_labels))
+        raise ValueError(f"FinBERT returned incomplete sentiment labels: {missing}")
+
+    total = raw_map["positive"] + raw_map["neutral"] + raw_map["negative"]
+    if total <= 0.0:
+        raise ValueError("FinBERT returned non-positive total sentiment probability")
+
+    return {
+        "positive": round(raw_map["positive"] / total, 12),
+        "neutral": round(raw_map["neutral"] / total, 12),
+        "negative": round(raw_map["negative"] / total, 12),
+    }
+
+
+def _normalize_label(label: str) -> str:
+    normalized = label.strip().lower()
+    aliases = {
+        "pos": "positive",
+        "positive": "positive",
+        "neutral": "neutral",
+        "neg": "negative",
+        "negative": "negative",
+    }
+    if normalized not in aliases:
+        raise ValueError(f"Unsupported FinBERT sentiment label: {label}")
+    return aliases[normalized]
+
+
+def _article_text(article: RssArticle, *, max_chars: int) -> str:
+    text = f"{article.title}. {article.summary}".strip()
+    return text[:max_chars]
+
+
 def _count_term_hits(text: str, terms: frozenset[str]) -> int:
     return sum(1 for term in terms if term in text)
 
@@ -186,8 +302,6 @@ def _count_term_hits(text: str, terms: frozenset[str]) -> int:
 def _average(values: Iterable[float]) -> float:
     value_list = tuple(values)
     return sum(value_list) / len(value_list)
-
-
 
 
 def _coverage_score(*, article_count: int, source_count: int) -> float:

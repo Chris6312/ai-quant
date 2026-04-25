@@ -82,3 +82,114 @@ async def test_crypto_daily_sentiment_row_uses_canonical_daily_id() -> None:
     assert row.sentiment_date == date(2026, 4, 25)
     assert row.created_at == created_at
     assert row.updated_at == created_at
+
+async def test_finbert_scorer_maps_probabilities_to_crypto_sentiment() -> None:
+    """FinBERT adapter should map positive/neutral/negative scores into the contract."""
+
+    from app.research.crypto_sentiment import FinbertCryptoSentimentScorer, FinbertPipelineResult
+
+    class FakeFinbertClassifier:
+        def __call__(self, text: str) -> FinbertPipelineResult:
+            assert "Bitcoin ETF approval" in text
+            return [
+                [
+                    {"label": "positive", "score": 0.70},
+                    {"label": "neutral", "score": 0.20},
+                    {"label": "negative", "score": 0.10},
+                ]
+            ]
+
+    article = RssArticle(
+        title="Bitcoin ETF approval boosts institutional demand",
+        url="https://example.test/btc-etf",
+        published_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+        source="Example",
+        summary="BTC rallies as inflows improve.",
+    )
+    scorer = FinbertCryptoSentimentScorer(
+        model_name="ProsusAI/finbert",
+        classifier=FakeFinbertClassifier(),
+    )
+
+    score = await scorer.score_article(article)
+
+    assert score.positive_score == 0.70
+    assert score.neutral_score == 0.20
+    assert score.negative_score == 0.10
+    assert round(score.compound_score, 4) == 0.60
+    assert score.source == "Example"
+
+
+async def test_finbert_scorer_normalizes_alias_labels() -> None:
+    """FinBERT adapter should handle common abbreviated label names."""
+
+    from app.research.crypto_sentiment import FinbertCryptoSentimentScorer, FinbertPipelineResult
+
+    class FakeFinbertClassifier:
+        def __call__(self, text: str) -> FinbertPipelineResult:
+            return [
+                [
+                    {"label": "pos", "score": 2.0},
+                    {"label": "neutral", "score": 1.0},
+                    {"label": "neg", "score": 1.0},
+                ]
+            ]
+
+    article = RssArticle(
+        title="Ethereum network activity improves",
+        url="https://example.test/eth",
+        published_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+        source="Example",
+        summary="ETH adoption grows.",
+    )
+    scorer = FinbertCryptoSentimentScorer(
+        model_name="ProsusAI/finbert",
+        classifier=FakeFinbertClassifier(),
+    )
+
+    score = await scorer.score_article(article)
+
+    assert score.positive_score == 0.5
+    assert score.neutral_score == 0.25
+    assert score.negative_score == 0.25
+    assert score.compound_score == 0.25
+
+
+async def test_daily_sentiment_aggregate_accepts_finbert_scorer() -> None:
+    """Daily aggregation should work with the FinBERT scorer contract."""
+
+    from app.research.crypto_sentiment import FinbertCryptoSentimentScorer, FinbertPipelineResult
+
+    class FakeFinbertClassifier:
+        def __call__(self, text: str) -> FinbertPipelineResult:
+            return [
+                [
+                    {"label": "positive", "score": 0.10},
+                    {"label": "neutral", "score": 0.20},
+                    {"label": "negative", "score": 0.70},
+                ]
+            ]
+
+    article = RssArticle(
+        title="Solana exploit triggers selloff",
+        url="https://example.test/sol",
+        published_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+        source="Example",
+        summary="SOL faces bearish pressure after hack reports.",
+    )
+    scorer = FinbertCryptoSentimentScorer(
+        model_name="ProsusAI/finbert",
+        classifier=FakeFinbertClassifier(),
+    )
+
+    aggregate = await build_daily_crypto_sentiment_aggregate(
+        symbol="SOL/USD",
+        sentiment_date=date(2026, 4, 25),
+        articles=[article],
+        scorer=scorer,
+    )
+
+    assert aggregate.positive_score == 0.10
+    assert aggregate.neutral_score == 0.20
+    assert aggregate.negative_score == 0.70
+    assert round(aggregate.compound_score or 0.0, 4) == -0.60

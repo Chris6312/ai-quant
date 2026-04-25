@@ -1124,3 +1124,11 @@ Slice 13 RSS scoring policy:
 - The current scorer is a deterministic fallback contract so tests stay lightweight.
 - FinBERT remains the planned production scorer and should replace the fallback through the same scorer interface.
 - Daily sentiment rows use deterministic `symbol:YYYY-MM-DD` ids for safe upserts.
+
+Slice 14 FinBERT adapter policy:
+
+- FinBERT is now represented by `FinbertCryptoSentimentScorer` behind the same article scorer protocol used by aggregation.
+- The adapter loads HuggingFace `transformers.pipeline` lazily so normal tests and lightweight workers do not import transformer dependencies unless the scorer is used.
+- The deterministic lexicon scorer remains as the fallback/testing scorer.
+- ML retraining still waits for historical sentiment backfill; adding FinBERT now only stabilizes the scoring interface.
+

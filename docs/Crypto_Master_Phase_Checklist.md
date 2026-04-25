@@ -219,6 +219,8 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Add RSS deduplication and pre-scoring quality filter
 * [x] Add daily RSS sentiment aggregation contract
 * [x] Preserve missing sentiment as NULL when no prepared articles exist
+* [x] Add FinBERT scoring adapter behind the crypto article sentiment scorer contract
+* [x] Keep deterministic fallback scorer available for lightweight tests
 
 ### Frontend
 
