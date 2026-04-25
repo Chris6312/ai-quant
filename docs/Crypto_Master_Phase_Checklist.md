@@ -224,6 +224,12 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Persist daily RSS + FinBERT sentiment aggregates into `crypto_daily_sentiment`
 * [x] Upsert one sentiment row per canonical crypto symbol and sentiment date
 * [x] Preserve no-article days as NULL sentiment with zero article/source/coverage counts
+* [x] Document historical sentiment backfill design before implementing GDELT or other heavy ingestion
+* [x] Document backfill source order, rate-limit/resume behavior, and coverage semantics
+* [x] Preserve rule that historical missing sentiment remains NULL, not neutral zero
+* [x] Add GDELT historical article ingestion client scaffold
+* [x] Normalize GDELT articles into the shared crypto sentiment article contract
+* [x] Build symbol/date-window GDELT query helpers without DB writes or ML joins
 
 ### Frontend
 

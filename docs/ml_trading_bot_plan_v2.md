@@ -1145,3 +1145,25 @@ RSS → symbol filter → dedupe → pre-scoring filter → FinBERT → daily ag
 - The task persists exactly one row per requested canonical crypto ML symbol and sentiment date.
 - Symbols with no prepared articles still get a row with `positive_score`, `neutral_score`, `negative_score`, and `compound_score` set to `NULL`; `article_count = 0`, `source_count = 0`, and `coverage_score = 0`.
 - This does not join sentiment into ML features and does not retrain the model.
+
+Slice 16 historical sentiment backfill design policy:
+
+- Historical sentiment backfill is a separate research lane from daily RSS and from ML candle sync.
+- Slice 16 is design-only and does not implement GDELT, historical APIs, article tables, ML feature joins, or retraining.
+- Historical source order should be GDELT first, then GNews or NewsData if account limits support the needed date range, then practical archive sources such as CoinDesk or Coinbase only if terms-safe.
+- Historical pulls must be chunked by canonical symbol and date range, resumable, idempotent, and safe to rerun.
+- Historical backfill should remain on the dedicated research queue and must not block ML candles, predictions, trading candles, or runtime trading paths.
+- All daily aggregate writes still use canonical `symbol + sentiment_date` and deterministic `SYMBOL:YYYY-MM-DD` ids.
+- Missing historical coverage must remain `NULL` sentiment with zero article/source/coverage counts when a date has been explicitly evaluated and no valid articles were found.
+- Failed provider calls must not overwrite previously good rows with empty rows.
+- Before large historical ingestion, consider adding a normalized article table for source-quality debugging; daily aggregates alone are enough for ML features but weak for auditability.
+- Do not join sentiment into ML features and do not retrain until historical coverage has been backfilled and reviewed.
+
+Slice 17 historical source ingestion policy:
+
+- GDELT is now represented by a lightweight historical article ingestion client scaffold.
+- The Slice 17 client builds one canonical-symbol/date-window query at a time and normalizes article results into the existing `RssArticle` scoring contract so RSS and historical articles can share the same downstream sentiment scoring pipeline.
+- Slice 17 does not create article storage, does not backfill `crypto_daily_sentiment`, does not join sentiment into ML features, and does not retrain models.
+- GDELT responses are normalized before scoring: unusable rows without title, URL, or parseable seen date are rejected.
+- GDELT query windows are explicit and inclusive at the day level so later backfill orchestration can chunk and resume safely.
+- Daily sentiment missing-data semantics remain unchanged: no valid articles for an evaluated date must become NULL sentiment with zero coverage only when the aggregate backfill slice intentionally writes that day.
