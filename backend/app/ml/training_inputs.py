@@ -15,6 +15,7 @@ from app.config.constants import ALPACA_DEFAULT_SOURCE, ML_CANDLE_USAGE
 from app.db.models import (
     CandleRow,
     CongressTradeRow,
+    CryptoDailySentimentRow,
     InsiderTradeRow,
     ResearchSignalRow,
     WatchlistRow,
@@ -29,7 +30,7 @@ class StockTrainingDataset:
     """Concrete stock training inputs assembled from persisted DB rows."""
 
     candles: tuple[Candle, ...]
-    research_lookup: dict[str, ResearchInputs]
+    research_lookup: Mapping[str | tuple[str, date], ResearchInputs]
 
 
 class StockTrainingInputAssembler:
@@ -53,7 +54,8 @@ class StockTrainingInputAssembler:
         candles = tuple(self._row_to_candle(row) for row in candle_rows)
         candle_symbols = tuple(self._ordered_unique_symbols(candle.symbol for candle in candles))
         research_lookup = await self._build_research_lookup(session, candle_symbols)
-        return StockTrainingDataset(candles=candles, research_lookup=research_lookup)
+        typed_research_lookup: Mapping[str | tuple[str, date], ResearchInputs] = research_lookup
+        return StockTrainingDataset(candles=candles, research_lookup=typed_research_lookup)
 
     async def _load_candle_rows(
         self,
@@ -487,6 +489,233 @@ class StockTrainingInputAssembler:
             except ValueError:
                 return None
         return None
+
+
+
+@dataclass(slots=True, frozen=True)
+class CryptoTrainingDataset:
+    """Concrete crypto training inputs assembled from ML candles and sentiment rows."""
+
+    candles: tuple[Candle, ...]
+    research_lookup: Mapping[str | tuple[str, date], ResearchInputs]
+
+
+class CryptoTrainingInputAssembler:
+    """Load crypto ML candles and map daily sentiment into date-specific inputs."""
+
+    async def assemble(
+        self,
+        session: AsyncSession,
+        *,
+        symbols: Sequence[str] | None = None,
+        timeframe: str = "1Day",
+    ) -> CryptoTrainingDataset:
+        """Return DB-backed crypto candles plus daily sentiment research inputs."""
+
+        normalized_symbols = self._normalize_symbols(symbols)
+        candle_rows = await self._load_candle_rows(
+            session,
+            symbols=normalized_symbols,
+            timeframe=timeframe,
+        )
+        candles = tuple(self._row_to_candle(row) for row in candle_rows)
+        candle_symbols = tuple(self._ordered_unique_symbols(candle.symbol for candle in candles))
+        candle_dates = tuple({candle.time.date() for candle in candles})
+        research_lookup = await self._build_sentiment_lookup(
+            session,
+            symbols=candle_symbols,
+            sentiment_dates=candle_dates,
+        )
+        return CryptoTrainingDataset(candles=candles, research_lookup=research_lookup)
+
+    async def _load_candle_rows(
+        self,
+        session: AsyncSession,
+        *,
+        symbols: tuple[str, ...] | None,
+        timeframe: str,
+    ) -> list[CandleRow]:
+        """Load persisted crypto ML candles for the requested timeframe and symbols."""
+
+        statement = (
+            select(CandleRow)
+            .where(CandleRow.asset_class == "crypto")
+            .where(CandleRow.timeframe == timeframe)
+            .where(CandleRow.usage == ML_CANDLE_USAGE)
+            .order_by(CandleRow.symbol.asc(), CandleRow.time.asc())
+        )
+        if symbols is not None:
+            statement = statement.where(CandleRow.symbol.in_(symbols))
+        result = await session.execute(statement)
+        return list(result.scalars().all())
+
+    async def _build_sentiment_lookup(
+        self,
+        session: AsyncSession,
+        *,
+        symbols: Sequence[str],
+        sentiment_dates: Sequence[date],
+    ) -> dict[tuple[str, date], ResearchInputs]:
+        """Build date-specific crypto ResearchInputs from persisted daily sentiment."""
+
+        if not symbols or not sentiment_dates:
+            return {}
+        normalized_symbols = tuple(self._ordered_unique_symbols(symbols))
+        unique_dates = tuple(sorted(set(sentiment_dates)))
+        result = await session.execute(
+            select(CryptoDailySentimentRow)
+            .where(CryptoDailySentimentRow.symbol.in_(normalized_symbols))
+            .where(CryptoDailySentimentRow.asset_class == "crypto")
+            .where(CryptoDailySentimentRow.sentiment_date.in_(unique_dates))
+            .order_by(
+                CryptoDailySentimentRow.symbol.asc(),
+                CryptoDailySentimentRow.sentiment_date.asc(),
+            )
+        )
+        rows = list(result.scalars().all())
+        rows_by_key = {(row.symbol.upper(), row.sentiment_date): row for row in rows}
+        lookup: dict[tuple[str, date], ResearchInputs] = {}
+        for symbol in normalized_symbols:
+            trailing_rows: list[CryptoDailySentimentRow] = []
+            for sentiment_date in unique_dates:
+                row = rows_by_key.get((symbol, sentiment_date))
+                if row is not None:
+                    trailing_rows.append(row)
+                trailing_rows = [
+                    item
+                    for item in trailing_rows
+                    if 0 <= (sentiment_date - item.sentiment_date).days <= 6
+                ]
+                lookup[(symbol, sentiment_date)] = self._sentiment_rows_to_research_inputs(
+                    one_day=row,
+                    trailing_rows=trailing_rows,
+                )
+        return lookup
+
+    def _sentiment_rows_to_research_inputs(
+        self,
+        *,
+        one_day: CryptoDailySentimentRow | None,
+        trailing_rows: Sequence[CryptoDailySentimentRow],
+    ) -> ResearchInputs:
+        """Convert daily sentiment rows into the existing ML research feature contract."""
+
+        one_day_sentiment = self._observed_compound_score(one_day)
+        seven_day_scores = [
+            score
+            for score in (self._observed_compound_score(row) for row in trailing_rows)
+            if score is not None
+        ]
+        seven_day_sentiment = (
+            sum(seven_day_scores) / float(len(seven_day_scores)) if seven_day_scores else 0.0
+        )
+        article_count = sum(max(0, int(row.article_count)) for row in trailing_rows)
+        return ResearchInputs(
+            news_sentiment_1d=one_day_sentiment if one_day_sentiment is not None else 0.0,
+            news_sentiment_7d=seven_day_sentiment,
+            news_article_count_7d=article_count,
+        )
+
+    def _observed_compound_score(self, row: CryptoDailySentimentRow | None) -> float | None:
+        """Return compound sentiment only when the row has source-backed coverage."""
+
+        if row is None or row.article_count <= 0 or row.coverage_score <= 0.0:
+            return None
+        return self._coerce_float(row.compound_score)
+
+    def _normalize_symbols(self, symbols: Sequence[str] | None) -> tuple[str, ...] | None:
+        """Normalize optional symbol filters into a stable uppercase tuple."""
+
+        if symbols is None:
+            return None
+        normalized = tuple(self._ordered_unique_symbols(symbols))
+        return normalized if normalized else None
+
+    def _ordered_unique_symbols(self, symbols: Iterable[str]) -> list[str]:
+        """Return stable uppercase symbols without blanks or duplicates."""
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for raw_symbol in symbols:
+            symbol = raw_symbol.strip().upper()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            ordered.append(symbol)
+        return ordered
+
+    def _row_to_candle(self, row: CandleRow) -> Candle:
+        """Convert a persisted candle row into a domain candle."""
+
+        return Candle(
+            time=row.time,
+            symbol=row.symbol,
+            asset_class=row.asset_class,
+            timeframe=row.timeframe,
+            open=self._required_float(row.open, "open"),
+            high=self._required_float(row.high, "high"),
+            low=self._required_float(row.low, "low"),
+            close=self._required_float(row.close, "close"),
+            volume=self._required_float(row.volume, "volume"),
+            source=row.source,
+        )
+
+    def _required_float(self, value: float | Decimal | None, field_name: str) -> float:
+        """Convert a DB numeric field into float and reject missing candle components."""
+
+        converted = self._coerce_float(value)
+        if converted is None:
+            raise ValueError(f"Candle row missing required numeric field: {field_name}")
+        return converted
+
+    def _coerce_float(self, value: object) -> float | None:
+        """Convert supported scalar values into float."""
+
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, float):
+            return value
+        if isinstance(value, int):
+            return float(value)
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                return float(stripped)
+            except ValueError:
+                return None
+        return None
+
+
+async def train_crypto_model_from_db(
+    session: AsyncSession,
+    *,
+    symbols: Sequence[str] | None = None,
+    timeframe: str = "1Day",
+    assembler: CryptoTrainingInputAssembler | None = None,
+    trainer: WalkForwardTrainer | None = None,
+    feature_engineer: FeatureEngineer | None = None,
+) -> tuple[TrainResult, CryptoTrainingDataset]:
+    """Assemble crypto candles/sentiment inputs from DB and train a model."""
+
+    dataset_assembler = assembler or CryptoTrainingInputAssembler()
+    model_trainer = trainer or WalkForwardTrainer()
+    engineer = feature_engineer or FeatureEngineer()
+
+    dataset = await dataset_assembler.assemble(session, symbols=symbols, timeframe=timeframe)
+    if not dataset.candles:
+        raise ValueError("No persisted crypto candles found for training")
+
+    result = await model_trainer.train(
+        dataset.candles,
+        "crypto",
+        engineer,
+        research_lookup=dataset.research_lookup,
+    )
+    return result, dataset
 
 
 async def train_stock_model_from_db(

@@ -1181,3 +1181,12 @@ historical article search → symbol/date chunk → dedupe → pre-scoring filte
 - Successful windows with no prepared articles intentionally write NULL sentiment with `article_count = 0`, `source_count = 0`, and `coverage_score = 0`.
 - Failed provider windows are reported as `failed_windows` and must not overwrite previously good rows with empty sentiment.
 - Slice 18 still does not join sentiment into ML features and does not retrain models.
+
+Slice 19 sentiment-to-ML feature join policy:
+
+- Persisted crypto daily sentiment now maps into ML research inputs by canonical `symbol + sentiment_date`.
+- Crypto feature rows may use only the source-backed sentiment fields: `news_sentiment_1d`, `news_sentiment_7d`, and `news_article_count_7d`.
+- Stock-only fields remain unavailable for crypto and must stay at their non-signal defaults: Congress, insider, CEO buy, earnings, analyst score, and consensus rating.
+- Missing or zero-coverage sentiment rows are not treated as observed neutral articles. They produce zero article count and default numeric values only to preserve the current finite LightGBM feature-vector contract.
+- Walk-forward training can now prefer date-specific research lookup entries before falling back to older symbol-level research inputs.
+- Slice 19 does not retrain models. Retraining and SHAP review remain Slice 20 work after historical sentiment coverage has been reviewed.

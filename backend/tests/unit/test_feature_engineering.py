@@ -74,9 +74,17 @@ def test_feature_engineer_returns_full_contract_for_stock_and_crypto() -> None:
     assert list(stock_features) == ALL_FEATURES
     assert list(crypto_features) == ALL_FEATURES
     assert tuple(stock_features) == tuple(crypto_features)
-    assert all(
-        crypto_features[name] == crypto_default_features[name] for name in RESEARCH_FEATURES
-    )
+    assert crypto_features["news_sentiment_1d"] == pytest.approx(0.8)
+    assert crypto_features["news_sentiment_7d"] == pytest.approx(0.6)
+    assert crypto_features["news_article_count_7d"] == pytest.approx(12.0)
+    assert crypto_features["congress_buy_score"] == crypto_default_features["congress_buy_score"]
+    assert crypto_features["insider_buy_score"] == crypto_default_features["insider_buy_score"]
+    assert crypto_features["analyst_upgrade_score"] == crypto_default_features[
+        "analyst_upgrade_score"
+    ]
+    assert crypto_features["watchlist_research_score"] == crypto_default_features[
+        "watchlist_research_score"
+    ]
     assert stock_features["news_sentiment_1d"] == pytest.approx(0.8)
     assert stock_features["watchlist_research_score"] == pytest.approx(88.0)
 
@@ -135,9 +143,9 @@ def test_crypto_feature_truth_audit_marks_ghost_research_features() -> None:
 
     assert audit["vwap_distance"]["availability"] == "real"
     assert audit["adx_14"]["availability"] == "real"
-    assert audit["news_sentiment_1d"]["availability"] == "missing"
-    assert audit["news_sentiment_7d"]["availability"] == "missing"
-    assert audit["news_article_count_7d"]["coverage_score"] == 0.0
+    assert audit["news_sentiment_1d"]["availability"] == "real"
+    assert audit["news_sentiment_7d"]["availability"] == "real"
+    assert audit["news_article_count_7d"]["coverage_score"] == 1.0
     assert audit["congress_buy_score"]["availability"] == "not_applicable_for_crypto"
     assert audit["insider_value_60d"]["availability"] == "not_applicable_for_crypto"
     assert audit["consensus_rating"]["availability"] == "not_applicable_for_crypto"
@@ -149,7 +157,7 @@ def test_feature_contract_summary_exposes_crypto_research_score_contract() -> No
 
     summary = build_feature_contract_summary()
 
-    assert summary["crypto_missing_research_features"] == [
+    assert summary["crypto_source_backed_research_features"] == [
         "news_sentiment_1d",
         "news_sentiment_7d",
         "news_article_count_7d",

@@ -233,6 +233,9 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Add historical sentiment backfill task scaffold
 * [x] Backfill `crypto_daily_sentiment` by canonical symbol/date from historical articles
 * [x] Preserve provider failures without overwriting existing sentiment rows
+* [x] Join persisted crypto daily sentiment into date-specific ML research inputs
+* [x] Keep stock-only research features unavailable for crypto feature rows
+* [x] Preserve missing sentiment as no-coverage defaults instead of source-backed neutral signal
 
 ### Frontend
 

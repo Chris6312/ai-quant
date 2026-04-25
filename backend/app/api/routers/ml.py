@@ -23,8 +23,7 @@ from app.config.constants import (
 from app.config.crypto_scope import (
     KRAKEN_UNIVERSE,
 )
-from app.config.settings import Settings
-from app.config.settings import get_settings as load_settings
+from app.config.settings import Settings, get_settings as load_settings
 from app.db.models import CandleRow, PredictionRow, PredictionShapRow
 from app.db.session import build_engine as create_engine
 from app.db.session import build_session_factory as create_session_factory
@@ -44,6 +43,7 @@ from app.ml.predictor import ModelPredictor
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
 from app.ml.trainer import TrainerConfig, TrainResult, WalkForwardTrainer
 from app.ml.training_inputs import (
+    train_crypto_model_from_db as train_crypto_model_from_db_impl,
     train_stock_model_from_db as train_stock_model_from_db_impl,
 )
 from app.models.domain import Candle
@@ -596,13 +596,14 @@ def _register_training_result(
     return record
 
 async def _train_crypto_result() -> TrainResult:
-    candles = await _load_training_candles("crypto")
-    trainer = WalkForwardTrainer(TrainerConfig())
-    return await trainer.train(
-        candles,
-        "crypto",
-        FeatureEngineer(),
-    )
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+
+    async with session_factory() as session:
+        result, _dataset = await train_crypto_model_from_db_impl(session)
+
+    return result
 
 async def _train_stock_result(
     *,

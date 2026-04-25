@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -24,6 +24,7 @@ from app.models.domain import Candle
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
 ProgressCallback = Callable[[int, int, str], None]
+ResearchLookup = Mapping[str | tuple[str, date], ResearchInputs]
 
 
 @dataclass(slots=True, frozen=True)
@@ -105,7 +106,7 @@ class WalkForwardTrainer:
         candles: Sequence[Candle],
         asset_class: str,
         feature_engineer: FeatureEngineer,
-        research_lookup: Mapping[str, ResearchInputs] | None = None,
+        research_lookup: ResearchLookup | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> TrainResult:
         """Run walk-forward validation and return the best model result."""
@@ -167,7 +168,7 @@ class WalkForwardTrainer:
         candles: Sequence[Candle],
         asset_class: str,
         feature_engineer: FeatureEngineer,
-        research_lookup: Mapping[str, ResearchInputs] | None,
+        research_lookup: ResearchLookup | None,
     ) -> list[_TrainingSample]:
         """Convert candles into labeled samples grouped by symbol."""
 
@@ -181,11 +182,12 @@ class WalkForwardTrainer:
         for symbol_candles in grouped.values():
             ordered = sorted(symbol_candles, key=lambda candle: candle.time)
             labels = self._label_candles(ordered)
-            research_inputs = (
-                research_lookup.get(ordered[0].symbol) if research_lookup else None
-            )
-
             for index in range(199, len(ordered) - 1):
+                research_inputs = self._research_inputs_for_sample(
+                    research_lookup,
+                    symbol=ordered[index].symbol,
+                    sample_date=ordered[index].time.date(),
+                )
                 history = ordered[: index + 1]
                 features = feature_engineer.build(
                     history,
@@ -208,6 +210,22 @@ class WalkForwardTrainer:
 
         samples.sort(key=lambda sample: sample.timestamp)
         return samples
+
+    def _research_inputs_for_sample(
+        self,
+        research_lookup: ResearchLookup | None,
+        *,
+        symbol: str,
+        sample_date: date,
+    ) -> ResearchInputs | None:
+        """Return date-specific research inputs, falling back to symbol-level inputs."""
+
+        if research_lookup is None:
+            return None
+        dated = research_lookup.get((symbol, sample_date))
+        if dated is not None:
+            return dated
+        return research_lookup.get(symbol)
 
     def _build_folds(
         self,

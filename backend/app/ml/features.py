@@ -71,7 +71,7 @@ RESEARCH_FEATURES: list[str] = [
 
 ALL_FEATURES: list[str] = TECHNICAL_FEATURES + RESEARCH_FEATURES
 
-CRYPTO_MISSING_RESEARCH_FEATURES: tuple[str, ...] = (
+CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES: tuple[str, ...] = (
     "news_sentiment_1d",
     "news_sentiment_7d",
     "news_article_count_7d",
@@ -222,7 +222,7 @@ def build_feature_contract_summary() -> dict[str, object]:
             "not_applicable_for_crypto until source-backed crypto research features "
             "are implemented"
         ),
-        "crypto_missing_research_features": list(CRYPTO_MISSING_RESEARCH_FEATURES),
+        "crypto_source_backed_research_features": list(CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES),
         "crypto_not_applicable_research_features": list(
             CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES
         ),
@@ -265,13 +265,13 @@ def _classify_feature_for_asset(feature_name: str, asset_class: str) -> FeatureT
             reason="stock research input may be source-backed when rows exist",
         )
 
-    if feature_name in CRYPTO_MISSING_RESEARCH_FEATURES:
+    if feature_name in CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES:
         return FeatureTruthMetadata(
             name=feature_name,
             category="research",
-            availability="missing",
-            coverage_score=0.0,
-            reason="crypto news sentiment ingestion is not implemented yet",
+            availability="real",
+            coverage_score=1.0,
+            reason="source-backed crypto daily sentiment when persisted coverage exists",
         )
 
     if feature_name in CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES:
@@ -354,12 +354,28 @@ class FeatureEngineer:
         ):
             features[name] = value
 
-        research = research_signals or ResearchInputs()
-        if asset_class != "stock":
-            research = ResearchInputs()
+        research = self._research_inputs_for_asset(asset_class, research_signals)
         for name, value in self._research_feature_items(research):
             features[name] = value
         return features
+
+    def _research_inputs_for_asset(
+        self,
+        asset_class: str,
+        research_signals: ResearchInputs | None,
+    ) -> ResearchInputs:
+        """Return the research fields allowed for the requested asset class."""
+
+        research = research_signals or ResearchInputs()
+        if asset_class == "stock":
+            return research
+        if asset_class == "crypto":
+            return ResearchInputs(
+                news_sentiment_1d=research.news_sentiment_1d,
+                news_sentiment_7d=research.news_sentiment_7d,
+                news_article_count_7d=research.news_article_count_7d,
+            )
+        return ResearchInputs()
 
     def _technical_feature_items(
         self,
