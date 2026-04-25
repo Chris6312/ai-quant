@@ -213,3 +213,156 @@ async def test_persist_daily_crypto_rss_sentiment_upserts_one_row_per_symbol(
     assert upserted_rows[1].compound_score is None
     assert upserted_rows[1].article_count == 0
     assert upserted_rows[1].coverage_score == 0.0
+
+
+class FakeHistoricalResult:
+    """Simple historical search result shaped like the GDELT client result."""
+
+    def __init__(self, articles: tuple[RssArticle, ...]) -> None:
+        self.articles = articles
+
+
+class FakeHistoricalClient:
+    """Historical client returning one BTC article and no DOGE coverage."""
+
+    async def search_articles(
+        self,
+        *,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> FakeHistoricalResult:
+        assert start_date == end_date
+        if symbol == "BTC/USD":
+            return FakeHistoricalResult(
+                (
+                    RssArticle(
+                        title="Bitcoin ETF inflows rise",
+                        url=f"https://example.test/btc/{start_date.isoformat()}",
+                        published_at=datetime.combine(start_date, datetime.min.time(), tzinfo=UTC),
+                        source="GDELT:Example",
+                        summary="BTC and crypto markets moved higher after inflows improved.",
+                    ),
+                )
+            )
+        return FakeHistoricalResult(())
+
+
+class FailingHistoricalClient:
+    """Historical client that fails provider calls for safety tests."""
+
+    async def search_articles(
+        self,
+        *,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> FakeHistoricalResult:
+        raise RuntimeError(f"provider failed for {symbol} {start_date.isoformat()}")
+
+
+def test_historical_sentiment_payload_targets_backfill_task() -> None:
+    """Historical backfill payload should target the research task with date bounds."""
+
+    from app.tasks.news_sentiment import build_historical_crypto_news_sentiment_payload
+
+    payload = build_historical_crypto_news_sentiment_payload(
+        ["BTC/USD"],
+        start_date=date(2026, 4, 1),
+        end_date=date(2026, 4, 2),
+    )
+
+    assert payload.name == "tasks.news_sentiment.historical_crypto_backfill"
+    assert payload.kwargs == {
+        "symbols": ["BTC/USD"],
+        "start_date": "2026-04-01",
+        "end_date": "2026-04-02",
+    }
+
+
+async def test_backfill_historical_crypto_sentiment_upserts_symbol_date_rows(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Historical backfill should persist one aggregate row per symbol and date."""
+
+    from app.tasks.news_sentiment import backfill_historical_crypto_sentiment
+
+    upserted_rows: list[CryptoDailySentimentRow] = []
+
+    class FakeResearchRepository:
+        def __init__(self, session: object) -> None:
+            self.session = session
+
+        async def upsert_crypto_daily_sentiment(
+            self,
+            row: CryptoDailySentimentRow,
+        ) -> CryptoDailySentimentRow:
+            upserted_rows.append(row)
+            return row
+
+    monkeypatch.setattr("app.tasks.news_sentiment.ResearchRepository", FakeResearchRepository)
+
+    result = await backfill_historical_crypto_sentiment(
+        symbols=["BTC/USD", "XDG/USD"],
+        start_date="2026-04-24",
+        end_date="2026-04-24",
+        client=FakeHistoricalClient(),
+        session_factory=fake_session_factory,
+        scorer=FakeCryptoSentimentScorer(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["rows_upserted"] == 2
+    assert result["failed_window_count"] == 0
+    assert result["pipeline"] == [
+        "historical_article_search",
+        "symbol_date_chunk",
+        "dedupe",
+        "pre_scoring_filter",
+        "finbert",
+        "daily_aggregate",
+        "crypto_daily_sentiment_upsert",
+    ]
+    assert [row.id for row in upserted_rows] == ["BTC/USD:2026-04-24", "XDG/USD:2026-04-24"]
+    assert upserted_rows[0].compound_score == 0.60
+    assert upserted_rows[0].article_count == 1
+    assert upserted_rows[1].compound_score is None
+    assert upserted_rows[1].article_count == 0
+    assert upserted_rows[1].coverage_score == 0.0
+
+
+async def test_backfill_historical_crypto_sentiment_does_not_write_failed_windows(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Provider failures must not overwrite existing rows with empty sentiment."""
+
+    from app.tasks.news_sentiment import backfill_historical_crypto_sentiment
+
+    upserted_rows: list[CryptoDailySentimentRow] = []
+
+    class FakeResearchRepository:
+        def __init__(self, session: object) -> None:
+            self.session = session
+
+        async def upsert_crypto_daily_sentiment(
+            self,
+            row: CryptoDailySentimentRow,
+        ) -> CryptoDailySentimentRow:
+            upserted_rows.append(row)
+            return row
+
+    monkeypatch.setattr("app.tasks.news_sentiment.ResearchRepository", FakeResearchRepository)
+
+    result = await backfill_historical_crypto_sentiment(
+        symbols=["BTC/USD"],
+        start_date="2026-04-24",
+        end_date="2026-04-24",
+        client=FailingHistoricalClient(),
+        session_factory=fake_session_factory,
+        scorer=FakeCryptoSentimentScorer(),
+    )
+
+    assert result["status"] == "completed_with_errors"
+    assert result["rows_upserted"] == 0
+    assert result["failed_window_count"] == 1
+    assert upserted_rows == []

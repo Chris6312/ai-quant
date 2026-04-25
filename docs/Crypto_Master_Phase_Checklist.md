@@ -230,6 +230,9 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Add GDELT historical article ingestion client scaffold
 * [x] Normalize GDELT articles into the shared crypto sentiment article contract
 * [x] Build symbol/date-window GDELT query helpers without DB writes or ML joins
+* [x] Add historical sentiment backfill task scaffold
+* [x] Backfill `crypto_daily_sentiment` by canonical symbol/date from historical articles
+* [x] Preserve provider failures without overwriting existing sentiment rows
 
 ### Frontend
 

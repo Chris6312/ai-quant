@@ -1167,3 +1167,17 @@ Slice 17 historical source ingestion policy:
 - GDELT responses are normalized before scoring: unusable rows without title, URL, or parseable seen date are rejected.
 - GDELT query windows are explicit and inclusive at the day level so later backfill orchestration can chunk and resume safely.
 - Daily sentiment missing-data semantics remain unchanged: no valid articles for an evaluated date must become NULL sentiment with zero coverage only when the aggregate backfill slice intentionally writes that day.
+
+Slice 18 historical sentiment table backfill policy:
+
+- Historical sentiment backfill now writes daily aggregates into `crypto_daily_sentiment` after a historical provider returns a successful symbol/date window.
+- The backfill flow is:
+
+```text
+historical article search → symbol/date chunk → dedupe → pre-scoring filter → FinBERT → daily aggregate → crypto_daily_sentiment upsert
+```
+
+- The backfill task persists one row per requested canonical crypto symbol and evaluated sentiment date.
+- Successful windows with no prepared articles intentionally write NULL sentiment with `article_count = 0`, `source_count = 0`, and `coverage_score = 0`.
+- Failed provider windows are reported as `failed_windows` and must not overwrite previously good rows with empty sentiment.
+- Slice 18 still does not join sentiment into ML features and does not retrain models.

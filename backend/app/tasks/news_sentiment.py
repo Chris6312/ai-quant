@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from typing import Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -22,8 +22,10 @@ from app.research.crypto_sentiment import (
     build_crypto_daily_sentiment_row,
     build_daily_crypto_sentiment_aggregate,
 )
+from app.research.gdelt_client import GdeltHistoricalNewsClient
 from app.research.rss_client import (
     CryptoRssClient,
+    RssArticle,
     SymbolArticleMatches,
     filter_relevant_articles,
     prepare_articles_for_scoring,
@@ -40,6 +42,20 @@ class NewsSentimentTaskPayload:
     kwargs: dict[str, object]
 
 
+class HistoricalCryptoNewsClient(Protocol):
+    """Client contract for historical crypto news search providers."""
+
+    async def search_articles(
+        self,
+        *,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> object:
+        """Return a historical search result with an articles sequence."""
+        ...
+
+
 @celery_app.task(name="tasks.news_sentiment.daily_crypto_sync")
 def daily_crypto_news_sentiment_task(
     symbols: list[str] | None = None,
@@ -53,6 +69,27 @@ def daily_crypto_news_sentiment_task(
         persist_daily_crypto_rss_sentiment(
             symbols=requested_symbols,
             sentiment_date=requested_date,
+        )
+    )
+
+
+@celery_app.task(name="tasks.news_sentiment.historical_crypto_backfill")
+def historical_crypto_news_sentiment_backfill_task(
+    symbols: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, object]:
+    """Backfill historical crypto sentiment aggregates into persistence."""
+
+    if start_date is None or end_date is None:
+        raise ValueError("Historical sentiment backfill requires start_date and end_date")
+
+    requested_symbols = symbols or list_crypto_watchlist_symbols()
+    return asyncio.run(
+        backfill_historical_crypto_sentiment(
+            symbols=requested_symbols,
+            start_date=start_date,
+            end_date=end_date,
         )
     )
 
@@ -171,6 +208,97 @@ async def persist_daily_crypto_rss_sentiment(
     }
 
 
+async def backfill_historical_crypto_sentiment(
+    *,
+    symbols: Sequence[str],
+    start_date: str,
+    end_date: str,
+    client: HistoricalCryptoNewsClient | None = None,
+    session_factory: async_sessionmaker[Any] | None = None,
+    scorer: CryptoArticleSentimentScorer | None = None,
+) -> dict[str, object]:
+    """Backfill historical crypto daily sentiment rows from historical articles."""
+
+    settings = get_settings()
+    active_scorer = scorer or FinbertCryptoSentimentScorer(
+        model_name=settings.research_finbert_model_name,
+    )
+    historical_client = client or GdeltHistoricalNewsClient()
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    if end < start:
+        raise ValueError("Historical sentiment backfill end_date must be on or after start_date")
+
+    owns_engine = session_factory is None
+    engine = None
+    active_session_factory = session_factory
+    if active_session_factory is None:
+        engine = build_engine(settings)
+        active_session_factory = build_session_factory(engine)
+
+    aggregates: list[CryptoDailySentimentAggregate] = []
+    failed_windows: list[dict[str, str]] = []
+    backfill_dates = _inclusive_dates(start, end)
+    try:
+        async with active_session_factory() as session:
+            repository = ResearchRepository(session)
+            for target_date in backfill_dates:
+                for symbol in symbols:
+                    try:
+                        aggregate = await _build_historical_daily_aggregate(
+                            client=historical_client,
+                            symbol=symbol,
+                            sentiment_date=target_date,
+                            scorer=active_scorer,
+                        )
+                    except Exception as exc:
+                        failed_windows.append(
+                            {
+                                "symbol": symbol,
+                                "sentiment_date": target_date.isoformat(),
+                                "error": str(exc),
+                            }
+                        )
+                        continue
+                    row = build_crypto_daily_sentiment_row(aggregate)
+                    await repository.upsert_crypto_daily_sentiment(row)
+                    aggregates.append(aggregate)
+    finally:
+        if owns_engine and engine is not None:
+            await engine.dispose()
+
+    return {
+        "status": "completed" if not failed_windows else "completed_with_errors",
+        "task": "historical_crypto_news_sentiment_backfill",
+        "asset_class": "crypto",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "symbol_count": len(symbols),
+        "symbols": list(symbols),
+        "date_count": len(backfill_dates),
+        "rows_upserted": len(aggregates),
+        "failed_window_count": len(failed_windows),
+        "failed_windows": failed_windows,
+        "sentiment_summary": {
+            f"{aggregate.symbol}:{aggregate.sentiment_date.isoformat()}": dict(
+                aggregate_to_summary(aggregate)
+            )
+            for aggregate in aggregates
+        },
+        "pipeline": [
+            "historical_article_search",
+            "symbol_date_chunk",
+            "dedupe",
+            "pre_scoring_filter",
+            "finbert",
+            "daily_aggregate",
+            "crypto_daily_sentiment_upsert",
+        ],
+        "message": "Historical articles were scored and persisted to crypto_daily_sentiment.",
+        "finished_at": datetime.now(tz=UTC).isoformat(),
+    }
+
+
 async def _build_daily_aggregates(
     *,
     matches: Sequence[SymbolArticleMatches],
@@ -190,6 +318,44 @@ async def _build_daily_aggregates(
     ]
 
 
+async def _build_historical_daily_aggregate(
+    *,
+    client: HistoricalCryptoNewsClient,
+    symbol: str,
+    sentiment_date: date,
+    scorer: CryptoArticleSentimentScorer,
+) -> CryptoDailySentimentAggregate:
+    search_result = await client.search_articles(
+        symbol=symbol,
+        start_date=sentiment_date,
+        end_date=sentiment_date,
+    )
+    articles = tuple(_extract_articles(search_result))
+    raw_matches = [SymbolArticleMatches(symbol=symbol, articles=articles)]
+    prepared_matches = prepare_articles_for_scoring(
+        raw_matches,
+        now=datetime.combine(sentiment_date, time.max, tzinfo=UTC),
+        max_age_days=1,
+    )
+    return await build_daily_crypto_sentiment_aggregate(
+        symbol=prepared_matches[0].symbol,
+        sentiment_date=sentiment_date,
+        articles=prepared_matches[0].articles,
+        scorer=scorer,
+    )
+
+
+def _extract_articles(search_result: object) -> Sequence[RssArticle]:
+    articles = getattr(search_result, "articles", ())
+    if isinstance(articles, Sequence) and not isinstance(articles, str):
+        return tuple(article for article in articles if isinstance(article, RssArticle))
+    return ()
+
+
+def _inclusive_dates(start: date, end: date) -> list[date]:
+    return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+
+
 def build_daily_crypto_news_sentiment_payload(
     symbols: Sequence[str],
     sentiment_date: date,
@@ -201,5 +367,23 @@ def build_daily_crypto_news_sentiment_payload(
         kwargs={
             "symbols": list(symbols),
             "sentiment_date": sentiment_date.isoformat(),
+        },
+    )
+
+
+def build_historical_crypto_news_sentiment_payload(
+    symbols: Sequence[str],
+    *,
+    start_date: date,
+    end_date: date,
+) -> NewsSentimentTaskPayload:
+    """Return the historical crypto news sentiment backfill task payload."""
+
+    return NewsSentimentTaskPayload(
+        name="tasks.news_sentiment.historical_crypto_backfill",
+        kwargs={
+            "symbols": list(symbols),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
         },
     )
