@@ -1132,3 +1132,16 @@ Slice 14 FinBERT adapter policy:
 - The deterministic lexicon scorer remains as the fallback/testing scorer.
 - ML retraining still waits for historical sentiment backfill; adding FinBERT now only stabilizes the scoring interface.
 
+
+Slice 15 persistence policy:
+
+- The live `tasks.news_sentiment.daily_crypto_sync` Celery entry point now writes through the persistence flow instead of returning a snapshot-only result.
+- The persisted flow is:
+
+```text
+RSS → symbol filter → dedupe → pre-scoring filter → FinBERT → daily aggregate → crypto_daily_sentiment upsert
+```
+
+- The task persists exactly one row per requested canonical crypto ML symbol and sentiment date.
+- Symbols with no prepared articles still get a row with `positive_score`, `neutral_score`, `negative_score`, and `compound_score` set to `NULL`; `article_count = 0`, `source_count = 0`, and `coverage_score = 0`.
+- This does not join sentiment into ML features and does not retrain the model.

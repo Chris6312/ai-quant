@@ -221,6 +221,9 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Preserve missing sentiment as NULL when no prepared articles exist
 * [x] Add FinBERT scoring adapter behind the crypto article sentiment scorer contract
 * [x] Keep deterministic fallback scorer available for lightweight tests
+* [x] Persist daily RSS + FinBERT sentiment aggregates into `crypto_daily_sentiment`
+* [x] Upsert one sentiment row per canonical crypto symbol and sentiment date
+* [x] Preserve no-article days as NULL sentiment with zero article/source/coverage counts
 
 ### Frontend
 
