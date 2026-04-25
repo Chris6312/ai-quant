@@ -212,6 +212,8 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Mark unimplemented crypto sentiment fields as missing in metadata
 * [x] Mark stock-only research fields as not applicable for crypto in metadata
 * [x] Document planned in-house `crypto_research_score` components
+* [x] Add crypto daily sentiment persistence contract
+* [x] Route news sentiment scaffold to isolated research queue
 
 ### Frontend
 

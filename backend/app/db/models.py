@@ -79,6 +79,38 @@ class ResearchSignalRow(Base):
     )
 
 
+
+class CryptoDailySentimentRow(Base):
+    """Daily aggregated crypto news sentiment by canonical symbol."""
+
+    __tablename__ = "crypto_daily_sentiment"
+    __table_args__ = (
+        Index("ix_crypto_daily_sentiment_symbol_date", "symbol", "sentiment_date"),
+        Index("ix_crypto_daily_sentiment_asset_date", "asset_class", "sentiment_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    sentiment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    article_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    positive_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    neutral_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    negative_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    compound_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    coverage_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
 class CongressTradeRow(Base):
     """Congressional trade disclosure."""
 

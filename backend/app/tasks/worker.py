@@ -5,7 +5,12 @@ from __future__ import annotations
 from celery import Celery
 from celery.schedules import crontab
 
-from app.config.constants import APP_NAME, CELERY_DEFAULT_QUEUE, CELERY_ML_QUEUE
+from app.config.constants import (
+    APP_NAME,
+    CELERY_DEFAULT_QUEUE,
+    CELERY_ML_QUEUE,
+    CELERY_RESEARCH_QUEUE,
+)
 from app.config.settings import get_settings
 
 try:
@@ -35,6 +40,7 @@ celery_app = Celery(
         "app.tasks.worker",
         "app.tasks.crypto_candles",
         "app.tasks.ml_candles",
+        "app.tasks.news_sentiment",
     ],
 )
 
@@ -47,6 +53,7 @@ celery_app.conf.update(
         "tasks.ml_candles.*": {"queue": CELERY_ML_QUEUE},
         "tasks.ml_predictions.run": {"queue": CELERY_ML_QUEUE},
         "tasks.retrain_models": {"queue": CELERY_ML_QUEUE},
+        "tasks.news_sentiment.*": {"queue": CELERY_RESEARCH_QUEUE},
     },
     timezone="America/New_York",
     beat_schedule={

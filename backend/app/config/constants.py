@@ -9,6 +9,7 @@ CANDLE_LOCK_TTL_SECONDS: int = 7_200
 CANDLE_HEARTBEAT_TTL_SECONDS: int = 3_600
 CELERY_DEFAULT_QUEUE: str = "default"
 CELERY_ML_QUEUE: str = "ml"
+CELERY_RESEARCH_QUEUE: str = "research"
 ML_DAILY_WORKER_ID: str = "ml:crypto:1D"
 ML_DAILY_WORKER_SOURCE: str = "alpaca ml daily sync"
 DEFAULT_CANDLE_SOURCE: str = "tradier"
