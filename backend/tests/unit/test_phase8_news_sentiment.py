@@ -66,8 +66,8 @@ def test_news_sentiment_task_uses_research_queue() -> None:
     assert routes["tasks.news_sentiment.*"] == {"queue": CELERY_RESEARCH_QUEUE}
 
 
-def test_news_sentiment_task_returns_rss_ingestion_snapshot(monkeypatch: MonkeyPatch) -> None:
-    """The research task should fetch RSS and stop before scoring/storage."""
+def test_news_sentiment_task_returns_rss_scoring_snapshot(monkeypatch: MonkeyPatch) -> None:
+    """The research task should fetch RSS and build daily sentiment summaries."""
 
     from app.research.rss_client import RssArticle
 
@@ -97,7 +97,7 @@ def test_news_sentiment_task_returns_rss_ingestion_snapshot(monkeypatch: MonkeyP
         sentiment_date="2026-04-24",
     )
 
-    assert result["status"] == "rss_ingestion_ready"
+    assert result["status"] == "rss_scoring_ready"
     assert result["asset_class"] == "crypto"
     assert result["sentiment_date"] == "2026-04-24"
     assert result["symbols"] == ["BTC/USD", "XDG/USD"]
@@ -115,9 +115,15 @@ def test_news_sentiment_task_returns_rss_ingestion_snapshot(monkeypatch: MonkeyP
         "symbol_filter",
         "dedupe",
         "pre_scoring_filter",
+        "article_scoring",
+        "daily_storage",
         "gdelt",
         "structured_api",
         "fallback_api",
         "finbert",
-        "daily_storage",
     ]
+    sentiment_summary = result["sentiment_summary"]
+    assert isinstance(sentiment_summary, dict)
+    assert sentiment_summary["BTC/USD"]["article_count"] == 1
+    assert sentiment_summary["BTC/USD"]["coverage_score"] == 0.29
+    assert sentiment_summary["XDG/USD"]["compound_score"] is None

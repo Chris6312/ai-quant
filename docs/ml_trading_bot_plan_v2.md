@@ -1116,3 +1116,11 @@ Planned in-house crypto research score components:
 - `news_sentiment_score`
 - `liquidity_score`
 - `on_chain_score` later
+
+Slice 13 RSS scoring policy:
+
+- Prepared RSS articles now aggregate into daily symbol-level sentiment summaries.
+- Empty article coverage keeps sentiment fields `NULL` with `coverage_score = 0`.
+- The current scorer is a deterministic fallback contract so tests stay lightweight.
+- FinBERT remains the planned production scorer and should replace the fallback through the same scorer interface.
+- Daily sentiment rows use deterministic `symbol:YYYY-MM-DD` ids for safe upserts.
