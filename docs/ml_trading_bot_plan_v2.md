@@ -1190,3 +1190,18 @@ Slice 19 sentiment-to-ML feature join policy:
 - Missing or zero-coverage sentiment rows are not treated as observed neutral articles. They produce zero article count and default numeric values only to preserve the current finite LightGBM feature-vector contract.
 - Walk-forward training can now prefer date-specific research lookup entries before falling back to older symbol-level research inputs.
 - Slice 19 does not retrain models. Retraining and SHAP review remain Slice 20 work after historical sentiment coverage has been reviewed.
+
+
+Slice 20 sentiment refresh retraining policy:
+
+- Old crypto model artifacts should be retired before running a sentiment refresh so the active model registry cannot serve a pre-sentiment model.
+- The operator refresh flow is now:
+
+```text
+historical GDELT backfill → crypto_daily_sentiment upsert → crypto retrain → persisted prediction regeneration → sentiment SHAP summary
+```
+
+- The endpoint `POST /ml/train/crypto/sentiment-refresh` is the forced old-news fetch and retrain trigger. It accepts `start_date`, `end_date`, optional comma-separated `symbols`, `prediction_limit`, and `skip_backfill`.
+- `skip_backfill=true` is only for rerunning retrain and SHAP review after sentiment rows are already populated.
+- Prediction generation now loads the latest date-specific crypto sentiment row for each symbol so local SHAP uses the same sentiment feature lane as training.
+- SHAP review remains daily-context only. Sentiment SHAP must explain the 1D ML model context and must not directly veto 15m, 1h, or 4h strategy entries.

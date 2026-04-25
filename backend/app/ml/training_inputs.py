@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,9 +54,11 @@ class StockTrainingInputAssembler:
         )
         candles = tuple(self._row_to_candle(row) for row in candle_rows)
         candle_symbols = tuple(self._ordered_unique_symbols(candle.symbol for candle in candles))
-        research_lookup = await self._build_research_lookup(session, candle_symbols)
-        typed_research_lookup: Mapping[str | tuple[str, date], ResearchInputs] = research_lookup
-        return StockTrainingDataset(candles=candles, research_lookup=typed_research_lookup)
+        research_lookup = cast(
+            Mapping[str | tuple[str, date], ResearchInputs],
+            await self._build_research_lookup(session, candle_symbols),
+        )
+        return StockTrainingDataset(candles=candles, research_lookup=research_lookup)
 
     async def _load_candle_rows(
         self,
@@ -526,7 +529,11 @@ class CryptoTrainingInputAssembler:
             symbols=candle_symbols,
             sentiment_dates=candle_dates,
         )
-        return CryptoTrainingDataset(candles=candles, research_lookup=research_lookup)
+        typed_research_lookup = cast(
+            Mapping[str | tuple[str, date], ResearchInputs],
+            research_lookup,
+        )
+        return CryptoTrainingDataset(candles=candles, research_lookup=typed_research_lookup)
 
     async def _load_candle_rows(
         self,

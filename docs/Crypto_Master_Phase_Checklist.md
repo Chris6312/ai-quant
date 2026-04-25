@@ -236,6 +236,9 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Join persisted crypto daily sentiment into date-specific ML research inputs
 * [x] Keep stock-only research features unavailable for crypto feature rows
 * [x] Preserve missing sentiment as no-coverage defaults instead of source-backed neutral signal
+* [x] Add operator trigger to force historical sentiment backfill before crypto retraining
+* [x] Regenerate persisted crypto predictions after sentiment-aware retraining
+* [x] Summarize persisted sentiment SHAP rows for the refreshed crypto model
 
 ### Frontend
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from math import ceil
 from pathlib import Path
 from typing import Protocol, cast
@@ -20,10 +20,9 @@ from app.config.constants import (
     CRYPTO_CSV_TRAINING_SOURCE,
     ML_CANDLE_USAGE,
 )
-from app.config.crypto_scope import (
-    KRAKEN_UNIVERSE,
-)
-from app.config.settings import Settings, get_settings as load_settings
+from app.config.crypto_scope import KRAKEN_UNIVERSE
+from app.config.settings import Settings
+from app.config.settings import get_settings as load_settings
 from app.db.models import CandleRow, PredictionRow, PredictionShapRow
 from app.db.session import build_engine as create_engine
 from app.db.session import build_session_factory as create_session_factory
@@ -41,13 +40,19 @@ from app.ml.features import (
 from app.ml.freshness import MlFreshnessResult, evaluate_crypto_ml_freshness
 from app.ml.predictor import ModelPredictor
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
-from app.ml.trainer import TrainerConfig, TrainResult, WalkForwardTrainer
+from app.ml.trainer import TrainerConfig, TrainResult
+from app.ml.training_inputs import (
+    CryptoTrainingInputAssembler,
+)
 from app.ml.training_inputs import (
     train_crypto_model_from_db as train_crypto_model_from_db_impl,
+)
+from app.ml.training_inputs import (
     train_stock_model_from_db as train_stock_model_from_db_impl,
 )
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
+from app.tasks.news_sentiment import backfill_historical_crypto_sentiment
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
@@ -56,6 +61,12 @@ logger = logging.getLogger(__name__)
 _CRYPTO_ALPACA_REQUEST_ALIASES: dict[str, str] = {
     "XDG/USD": "DOGE/USD",
 }
+
+_SENTIMENT_FEATURES: tuple[str, ...] = (
+    "news_sentiment_1d",
+    "news_sentiment_7d",
+    "news_article_count_7d",
+)
 
 
 class GainersFetcher(Protocol):
@@ -95,14 +106,18 @@ class FoldLike(Protocol):
     n_test_samples: int
     model_path: str
 
+
 def get_settings() -> Settings:
     return load_settings()
+
 
 def build_engine(settings: Settings) -> AsyncEngine:
     return create_engine(settings)
 
+
 def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return create_session_factory(engine)
+
 
 async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
     statement = (
@@ -605,6 +620,44 @@ async def _train_crypto_result() -> TrainResult:
 
     return result
 
+
+def _parse_symbol_list(raw_symbols: str | None) -> list[str]:
+    """Parse a comma-separated symbol list into stable uppercase symbols."""
+
+    if raw_symbols is None:
+        return list(KRAKEN_UNIVERSE)
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for raw_symbol in raw_symbols.split(","):
+        symbol = raw_symbol.strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+    return symbols
+
+
+def _parse_iso_date(value: str, field_name: str) -> date:
+    """Parse an ISO date for operator-triggered ML workflows."""
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must be an ISO date formatted as YYYY-MM-DD",
+        ) from exc
+
+
+def _validate_backfill_window(start_date: str, end_date: str) -> tuple[date, date]:
+    """Validate the historical sentiment backfill date window."""
+
+    start = _parse_iso_date(start_date, "start_date")
+    end = _parse_iso_date(end_date, "end_date")
+    if end < start:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+    return start, end
+
 async def _train_stock_result(
     *,
     symbols: list[str] | None,
@@ -685,6 +738,57 @@ async def _run_registered_training_job(
         )
 
     return record, training_meta
+
+
+async def _build_sentiment_shap_summary(model_id: str) -> Mapping[str, object]:
+    """Summarize persisted sentiment SHAP rows for a freshly generated crypto model."""
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    try:
+        async with session_factory() as session:
+            statement = (
+                select(
+                    PredictionShapRow.feature,
+                    func.count(PredictionShapRow.id),
+                    func.avg(PredictionShapRow.abs_value),
+                    func.avg(PredictionShapRow.feature_value),
+                )
+                .join(PredictionRow, PredictionRow.id == PredictionShapRow.prediction_id)
+                .where(PredictionRow.asset_class == "crypto")
+                .where(PredictionRow.model_id == model_id)
+                .where(PredictionShapRow.feature.in_(_SENTIMENT_FEATURES))
+                .group_by(PredictionShapRow.feature)
+                .order_by(PredictionShapRow.feature.asc())
+            )
+            result = await session.execute(statement)
+            rows = result.all()
+    finally:
+        await engine.dispose()
+
+    features: dict[str, dict[str, object]] = {
+        feature: {
+            "row_count": 0,
+            "avg_abs_shap": 0.0,
+            "avg_feature_value": 0.0,
+        }
+        for feature in _SENTIMENT_FEATURES
+    }
+    for feature, row_count, avg_abs_shap, avg_feature_value in rows:
+        feature_name = str(feature)
+        features[feature_name] = {
+            "row_count": int(row_count),
+            "avg_abs_shap": round(_coerce_numeric(avg_abs_shap), 8),
+            "avg_feature_value": round(_coerce_numeric(avg_feature_value), 8),
+        }
+
+    return {
+        "model_id": model_id,
+        "features": features,
+        "sentiment_feature_count": len(_SENTIMENT_FEATURES),
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+    }
 
 async def _run_training_job(
     job_id: str,
@@ -1438,6 +1542,60 @@ async def _persist_prediction_snapshot(
         await session.commit()
 
     return persisted
+
+async def _build_crypto_prediction_research_lookup(
+    latest_by_symbol: Mapping[str, Sequence[Candle]],
+) -> Mapping[str | tuple[str, date], ResearchInputs]:
+    """Load date-specific sentiment inputs for latest crypto prediction candles."""
+
+    if not latest_by_symbol:
+        return {}
+
+    symbols: list[str] = []
+    sentiment_dates: list[date] = []
+    for symbol, history in latest_by_symbol.items():
+        if not history:
+            continue
+        symbols.append(symbol)
+        prediction_date = history[-1].time.date()
+        sentiment_dates.extend(
+            prediction_date - timedelta(days=offset) for offset in range(6, -1, -1)
+        )
+
+    if not symbols or not sentiment_dates:
+        return {}
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    try:
+        async with session_factory() as session:
+            assembler = CryptoTrainingInputAssembler()
+            lookup = await assembler._build_sentiment_lookup(
+                session,
+                symbols=symbols,
+                sentiment_dates=sentiment_dates,
+            )
+    finally:
+        await engine.dispose()
+
+    return cast(Mapping[str | tuple[str, date], ResearchInputs], lookup)
+
+
+def _prediction_research_inputs(
+    research_lookup: Mapping[str | tuple[str, date], ResearchInputs],
+    *,
+    symbol: str,
+    prediction_date: date,
+) -> ResearchInputs | None:
+    """Return prediction-time research inputs using the trainer lookup convention."""
+
+    dated = research_lookup.get((symbol, prediction_date))
+    if dated is not None:
+        return dated
+    return research_lookup.get(symbol)
+
+
 async def _build_asset_predictions(
     asset_class: str,
     *,
@@ -1507,10 +1665,20 @@ async def _build_asset_predictions(
         if len(bucket) > history_size:
             del bucket[0]
 
+    research_lookup: Mapping[str | tuple[str, date], ResearchInputs] = {}
+    if asset_class == "crypto":
+        research_lookup = await _build_crypto_prediction_research_lookup(latest_by_symbol)
+
     rows: list[dict[str, object]] = []
     model_id_value = selected_model_id if isinstance(selected_model_id, str) else None
     for symbol, history in latest_by_symbol.items():
-        features = engineer.build(history, asset_class)
+        prediction_date = history[-1].time.date()
+        research_inputs = _prediction_research_inputs(
+            research_lookup,
+            symbol=symbol,
+            prediction_date=prediction_date,
+        )
+        features = engineer.build(history, asset_class, research_inputs)
         if features is None:
             continue
         prediction = predictor.predict(features)
@@ -1729,6 +1897,86 @@ def get_model_importances(model_id: str) -> Mapping[str, object]:
         "importances": sorted_rows,
         "generated_at": datetime.now(tz=UTC).isoformat(),
     }
+
+
+@router.post("/train/crypto/sentiment-refresh")
+async def train_crypto_after_sentiment_backfill(
+    start_date: str = Query(..., description="Historical news backfill start date, YYYY-MM-DD"),
+    end_date: str = Query(..., description="Historical news backfill end date, YYYY-MM-DD"),
+    symbols: str | None = Query(
+        default=None,
+        description=(
+            "Optional comma-separated crypto symbols. "
+            "Defaults to configured crypto universe."
+        ),
+    ),
+    prediction_limit: int = Query(default=200, ge=1, le=500),
+    skip_backfill: bool = Query(
+        default=False,
+        description="Skip GDELT fetch/upsert and only retrain/regenerate predictions.",
+    ),
+) -> Mapping[str, object]:
+    """
+    Fetch historical sentiment, retrain crypto, regenerate predictions,
+    and summarize SHAP.
+    """
+
+    _ensure_no_running_job()
+    start, end = _validate_backfill_window(start_date, end_date)
+    symbol_list = _parse_symbol_list(symbols)
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail="at least one crypto symbol is required")
+
+    job = _new_job("crypto_sentiment_refresh_train", symbol_list)
+    backfill_result: Mapping[str, object]
+    if skip_backfill:
+        backfill_result = {
+            "status": "skipped",
+            "reason": "skip_backfill=true",
+            "symbols": symbol_list,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+        }
+    else:
+        backfill_result = await backfill_historical_crypto_sentiment(
+            symbols=symbol_list,
+            start_date=start.isoformat(),
+            end_date=end.isoformat(),
+        )
+
+    record, _ = await _run_registered_training_job(
+        asset_class="crypto",
+        latest_job_id=str(job["job_id"]),
+    )
+    model_id = str(record["model_id"])
+    prediction_result = await generate_prediction_snapshot(
+        limit=prediction_limit,
+        asset_class="crypto",
+    )
+    shap_summary = await _build_sentiment_shap_summary(model_id)
+
+    return {
+        "job_id": job["job_id"],
+        "asset_class": "crypto",
+        "model_id": model_id,
+        "artifact_path": record["artifact_path"],
+        "best_fold": record["best_fold"],
+        "fold_count": record["fold_count"],
+        "validation_accuracy": record["validation_accuracy"],
+        "validation_sharpe": record["validation_sharpe"],
+        "train_samples": record["train_samples"],
+        "test_samples": record["test_samples"],
+        "feature_count": record["feature_count"],
+        "backfill": backfill_result,
+        "predictions": {
+            "count": prediction_result.get("count"),
+            "persisted_count": prediction_result.get("persisted_count"),
+            "active_model_ids": prediction_result.get("active_model_ids"),
+        },
+        "sentiment_shap_summary": shap_summary,
+        "status": "completed",
+    }
+
 
 @router.post("/train/crypto")
 async def train_crypto() -> Mapping[str, object]:

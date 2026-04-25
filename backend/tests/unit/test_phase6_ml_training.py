@@ -123,12 +123,20 @@ async def test_run_training_job_registers_active_model(
         for index in range(260)
     ]
 
-    async def _fake_load(asset_class: str) -> list[Candle]:
-        assert asset_class == "crypto"
-        return candles
+    async def _fake_train_crypto_model_from_db(session: object) -> tuple[TrainResult, object]:
+        del session
+        result = await _FakeTrainer(TrainerConfig()).train(
+            candles,
+            "crypto",
+            FeatureEngineer(),
+        )
+        return result, object()
 
-    monkeypatch.setattr(ml_router, "_load_training_candles", _fake_load)
-    monkeypatch.setattr(ml_router, "WalkForwardTrainer", _FakeTrainer)
+    monkeypatch.setattr(
+        ml_router,
+        "train_crypto_model_from_db_impl",
+        _fake_train_crypto_model_from_db,
+    )
 
     job = ml_router._new_job("crypto_train", ["BTC/USD"])
     await ml_router._run_training_job(str(job["job_id"]), "crypto")
