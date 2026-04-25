@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import Literal
 
 from app.indicators.library import IndicatorLib
 from app.models.domain import Candle
 
 type FeatureVector = dict[str, float]
+type FeatureAvailability = Literal["real", "missing", "placeholder", "not_applicable_for_crypto"]
 
 TECHNICAL_FEATURES: list[str] = [
     "returns_1",
@@ -68,6 +70,52 @@ RESEARCH_FEATURES: list[str] = [
 ]
 
 ALL_FEATURES: list[str] = TECHNICAL_FEATURES + RESEARCH_FEATURES
+
+CRYPTO_MISSING_RESEARCH_FEATURES: tuple[str, ...] = (
+    "news_sentiment_1d",
+    "news_sentiment_7d",
+    "news_article_count_7d",
+)
+
+CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES: tuple[str, ...] = (
+    "earnings_proximity_days",
+    "congress_buy_score",
+    "congress_cluster_30d",
+    "days_since_last_congress",
+    "insider_buy_score",
+    "insider_cluster_60d",
+    "insider_value_60d",
+    "ceo_bought_90d",
+    "analyst_upgrade_score",
+    "consensus_rating",
+)
+
+CRYPTO_REPLACE_LATER_RESEARCH_FEATURES: tuple[str, ...] = (
+    "analyst_upgrade_score",
+    "consensus_rating",
+)
+
+
+@dataclass(slots=True, frozen=True)
+class FeatureTruthMetadata:
+    """Describe whether a feature is real signal for a given asset class."""
+
+    name: str
+    category: str
+    availability: FeatureAvailability
+    coverage_score: float
+    reason: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable feature truth payload."""
+
+        return {
+            "name": self.name,
+            "category": self.category,
+            "availability": self.availability,
+            "coverage_score": self.coverage_score,
+            "reason": self.reason,
+        }
 
 
 @dataclass(slots=True, frozen=True)
@@ -139,6 +187,22 @@ def ordered_feature_row(features: Mapping[str, float]) -> list[float]:
     return [float(features[name]) for name in ALL_FEATURES]
 
 
+def build_feature_truth_metadata(asset_class: str) -> list[FeatureTruthMetadata]:
+    """Return feature availability metadata for SHAP and feature audit screens."""
+
+    normalized_asset_class = asset_class.lower().strip()
+    return [
+        _classify_feature_for_asset(feature_name, normalized_asset_class)
+        for feature_name in ALL_FEATURES
+    ]
+
+
+def build_feature_truth_audit(asset_class: str) -> list[dict[str, object]]:
+    """Return JSON-safe feature truth metadata for an asset class."""
+
+    return [metadata.as_dict() for metadata in build_feature_truth_metadata(asset_class)]
+
+
 def build_feature_contract_summary() -> dict[str, object]:
     """Return a compact summary of the canonical feature contract."""
 
@@ -149,12 +213,83 @@ def build_feature_contract_summary() -> dict[str, object]:
         "all_features": list(ALL_FEATURES),
         "technical_features": list(TECHNICAL_FEATURES),
         "research_features": list(RESEARCH_FEATURES),
-        "stock_research_policy": "stock feature vectors may include non-zero research features",
-        "crypto_research_policy": (
-            "crypto feature vectors keep research feature keys but use the "
-            "default research placeholders"
+        "stock_research_policy": (
+            "stock feature vectors may include source-backed research features"
         ),
+        "crypto_research_policy": (
+            "crypto feature vectors preserve the current numeric ML contract, but "
+            "research fields are explicitly classified as missing or "
+            "not_applicable_for_crypto until source-backed crypto research features "
+            "are implemented"
+        ),
+        "crypto_missing_research_features": list(CRYPTO_MISSING_RESEARCH_FEATURES),
+        "crypto_not_applicable_research_features": list(
+            CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES
+        ),
+        "crypto_replace_later_research_features": list(CRYPTO_REPLACE_LATER_RESEARCH_FEATURES),
+        "crypto_research_score_contract": {
+            "name": "crypto_research_score",
+            "status": "planned",
+            "components": [
+                "technical_score",
+                "news_sentiment_score",
+                "liquidity_score",
+                "on_chain_score_later",
+            ],
+        },
+        "feature_truth": {
+            "crypto": build_feature_truth_audit("crypto"),
+            "stock": build_feature_truth_audit("stock"),
+        },
     }
+
+
+def _classify_feature_for_asset(feature_name: str, asset_class: str) -> FeatureTruthMetadata:
+    """Classify one feature for one asset class without changing numeric model input shape."""
+
+    if feature_name in TECHNICAL_FEATURES:
+        return FeatureTruthMetadata(
+            name=feature_name,
+            category="technical",
+            availability="real",
+            coverage_score=1.0,
+            reason="computed from candle history",
+        )
+
+    if asset_class != "crypto":
+        return FeatureTruthMetadata(
+            name=feature_name,
+            category="research",
+            availability="real",
+            coverage_score=1.0,
+            reason="stock research input may be source-backed when rows exist",
+        )
+
+    if feature_name in CRYPTO_MISSING_RESEARCH_FEATURES:
+        return FeatureTruthMetadata(
+            name=feature_name,
+            category="research",
+            availability="missing",
+            coverage_score=0.0,
+            reason="crypto news sentiment ingestion is not implemented yet",
+        )
+
+    if feature_name in CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES:
+        return FeatureTruthMetadata(
+            name=feature_name,
+            category="research",
+            availability="not_applicable_for_crypto",
+            coverage_score=0.0,
+            reason="stock-only research feature; do not treat numeric default as crypto signal",
+        )
+
+    return FeatureTruthMetadata(
+        name=feature_name,
+        category="research",
+        availability="placeholder",
+        coverage_score=0.0,
+        reason="requires source-backed crypto research score contract",
+    )
 
 
 class FeatureEngineer:

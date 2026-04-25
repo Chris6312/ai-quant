@@ -208,6 +208,10 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [ ] Add `/ml/predictions/{id}/shap`
 * [ ] Use persisted data
 * [ ] Remove reconstruction path
+* [x] Audit crypto zero-filled SHAP feature truth metadata
+* [x] Mark unimplemented crypto sentiment fields as missing in metadata
+* [x] Mark stock-only research fields as not applicable for crypto in metadata
+* [x] Document planned in-house `crypto_research_score` components
 
 ### Frontend
 

@@ -13,6 +13,7 @@ from app.ml.features import (
     FeatureEngineer,
     ResearchInputs,
     build_feature_contract_summary,
+    build_feature_truth_audit,
     ordered_feature_row,
     validate_feature_vector,
 )
@@ -125,3 +126,40 @@ def test_feature_contract_summary_matches_feature_lists() -> None:
     )
     assert summary["all_features"] == ALL_FEATURES
     assert summary["research_features"] == RESEARCH_FEATURES
+
+
+def test_crypto_feature_truth_audit_marks_ghost_research_features() -> None:
+    """Crypto SHAP metadata should separate real features from ghost-zero research fields."""
+
+    audit = {item["name"]: item for item in build_feature_truth_audit("crypto")}
+
+    assert audit["vwap_distance"]["availability"] == "real"
+    assert audit["adx_14"]["availability"] == "real"
+    assert audit["news_sentiment_1d"]["availability"] == "missing"
+    assert audit["news_sentiment_7d"]["availability"] == "missing"
+    assert audit["news_article_count_7d"]["coverage_score"] == 0.0
+    assert audit["congress_buy_score"]["availability"] == "not_applicable_for_crypto"
+    assert audit["insider_value_60d"]["availability"] == "not_applicable_for_crypto"
+    assert audit["consensus_rating"]["availability"] == "not_applicable_for_crypto"
+    assert audit["watchlist_research_score"]["availability"] == "placeholder"
+
+
+def test_feature_contract_summary_exposes_crypto_research_score_contract() -> None:
+    """The contract summary should document the planned crypto research score."""
+
+    summary = build_feature_contract_summary()
+
+    assert summary["crypto_missing_research_features"] == [
+        "news_sentiment_1d",
+        "news_sentiment_7d",
+        "news_article_count_7d",
+    ]
+    crypto_research_score_contract = summary["crypto_research_score_contract"]
+    assert isinstance(crypto_research_score_contract, dict)
+    assert crypto_research_score_contract["name"] == "crypto_research_score"
+    assert crypto_research_score_contract["components"] == [
+        "technical_score",
+        "news_sentiment_score",
+        "liquidity_score",
+        "on_chain_score_later",
+    ]
