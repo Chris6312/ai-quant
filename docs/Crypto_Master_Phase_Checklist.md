@@ -237,6 +237,8 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Keep stock-only research features unavailable for crypto feature rows
 * [x] Preserve missing sentiment as no-coverage defaults instead of source-backed neutral signal
 * [x] Add operator trigger to force historical sentiment backfill before crypto retraining
+* [x] Block retraining when historical sentiment coverage is below the requested threshold
+* [x] Move sentiment refresh orchestration out of oversized `ml.py` router
 * [x] Regenerate persisted crypto predictions after sentiment-aware retraining
 * [x] Summarize persisted sentiment SHAP rows for the refreshed crypto model
 

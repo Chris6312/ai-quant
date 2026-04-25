@@ -1201,7 +1201,9 @@ Slice 20 sentiment refresh retraining policy:
 historical GDELT backfill → crypto_daily_sentiment upsert → crypto retrain → persisted prediction regeneration → sentiment SHAP summary
 ```
 
-- The endpoint `POST /ml/train/crypto/sentiment-refresh` is the forced old-news fetch and retrain trigger. It accepts `start_date`, `end_date`, optional comma-separated `symbols`, `prediction_limit`, and `skip_backfill`.
-- `skip_backfill=true` is only for rerunning retrain and SHAP review after sentiment rows are already populated.
+- The endpoint `POST /ml/train/crypto/sentiment-refresh` is the forced old-news fetch and retrain trigger. It accepts `start_date`, `end_date`, optional comma-separated `symbols`, `prediction_limit`, and `min_sentiment_coverage`.
+- The endpoint must always run historical sentiment backfill before training. There is no skip-backfill path in the Slice 20 operator flow.
+- The endpoint must validate persisted sentiment coverage before retraining. If coverage is below `min_sentiment_coverage`, retraining and prediction regeneration are blocked.
+- Slice 20 began refactoring the oversized `app/api/routers/ml.py` by moving sentiment refresh orchestration and SHAP summary logic into `app/ml/sentiment_refresh.py`. The router is still too large and should continue being split before more ML features are added.
 - Prediction generation now loads the latest date-specific crypto sentiment row for each symbol so local SHAP uses the same sentiment feature lane as training.
 - SHAP review remains daily-context only. Sentiment SHAP must explain the 1D ML model context and must not directly veto 15m, 1h, or 4h strategy entries.

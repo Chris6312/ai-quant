@@ -39,6 +39,10 @@ from app.ml.features import (
 )
 from app.ml.freshness import MlFreshnessResult, evaluate_crypto_ml_freshness
 from app.ml.predictor import ModelPredictor
+from app.ml.sentiment_refresh import (
+    parse_crypto_symbol_list,
+    run_crypto_sentiment_refresh_training,
+)
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
 from app.ml.trainer import TrainerConfig, TrainResult
 from app.ml.training_inputs import (
@@ -52,7 +56,6 @@ from app.ml.training_inputs import (
 )
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
-from app.tasks.news_sentiment import backfill_historical_crypto_sentiment
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
@@ -62,11 +65,6 @@ _CRYPTO_ALPACA_REQUEST_ALIASES: dict[str, str] = {
     "XDG/USD": "DOGE/USD",
 }
 
-_SENTIMENT_FEATURES: tuple[str, ...] = (
-    "news_sentiment_1d",
-    "news_sentiment_7d",
-    "news_article_count_7d",
-)
 
 
 class GainersFetcher(Protocol):
@@ -621,43 +619,6 @@ async def _train_crypto_result() -> TrainResult:
     return result
 
 
-def _parse_symbol_list(raw_symbols: str | None) -> list[str]:
-    """Parse a comma-separated symbol list into stable uppercase symbols."""
-
-    if raw_symbols is None:
-        return list(KRAKEN_UNIVERSE)
-    symbols: list[str] = []
-    seen: set[str] = set()
-    for raw_symbol in raw_symbols.split(","):
-        symbol = raw_symbol.strip().upper()
-        if not symbol or symbol in seen:
-            continue
-        seen.add(symbol)
-        symbols.append(symbol)
-    return symbols
-
-
-def _parse_iso_date(value: str, field_name: str) -> date:
-    """Parse an ISO date for operator-triggered ML workflows."""
-
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field_name} must be an ISO date formatted as YYYY-MM-DD",
-        ) from exc
-
-
-def _validate_backfill_window(start_date: str, end_date: str) -> tuple[date, date]:
-    """Validate the historical sentiment backfill date window."""
-
-    start = _parse_iso_date(start_date, "start_date")
-    end = _parse_iso_date(end_date, "end_date")
-    if end < start:
-        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
-    return start, end
-
 async def _train_stock_result(
     *,
     symbols: list[str] | None,
@@ -739,56 +700,6 @@ async def _run_registered_training_job(
 
     return record, training_meta
 
-
-async def _build_sentiment_shap_summary(model_id: str) -> Mapping[str, object]:
-    """Summarize persisted sentiment SHAP rows for a freshly generated crypto model."""
-
-    settings = get_settings()
-    engine = build_engine(settings)
-    session_factory = build_session_factory(engine)
-    try:
-        async with session_factory() as session:
-            statement = (
-                select(
-                    PredictionShapRow.feature,
-                    func.count(PredictionShapRow.id),
-                    func.avg(PredictionShapRow.abs_value),
-                    func.avg(PredictionShapRow.feature_value),
-                )
-                .join(PredictionRow, PredictionRow.id == PredictionShapRow.prediction_id)
-                .where(PredictionRow.asset_class == "crypto")
-                .where(PredictionRow.model_id == model_id)
-                .where(PredictionShapRow.feature.in_(_SENTIMENT_FEATURES))
-                .group_by(PredictionShapRow.feature)
-                .order_by(PredictionShapRow.feature.asc())
-            )
-            result = await session.execute(statement)
-            rows = result.all()
-    finally:
-        await engine.dispose()
-
-    features: dict[str, dict[str, object]] = {
-        feature: {
-            "row_count": 0,
-            "avg_abs_shap": 0.0,
-            "avg_feature_value": 0.0,
-        }
-        for feature in _SENTIMENT_FEATURES
-    }
-    for feature, row_count, avg_abs_shap, avg_feature_value in rows:
-        feature_name = str(feature)
-        features[feature_name] = {
-            "row_count": int(row_count),
-            "avg_abs_shap": round(_coerce_numeric(avg_abs_shap), 8),
-            "avg_feature_value": round(_coerce_numeric(avg_feature_value), 8),
-        }
-
-    return {
-        "model_id": model_id,
-        "features": features,
-        "sentiment_feature_count": len(_SENTIMENT_FEATURES),
-        "generated_at": datetime.now(tz=UTC).isoformat(),
-    }
 
 async def _run_training_job(
     job_id: str,
@@ -1901,8 +1812,14 @@ def get_model_importances(model_id: str) -> Mapping[str, object]:
 
 @router.post("/train/crypto/sentiment-refresh")
 async def train_crypto_after_sentiment_backfill(
-    start_date: str = Query(..., description="Historical news backfill start date, YYYY-MM-DD"),
-    end_date: str = Query(..., description="Historical news backfill end date, YYYY-MM-DD"),
+    start_date: str = Query(
+        ...,
+        description="Historical news backfill start date, YYYY-MM-DD",
+    ),
+    end_date: str = Query(
+        ...,
+        description="Historical news backfill end date, YYYY-MM-DD",
+    ),
     symbols: str | None = Query(
         default=None,
         description=(
@@ -1911,71 +1828,41 @@ async def train_crypto_after_sentiment_backfill(
         ),
     ),
     prediction_limit: int = Query(default=200, ge=1, le=500),
-    skip_backfill: bool = Query(
-        default=False,
-        description="Skip GDELT fetch/upsert and only retrain/regenerate predictions.",
-    ),
+    min_sentiment_coverage: float = Query(default=0.01, ge=0.0, le=1.0),
 ) -> Mapping[str, object]:
     """
-    Fetch historical sentiment, retrain crypto, regenerate predictions,
-    and summarize SHAP.
+    Force historical sentiment fetch before crypto retraining.
+
+    The retrain step is blocked when persisted sentiment coverage is below the
+    requested minimum threshold.
     """
 
     _ensure_no_running_job()
-    start, end = _validate_backfill_window(start_date, end_date)
-    symbol_list = _parse_symbol_list(symbols)
+    symbol_list = parse_crypto_symbol_list(symbols)
     if not symbol_list:
         raise HTTPException(status_code=400, detail="at least one crypto symbol is required")
 
     job = _new_job("crypto_sentiment_refresh_train", symbol_list)
-    backfill_result: Mapping[str, object]
-    if skip_backfill:
-        backfill_result = {
-            "status": "skipped",
-            "reason": "skip_backfill=true",
-            "symbols": symbol_list,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-        }
-    else:
-        backfill_result = await backfill_historical_crypto_sentiment(
-            symbols=symbol_list,
-            start_date=start.isoformat(),
-            end_date=end.isoformat(),
+    job_id = str(job["job_id"])
+    try:
+        return await run_crypto_sentiment_refresh_training(
+            job_id=job_id,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=symbols,
+            prediction_limit=prediction_limit,
+            min_sentiment_coverage=min_sentiment_coverage,
+            train_model=_run_registered_training_job,
+            generate_predictions=generate_prediction_snapshot,
         )
-
-    record, _ = await _run_registered_training_job(
-        asset_class="crypto",
-        latest_job_id=str(job["job_id"]),
-    )
-    model_id = str(record["model_id"])
-    prediction_result = await generate_prediction_snapshot(
-        limit=prediction_limit,
-        asset_class="crypto",
-    )
-    shap_summary = await _build_sentiment_shap_summary(model_id)
-
-    return {
-        "job_id": job["job_id"],
-        "asset_class": "crypto",
-        "model_id": model_id,
-        "artifact_path": record["artifact_path"],
-        "best_fold": record["best_fold"],
-        "fold_count": record["fold_count"],
-        "validation_accuracy": record["validation_accuracy"],
-        "validation_sharpe": record["validation_sharpe"],
-        "train_samples": record["train_samples"],
-        "test_samples": record["test_samples"],
-        "feature_count": record["feature_count"],
-        "backfill": backfill_result,
-        "predictions": {
-            "count": prediction_result.get("count"),
-            "persisted_count": prediction_result.get("persisted_count"),
-            "active_model_ids": prediction_result.get("active_model_ids"),
-        },
-        "sentiment_shap_summary": shap_summary,
-        "status": "completed",
-    }
+    except HTTPException as exc:
+        job_store.update_job(
+            job_id,
+            status="failed",
+            progress_pct=100,
+            error=str(exc.detail),
+        )
+        raise
 
 
 @router.post("/train/crypto")
