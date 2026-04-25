@@ -466,6 +466,28 @@ export type MlPredictionFreshness = {
   status: 'fresh' | 'stale' | 'no_data';
 };
 
+export type MlPredictionShapRow = {
+  prediction_id: string;
+  model_id: string | null;
+  symbol: string;
+  feature_name: string;
+  feature_value: number;
+  contribution: number;
+  rank: number;
+};
+
+export type MlPredictionShapResponse = {
+  prediction_id: string;
+  model_id: string | null;
+  symbol: string;
+  asset_class: 'crypto' | 'stock';
+  rows: MlPredictionShapRow[];
+  count: number;
+  returned_count?: number;
+  limit?: number | null;
+  source: 'persisted';
+};
+
 export type MlPredictionsResponse = {
   predictions: MlPredictionRow[];
   count: number;
@@ -555,6 +577,19 @@ export const runMlPredictions = (limit = 200, assetClass?: 'crypto' | 'stock') =
   return requestJson<MlPredictionsResponse>(`/ml/predictions/run?${query.toString()}`, {
     method: 'POST',
   });
+};
+
+export const getMlPredictionShap = (
+  predictionId: string,
+  options: { limit?: number; all?: boolean } = {},
+) => {
+  const query = new URLSearchParams({ prediction_id: predictionId });
+  if (options.all) {
+    query.set('all', 'true');
+  } else if (options.limit) {
+    query.set('limit', String(options.limit));
+  }
+  return requestJson<MlPredictionShapResponse>(`/ml/predictions/shap?${query.toString()}`);
 };
 
 export const trainMlModel = (assetClass: 'crypto' | 'stock'): Promise<TrainModelResponse> =>

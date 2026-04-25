@@ -1226,6 +1226,88 @@ async def _read_persisted_prediction_snapshot(
     }
 
 
+
+async def _read_persisted_prediction_shap(
+    prediction_id: str,
+    *,
+    limit: int | None = 10,
+) -> Mapping[str, object]:
+    """Read persisted SHAP rows for a persisted prediction."""
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+
+    async with session_factory() as session:
+        prediction = cast(
+            PredictionRow | None,
+            await session.scalar(
+                select(PredictionRow).where(PredictionRow.id == prediction_id)
+            ),
+        )
+        if prediction is None:
+            raise HTTPException(status_code=404, detail="Prediction not found")
+
+        shap_result = await session.scalars(
+            select(PredictionShapRow)
+            .where(PredictionShapRow.prediction_id == prediction_id)
+            .order_by(PredictionShapRow.rank.asc())
+        )
+        all_shap_rows = cast(list[PredictionShapRow], list(shap_result.all()))
+        shap_rows = all_shap_rows if limit is None else all_shap_rows[:limit]
+
+    return {
+        "prediction_id": prediction.id,
+        "model_id": prediction.model_id,
+        "symbol": prediction.symbol,
+        "asset_class": prediction.asset_class,
+        "rows": [
+            {
+                "prediction_id": row.prediction_id,
+                "model_id": prediction.model_id,
+                "symbol": prediction.symbol,
+                "feature_name": row.feature,
+                "feature_value": row.feature_value,
+                "contribution": row.shap_value,
+                "rank": row.rank,
+            }
+            for row in shap_rows
+        ],
+        "count": len(all_shap_rows),
+        "returned_count": len(shap_rows),
+        "limit": limit,
+        "source": "persisted",
+    }
+
+
+@router.get("/predictions/shap")
+async def get_prediction_shap_by_query(
+    prediction_id: str = Query(..., description="Persisted prediction id"),
+    limit: int = Query(10, ge=1, le=200, description="Maximum persisted SHAP rows to return"),
+    include_all: bool = Query(False, alias="all", description="Return every persisted SHAP row"),
+) -> Mapping[str, object]:
+    """Read persisted SHAP rows using a query parameter-safe prediction id."""
+
+    return await _read_persisted_prediction_shap(
+        prediction_id,
+        limit=None if include_all else limit,
+    )
+
+
+@router.get("/predictions/{prediction_id}/shap")
+async def get_prediction_shap(
+    prediction_id: str,
+    limit: int = Query(10, ge=1, le=200, description="Maximum persisted SHAP rows to return"),
+    include_all: bool = Query(False, alias="all", description="Return every persisted SHAP row"),
+) -> Mapping[str, object]:
+    """Read persisted SHAP rows for a persisted prediction."""
+
+    return await _read_persisted_prediction_shap(
+        prediction_id,
+        limit=None if include_all else limit,
+    )
+
+
 async def generate_prediction_snapshot(
     *,
     limit: int = 200,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   importCryptoCsv,
@@ -8,6 +8,7 @@ import {
   getFeatureParity,
   getMlModelImportances,
   getMlModels,
+  getMlPredictionShap,
   getMlPredictions,
   getMlPersistence,
   getStockUniverse,
@@ -21,6 +22,9 @@ import {
   type MlModelImportancesResponse,
   type MlModelRecord,
   type MlModelsResponse,
+  type MlPredictionRow,
+  type MlPredictionShapResponse,
+  type MlPredictionShapRow,
   type MlPredictionsResponse,
   type MlPersistenceResponse,
   type StockUniverseResponse,
@@ -62,6 +66,17 @@ type ActionTone = 'blue' | 'amber' | 'muted' | 'danger';
 type AssetClass = 'crypto' | 'stock';
 type ImportanceDisplayLimit = 10 | 25 | 'all';
 type PredictionDisplayMode = 'top' | 'all';
+type ShapDisplayLimit = 10 | 'all';
+
+const SHAP_DISPLAY_LIMIT = 10;
+
+type ShapRegime = 'Trend' | 'Counter-trend' | 'Exhaustion' | 'Chop / Mixed';
+
+type ShapReadout = {
+  regime: ShapRegime;
+  tone: BadgeVariant;
+  summary: string;
+};
 
 type FeatureContractSummary = {
   feature_count: number;
@@ -134,14 +149,81 @@ const CRYPTO_FOLDS: Fold[] = [
   { label: 'Fold 8', window: 'Aug 2024 → Jan 2025 | Feb 2025', trainL: 75, trainW: 12.5, testL: 87.5, testW: 12.5, sharpe: 1.12, acc: 70.9 },
 ];
 
-const SHAP_ROWS = [
-  { name: 'rsi_14 = 62.4', val: 0.31 },
-  { name: 'returns_5 = +2.1%', val: 0.27 },
-  { name: 'macd_hist = +0.44', val: 0.21 },
-  { name: 'news_sentiment_7d', val: 0.13 },
-  { name: 'volume_ratio_20 = 0.82', val: -0.09 },
-  { name: 'atr_pct_14 = 1.8%', val: -0.06 },
-];
+
+function sumContributions(rows: MlPredictionShapRow[], matcher: (featureName: string) => boolean): number {
+  return rows
+    .filter((row) => matcher(row.feature_name.toLowerCase()))
+    .reduce((total, row) => total + row.contribution, 0);
+}
+
+function getTopShapDrivers(rows: MlPredictionShapRow[], count: number): MlPredictionShapRow[] {
+  return [...rows]
+    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
+    .slice(0, count);
+}
+
+function formatDriverName(name: string): string {
+  return name.replaceAll('_', ' ');
+}
+
+function buildShapReadout(rows: MlPredictionShapRow[], direction: MlPredictionRow['direction'] | null): ShapReadout {
+  if (rows.length === 0) {
+    return {
+      regime: 'Chop / Mixed',
+      tone: 'muted',
+      summary: 'No persisted SHAP rows are available for this prediction yet.',
+    };
+  }
+
+  const momentumScore = sumContributions(rows, (name) => name.includes('returns'));
+  const trendScore = sumContributions(rows, (name) => name.includes('sma') || name.includes('ema'));
+  const volatilityScore = sumContributions(rows, (name) => name.includes('range') || name.includes('atr') || name.includes('bollinger'));
+  const calendarScore = sumContributions(rows, (name) => name.includes('day') || name.includes('month'));
+  const topDrivers = getTopShapDrivers(rows, 3);
+  const driverNames = topDrivers.map((row) => formatDriverName(row.feature_name)).join(', ');
+  const alignedMomentum = direction === 'short' ? momentumScore < 0 : momentumScore > 0;
+  const alignedTrend = direction === 'short' ? trendScore < 0 : trendScore > 0;
+  const opposingMomentum = direction === 'short' ? momentumScore > 0 : momentumScore < 0;
+  const opposingTrend = direction === 'short' ? trendScore > 0 : trendScore < 0;
+
+  if (alignedMomentum && alignedTrend) {
+    return {
+      regime: 'Trend',
+      tone: direction === 'short' ? 'red' : 'green',
+      summary: `Trend-aligned ${direction ?? 'model'} signal. Momentum and trend drivers agree; top drivers are ${driverNames}.`,
+    };
+  }
+
+  if (alignedMomentum && opposingTrend) {
+    return {
+      regime: 'Counter-trend',
+      tone: 'amber',
+      summary: `Counter-trend ${direction ?? 'model'} signal. Momentum is leaning with the prediction while trend structure still pushes back; top drivers are ${driverNames}.`,
+    };
+  }
+
+  if (volatilityScore < 0 && (opposingMomentum || opposingTrend)) {
+    return {
+      regime: 'Exhaustion',
+      tone: 'purple',
+      summary: `Exhaustion risk. Volatility/range pressure and opposing structure are weighing on the setup; top drivers are ${driverNames}.`,
+    };
+  }
+
+  if (Math.abs(calendarScore) > Math.abs(momentumScore) && Math.abs(calendarScore) > Math.abs(trendScore)) {
+    return {
+      regime: 'Chop / Mixed',
+      tone: 'teal',
+      summary: `Mixed signal with calendar features doing too much of the work. Top drivers are ${driverNames}.`,
+    };
+  }
+
+  return {
+    regime: 'Chop / Mixed',
+    tone: 'muted',
+    summary: `Mixed model readout. Drivers are not strongly aligned; top drivers are ${driverNames}.`,
+  };
+}
 
 const formatLagDays = (lagDays: number | null | undefined): string => {
   if (typeof lagDays !== 'number' || !Number.isFinite(lagDays)) {
@@ -250,12 +332,18 @@ function FeatBar({ name, pct, color, tag }: { name: string; pct: number; color: 
   );
 }
 
-function ShapRow({ name, val }: { name: string; val: number }): React.ReactElement {
-  const pos = val >= 0;
-  const pct = (Math.abs(val) / 0.31) * 40;
+function ShapRow({ name, featureValue, contribution, maxAbsContribution }: { name: string; featureValue: number; contribution: number; maxAbsContribution: number }): React.ReactElement {
+  const pos = contribution >= 0;
+  const denominator = maxAbsContribution > 0 ? maxAbsContribution : 1;
+  const pct = Math.min((Math.abs(contribution) / denominator) * 48, 48);
+  const formattedValue = Number.isFinite(featureValue) ? featureValue.toFixed(4) : 'n/a';
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 48px', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: `0.5px solid ${S.border}` }}>
-      <span style={{ fontSize: 10, color: S.text2 }}>{name}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 58px', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: `0.5px solid ${S.border}` }}>
+      <span style={{ fontSize: 10, color: S.text2 }}>
+        {name}
+        <span style={{ display: 'block', color: S.text3, fontSize: 9, marginTop: 2 }}>{formattedValue}</span>
+      </span>
       <div style={{ position: 'relative', height: 8, background: S.bg3, borderRadius: 2, overflow: 'hidden' }}>
         <div style={{ position: 'absolute', left: '50%', width: '0.5px', height: '100%', background: S.border2 }} />
         {pos ? (
@@ -264,7 +352,7 @@ function ShapRow({ name, val }: { name: string; val: number }): React.ReactEleme
           <div style={{ position: 'absolute', right: '50%', height: '100%', width: `${pct}%`, background: 'rgba(255,77,106,0.6)', borderRadius: '2px 0 0 2px' }} />
         )}
       </div>
-      <span style={{ fontSize: 10, color: pos ? S.green : S.red, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pos ? '+' : ''}{val.toFixed(2)}</span>
+      <span style={{ fontSize: 10, color: pos ? S.green : S.red, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pos ? '+' : ''}{contribution.toFixed(4)}</span>
     </div>
   );
 }
@@ -408,6 +496,12 @@ const MachineLearning: React.FC = () => {
   const [importanceError, setImportanceError] = useState<string | null>(null);
   const [predictionsResponse, setPredictionsResponse] = useState<MlPredictionsResponse | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [selectedPredictionId, setSelectedPredictionId] = useState<string | null>(null);
+  const [selectedShapResponse, setSelectedShapResponse] = useState<MlPredictionShapResponse | null>(null);
+  const [shapError, setShapError] = useState<string | null>(null);
+  const [isLoadingShap, setIsLoadingShap] = useState(false);
+  const [selectedShapLimit, setSelectedShapLimit] = useState<ShapDisplayLimit>(10);
+  const shapCacheRef = useRef<Map<string, MlPredictionShapResponse>>(new Map());
   const [predictionDisplayMode, setPredictionDisplayMode] = useState<PredictionDisplayMode>('top');
   const [isLoading, setIsLoading] = useState(true);
   const [banner, setBanner] = useState<BannerState | null>(null);
@@ -540,6 +634,10 @@ const MachineLearning: React.FC = () => {
 
   const activeCryptoModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'crypto' && model.status === 'active') ?? null, [modelsResponse]);
   const activeStockModel = useMemo(() => modelsResponse?.models.find((model) => model.asset_class === 'stock' && model.status === 'active') ?? null, [modelsResponse]);
+  const phase8RegistryModels = useMemo(
+    () => modelsResponse?.models.filter((model) => model.asset_class === 'crypto') ?? [],
+    [modelsResponse],
+  );
   const cryptoPredictionFreshness = predictionsResponse?.freshness_by_asset.crypto ?? null;
   const stockPredictionFreshness = predictionsResponse?.freshness_by_asset.stock ?? null;
   const selectedImportanceModel = useMemo(() => {
@@ -617,6 +715,93 @@ const MachineLearning: React.FC = () => {
     }
     return rows.slice(0, 5);
   }, [predictionDisplayMode, predictionsResponse]);
+
+  const selectedPrediction = useMemo<MlPredictionRow | null>(() => {
+    const rows = predictionsResponse?.predictions ?? [];
+    if (!selectedPredictionId || rows.length === 0) {
+      return null;
+    }
+
+    return rows.find((prediction) => prediction.prediction_id === selectedPredictionId) ?? null;
+  }, [predictionsResponse, selectedPredictionId]);
+
+  useEffect(() => {
+    shapCacheRef.current.clear();
+    setSelectedShapResponse(null);
+    setShapError(null);
+
+    const rows = predictionsResponse?.predictions ?? [];
+    if (selectedPredictionId && !rows.some((prediction) => prediction.prediction_id === selectedPredictionId)) {
+      setSelectedPredictionId(null);
+    }
+  }, [predictionsResponse]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const run = async (): Promise<void> => {
+      if (!selectedPrediction) {
+        setSelectedShapResponse(null);
+        setShapError(null);
+        setIsLoadingShap(false);
+        return;
+      }
+
+      try {
+        if (alive) {
+          setIsLoadingShap(true);
+          setShapError(null);
+        }
+        const cacheKey = `${selectedPrediction.prediction_id}:${selectedShapLimit}`;
+        const cached = shapCacheRef.current.get(cacheKey);
+        if (cached) {
+          if (alive) {
+            setSelectedShapResponse(cached);
+          }
+          return;
+        }
+
+        const response = await getMlPredictionShap(
+          selectedPrediction.prediction_id,
+          selectedShapLimit === 'all' ? { all: true } : { limit: SHAP_DISPLAY_LIMIT },
+        );
+        shapCacheRef.current.set(cacheKey, response);
+        if (alive) {
+          setSelectedShapResponse(response);
+        }
+      } catch (error: unknown) {
+        if (alive) {
+          setSelectedShapResponse(null);
+          setShapError(normalizeError(error));
+        }
+      } finally {
+        if (alive) {
+          setIsLoadingShap(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      alive = false;
+    };
+  }, [selectedPrediction, selectedShapLimit]);
+
+  const shapRows = selectedShapResponse?.rows ?? [];
+  const visibleShapRows = shapRows;
+  const maxAbsShapContribution = useMemo(() => {
+    if (visibleShapRows.length === 0) {
+      return 1;
+    }
+
+    return Math.max(...visibleShapRows.map((row) => Math.abs(row.contribution)), 1);
+  }, [visibleShapRows]);
+
+  const shapReadout = useMemo(
+    () => buildShapReadout(shapRows, selectedPrediction?.direction ?? null),
+    [selectedPrediction?.direction, shapRows],
+  );
 
   const toModelCardData = (
     model: MlModelRecord | null,
@@ -1106,7 +1291,14 @@ const MachineLearning: React.FC = () => {
                   : 'muted';
                 const actionLabel = prediction.action === 'signal' ? 'Signal' : 'Skip';
                 return (
-                  <tr key={prediction.prediction_id}>
+                  <tr
+                    key={prediction.prediction_id}
+                    onClick={() => setSelectedPredictionId(prediction.prediction_id)}
+                    style={{
+                      cursor: 'pointer',
+                      background: selectedPredictionId === prediction.prediction_id ? S.bg2 : 'transparent',
+                    }}
+                  >
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontWeight: 500, color: S.text }}>{prediction.symbol}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><Badge v={prediction.asset_class === 'crypto' ? 'blue' : 'amber'}>{prediction.asset_class}</Badge></td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><DirPill dir={prediction.direction} /></td>
@@ -1142,30 +1334,69 @@ const MachineLearning: React.FC = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
-          <CardHeader title="SHAP explainability · BTC/USD · latest signal">
-            <DirPill dir="long" />
-            <span style={{ fontSize: 9, color: S.text3 }}>Preview only</span>
-            <Badge v="muted">Per-trade</Badge>
+          <CardHeader title={`SHAP explainability · ${selectedPrediction?.symbol ?? 'no prediction selected'}`}>
+            {selectedPrediction ? <DirPill dir={selectedPrediction.direction} /> : <Badge v="muted">No prediction</Badge>}
+            {selectedPrediction ? <Badge v={shapReadout.tone}>{shapReadout.regime}</Badge> : null}
+            <span style={{ fontSize: 9, color: S.text3 }}>Cached local SHAP</span>
+            <Badge v="muted">{selectedShapResponse ? `${selectedShapResponse.count} rows` : 'Per-trade'}</Badge>
+            <ActionButton tone={selectedShapLimit === 10 ? 'blue' : 'muted'} onClick={() => setSelectedShapLimit(10)}>
+              Top 10
+            </ActionButton>
+            <ActionButton tone={selectedShapLimit === 'all' ? 'blue' : 'muted'} onClick={() => setSelectedShapLimit('all')}>
+              All
+            </ActionButton>
           </CardHeader>
           <div style={{ padding: 16 }}>
-            <div style={{ fontSize: 10, color: S.text3, marginBottom: 12, lineHeight: 1.6 }}>Feature contributions to this prediction. The layout is preserved, but the live payload depends on <span style={{ color: S.text2, fontFamily: S.mono }}>GET /ml/predictions/&#123;id&#125;/shap</span>.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 48px', gap: 8, paddingBottom: 6, borderBottom: `0.5px solid ${S.border}` }}>
-              {['Feature (value)', 'SHAP contribution', 'SHAP'].map((h, i) => (
+            <div style={{ fontSize: 10, color: S.text3, marginBottom: 12, lineHeight: 1.6 }}>
+              {selectedPrediction
+                ? `${selectedShapLimit === 'all' ? 'All' : `Top ${Math.min(SHAP_DISPLAY_LIMIT, shapRows.length)}`} cached local SHAP drivers for prediction ${selectedPrediction.prediction_id}. Data is fetched only after explicit row selection and read from persisted prediction_shap rows only.`
+                : 'Select a prediction row to view cached local SHAP explainability. The page does not compute or fetch SHAP on table load.'}
+              {selectedPrediction ? (
+                <span style={{ display: 'block', marginTop: 6, color: getBadgeTone(shapReadout.tone).color }}>
+                  {shapReadout.regime}: {shapReadout.summary}
+                </span>
+              ) : null}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 58px', gap: 8, paddingBottom: 6, borderBottom: `0.5px solid ${S.border}` }}>
+              {['Feature value', 'SHAP contribution', 'SHAP'].map((h, i) => (
                 <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3, textAlign: i === 2 ? 'right' : i === 1 ? 'center' : 'left' }}>{h}</span>
               ))}
             </div>
-            {SHAP_ROWS.map((row) => <ShapRow key={row.name} name={row.name} val={row.val} />)}
+            {!selectedPrediction ? (
+              <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>Select a prediction to view cached local SHAP explanation.</div>
+            ) : isLoadingShap ? (
+              <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>Loading persisted SHAP rows…</div>
+            ) : shapError ? (
+              <div style={{ padding: '12px 0', fontSize: 10, color: S.red }}>Unable to load persisted SHAP rows: {shapError}</div>
+            ) : shapRows.length === 0 ? (
+              <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>No SHAP rows found for this prediction.</div>
+            ) : (
+              <>
+                <div style={{ padding: '8px 0 10px', fontSize: 9, color: S.text3, letterSpacing: '0.04em' }}>
+                  Showing {selectedShapLimit === 'all' ? 'all' : `top ${visibleShapRows.length}`} of {selectedShapResponse?.count ?? shapRows.length} persisted SHAP rows.
+                </div>
+                {visibleShapRows.map((row) => (
+                <ShapRow
+                  key={`${row.prediction_id}:${row.rank}:${row.feature_name}`}
+                  name={row.feature_name}
+                  featureValue={row.feature_value}
+                  contribution={row.contribution}
+                  maxAbsContribution={maxAbsShapContribution}
+                />
+                ))}
+              </>
+            )}
           </div>
         </Card>
 
         <Card>
-          <CardHeader title="Model registry · artifacts on disk">
-            <Badge v="muted">{modelsResponse?.models.length ?? 0} records</Badge>
+          <CardHeader title="Crypto model registry · artifacts on disk">
+            <Badge v="muted">{phase8RegistryModels.length} crypto records</Badge>
           </CardHeader>
           <div style={{ padding: 16 }}>
-            {modelsResponse && modelsResponse.models.length > 0 ? (
+            {phase8RegistryModels.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {modelsResponse.models.slice(0, 6).map((model) => (
+                {phase8RegistryModels.slice(0, 6).map((model) => (
                   <div key={model.model_id} style={{ display: 'grid', gridTemplateColumns: '76px 58px 1fr 64px 62px', gap: 8, alignItems: 'center', paddingBottom: 8, borderBottom: `0.5px solid ${S.border}` }}>
                     <Badge v={model.asset_class === 'crypto' ? 'blue' : 'amber'}>{model.asset_class}</Badge>
                     <span style={{ fontSize: 10, color: S.text3 }}>Fold {model.best_fold}</span>
@@ -1177,7 +1408,7 @@ const MachineLearning: React.FC = () => {
               </div>
             ) : (
               <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-                No trained model artifacts have been registered yet. Run crypto or stock training to populate this section.
+                No crypto model artifacts are registered yet. Stock artifacts are intentionally hidden during crypto-first Phase 8.
               </div>
             )}
           </div>
