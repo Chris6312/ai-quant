@@ -22,6 +22,9 @@ class PaperLedgerStore(Protocol):
     ) -> PaperAccountRow:
         """Return an existing account or persist a default one."""
 
+    async def list_accounts(self) -> list[PaperAccountRow]:
+        """Return persisted paper accounts."""
+
     async def set_account_balance(
         self,
         asset_class: str,
@@ -29,6 +32,9 @@ class PaperLedgerStore(Protocol):
         default_cash_balance: float | None = None,
     ) -> PaperAccountRow:
         """Persist account cash balance changes."""
+
+    async def reset_account(self, asset_class: str) -> PaperAccountRow:
+        """Reset a durable paper account to its default cash balance."""
 
     async def list_open_positions(self, asset_class: str | None = None) -> list[PaperPositionRow]:
         """Return persisted open paper positions."""
@@ -99,6 +105,12 @@ class PaperLedgerStore(Protocol):
     ) -> PaperFillRow:
         """Persist an immutable fill event."""
 
+    async def list_orders(self, symbol: str | None = None) -> list[PaperOrderRow]:
+        """Return persisted paper orders."""
+
+    async def list_fills(self, symbol: str | None = None) -> list[PaperFillRow]:
+        """Return persisted paper fills."""
+
 
 @dataclass(frozen=True, slots=True)
 class PaperLedgerSnapshot:
@@ -136,6 +148,65 @@ class PaperLedgerService:
             crypto_cash=float(crypto_account.cash_balance),
             open_positions=tuple(open_positions),
         )
+
+    async def list_accounts(self) -> list[PaperAccountRow]:
+        """Return durable account rows, creating defaults when the ledger is empty."""
+
+        await self.store.get_or_create_account("stock", DEFAULT_PAPER_BALANCE)
+        await self.store.get_or_create_account("crypto", DEFAULT_PAPER_BALANCE)
+        return await self.store.list_accounts()
+
+    async def set_account_balance(
+        self,
+        asset_class: str,
+        cash_balance: float,
+        update_default: bool = True,
+    ) -> PaperAccountRow:
+        """Set durable account cash, optionally making the value the reset default."""
+
+        if asset_class not in {"stock", "crypto"}:
+            raise ValueError("paper asset_class must be 'stock' or 'crypto'")
+        if cash_balance < 0.0:
+            raise ValueError("paper cash balance must be non-negative")
+        default_cash_balance = cash_balance if update_default else None
+        return await self.store.set_account_balance(
+            asset_class=asset_class,
+            cash_balance=cash_balance,
+            default_cash_balance=default_cash_balance,
+        )
+
+    async def reset_account(self, asset_class: str) -> list[PaperAccountRow]:
+        """Reset one or all durable account balances to configured defaults."""
+
+        if asset_class == "all":
+            await self.store.get_or_create_account("stock", DEFAULT_PAPER_BALANCE)
+            await self.store.get_or_create_account("crypto", DEFAULT_PAPER_BALANCE)
+            return [
+                await self.store.reset_account("stock"),
+                await self.store.reset_account("crypto"),
+            ]
+        if asset_class not in {"stock", "crypto"}:
+            raise ValueError("paper asset_class must be 'stock', 'crypto', or 'all'")
+        await self.store.get_or_create_account(asset_class, DEFAULT_PAPER_BALANCE)
+        return [await self.store.reset_account(asset_class)]
+
+    async def list_open_positions(
+        self,
+        asset_class: str | None = None,
+    ) -> list[PaperPositionRow]:
+        """Return durable open paper positions."""
+
+        return await self.store.list_open_positions(asset_class=asset_class)
+
+    async def list_orders(self, symbol: str | None = None) -> list[PaperOrderRow]:
+        """Return durable paper orders."""
+
+        return await self.store.list_orders(symbol=symbol)
+
+    async def list_fills(self, symbol: str | None = None) -> list[PaperFillRow]:
+        """Return durable paper fills."""
+
+        return await self.store.list_fills(symbol=symbol)
 
     async def execute_market_fill(
         self,

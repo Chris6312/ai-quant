@@ -61,6 +61,22 @@ class InMemoryPaperLedgerStore:
         account.updated_at = datetime.now(tz=UTC)
         return account
 
+    async def list_accounts(self) -> list[PaperAccountRow]:
+        """Return fake durable accounts."""
+
+        return sorted(self.accounts.values(), key=lambda row: row.asset_class)
+
+    async def reset_account(self, asset_class: str) -> PaperAccountRow:
+        """Reset a fake account to its default cash balance."""
+
+        account = await self.get_or_create_account(asset_class, DEFAULT_PAPER_BALANCE)
+        account.cash_balance = account.default_cash_balance
+        account.realized_pnl = 0.0
+        account.reset_count += 1
+        account.last_reset_at = datetime.now(tz=UTC)
+        account.updated_at = account.last_reset_at
+        return account
+
     async def list_open_positions(self, asset_class: str | None = None) -> list[PaperPositionRow]:
         """Return open fake positions."""
 
@@ -219,6 +235,20 @@ class InMemoryPaperLedgerStore:
         )
         self.fills.append(fill)
         return fill
+
+    async def list_orders(self, symbol: str | None = None) -> list[PaperOrderRow]:
+        """Return fake durable orders."""
+
+        if symbol is None:
+            return list(self.orders)
+        return [order for order in self.orders if order.symbol == symbol.upper()]
+
+    async def list_fills(self, symbol: str | None = None) -> list[PaperFillRow]:
+        """Return fake durable fills."""
+
+        if symbol is None:
+            return list(self.fills)
+        return [fill for fill in self.fills if fill.symbol == symbol.upper()]
 
 
 @pytest.mark.asyncio

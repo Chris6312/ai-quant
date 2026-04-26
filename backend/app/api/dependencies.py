@@ -11,6 +11,8 @@ from app.brokers.router import BrokerRouter
 from app.brokers.tradier import TradierBroker
 from app.config.settings import Settings, get_settings
 from app.db.session import build_engine, build_session_factory
+from app.paper.ledger_repository import PaperLedgerRepository
+from app.paper.ledger_service import PaperLedgerService
 from app.repositories.candles import CandleRepository
 from app.repositories.positions import PositionRepository
 from app.repositories.research import ResearchRepository
@@ -73,6 +75,22 @@ def get_research_repository(
     """Dependency for the research repository."""
 
     return ResearchRepository(session)
+
+
+def get_paper_ledger_repository(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PaperLedgerRepository:
+    """Dependency for durable paper ledger persistence."""
+
+    return PaperLedgerRepository(session)
+
+
+def get_paper_ledger_service(
+    repository: Annotated[PaperLedgerRepository, Depends(get_paper_ledger_repository)],
+) -> PaperLedgerService:
+    """Dependency for durable paper ledger orchestration."""
+
+    return PaperLedgerService(repository)
 
 
 def get_direction_gate() -> DirectionGate:
