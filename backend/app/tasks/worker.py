@@ -57,6 +57,10 @@ celery_app.conf.update(
     },
     timezone="America/New_York",
     beat_schedule={
+        "news-sentiment-crypto-refresh": {
+            "task": "tasks.news_sentiment.daily_crypto_sync",
+            "schedule": crontab(hour="2,6,10,14,18,22", minute=30),
+        },
         "ml-daily-candle-sync": {
             "task": "tasks.ml_candles.daily_sync",
             "schedule": crontab(hour=8, minute=40),

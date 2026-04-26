@@ -56,6 +56,14 @@ from app.ml.training_inputs import (
 )
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
+from app.risk.sentiment_risk import (
+    SentimentGateDecision,
+    SentimentGateInput,
+    SentimentSizingInput,
+    TradeDirection,
+    calculate_position_multiplier,
+    evaluate_sentiment_gate,
+)
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
@@ -861,6 +869,65 @@ def _prediction_action(
         return "skip"
     return "signal"
 
+def _sentiment_gate_for_prediction(
+    asset_class: str,
+    direction: str,
+    features: FeatureVector,
+    *,
+    model_confidence: float | None = None,
+) -> SentimentGateDecision | None:
+    """Evaluate crypto macro sentiment pressure for prediction candidates.
+
+    Phase 9 treats BTC/ETH sentiment as a crypto macro risk-pressure layer,
+    not symbol-specific altcoin sentiment and not a universal hard gate. Stocks
+    remain untouched until their own sentiment policy is explicitly designed.
+    """
+
+    if asset_class != "crypto" or direction not in {"long", "short"}:
+        return None
+
+    article_count = int(max(0.0, round(features.get("news_article_count_7d", 0.0))))
+    return evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction=cast(TradeDirection, direction),
+            news_sentiment_1d=features.get("news_sentiment_1d"),
+            article_count_7d=article_count,
+            model_confidence=model_confidence,
+        )
+    )
+
+
+def _prediction_action_after_sentiment_gate(
+    action: str,
+    sentiment_gate: SentimentGateDecision | None,
+) -> str:
+    """Apply sentiment permission after the base ML action is known."""
+
+    if action != "signal" or sentiment_gate is None:
+        return action
+    if not sentiment_gate.allowed:
+        return "skip"
+    return action
+
+
+def _sentiment_gate_api_payload(
+    sentiment_gate: SentimentGateDecision | None,
+) -> dict[str, object] | None:
+    """Serialize a sentiment decision without leaking dataclass internals."""
+
+    if sentiment_gate is None:
+        return None
+    return {
+        "state": sentiment_gate.state,
+        "allowed": sentiment_gate.allowed,
+        "sentiment_bias": sentiment_gate.sentiment_bias,
+        "risk_flag": sentiment_gate.risk_flag,
+        "reason": sentiment_gate.reason,
+        "position_multiplier": calculate_position_multiplier(
+            SentimentSizingInput(decision=sentiment_gate)
+        ),
+    }
+
 def _format_driver_value(feature: str, value: float) -> str:
     if feature.startswith("returns_") or feature in {"gap_open", "atr_pct_14"}:
         return f"{value * 100:+.1f}%"
@@ -1167,7 +1234,7 @@ def _prediction_gate_outcome(action: str) -> str:
 def _prediction_signal_event(row: Mapping[str, object]) -> dict[str, object] | None:
     if row.get("action") != "signal":
         return None
-    return {
+    event: dict[str, object] = {
         "event_type": "ml_prediction_signal",
         "prediction_id": row.get("prediction_id"),
         "model_id": row.get("model_id"),
@@ -1177,6 +1244,10 @@ def _prediction_signal_event(row: Mapping[str, object]) -> dict[str, object] | N
         "confidence": row.get("confidence"),
         "candle_time": row.get("candle_time"),
     }
+    sentiment_gate = row.get("sentiment_gate")
+    if isinstance(sentiment_gate, Mapping):
+        event["sentiment_gate"] = dict(sentiment_gate)
+    return event
 
 
 
@@ -1614,12 +1685,19 @@ async def _build_asset_predictions(
             continue
         candle_time = history[-1].time.isoformat()
         shap_values = predictor.explain(features, class_index=prediction.class_index)
-        action = _prediction_action(
+        base_action = _prediction_action(
             asset_class,
             prediction.direction,
             prediction.confidence,
             threshold,
         )
+        sentiment_gate = _sentiment_gate_for_prediction(
+            asset_class,
+            prediction.direction,
+            features,
+            model_confidence=prediction.confidence,
+        )
+        action = _prediction_action_after_sentiment_gate(base_action, sentiment_gate)
         rows.append(
             {
                 "prediction_id": f"{asset_class}:{symbol}:{candle_time}",
@@ -1637,6 +1715,7 @@ async def _build_asset_predictions(
                 "candle_time": candle_time,
                 "action": action,
                 "confidence_threshold": threshold,
+                "sentiment_gate": _sentiment_gate_api_payload(sentiment_gate),
                 "feature_values": {name: float(features[name]) for name in ALL_FEATURES},
                 "shap_values": shap_values,
             }

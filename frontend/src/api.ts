@@ -445,6 +445,20 @@ export type MlModelImportancesResponse = {
   generated_at: string;
 };
 
+export type MlSentimentGate = {
+  state: 'allowed' | 'blocked' | 'downgraded';
+  allowed: boolean;
+  sentiment_bias: 'bullish' | 'bearish' | 'neutral' | 'unknown';
+  risk_flag:
+    | 'aligned'
+    | 'extreme_macro_pressure'
+    | 'macro_pressure'
+    | 'weak_coverage'
+    | 'neutral'
+    | 'missing_sentiment';
+  reason: string;
+};
+
 export type MlPredictionRow = {
   prediction_id: string;
   model_id: string | null;
@@ -461,6 +475,7 @@ export type MlPredictionRow = {
   candle_time: string;
   action: 'signal' | 'skip';
   confidence_threshold: number;
+  sentiment_gate: MlSentimentGate | null;
 };
 
 export type MlPredictionFreshness = {

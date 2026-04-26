@@ -266,6 +266,54 @@ function Badge({ v, children }: { v: BadgeVariant; children: React.ReactNode }):
   );
 }
 
+function sentimentGateTone(gate: MlPredictionRow['sentiment_gate']): BadgeVariant {
+  if (!gate) {
+    return 'muted';
+  }
+  if (!gate.allowed || gate.state === 'blocked') {
+    return 'red';
+  }
+  if (gate.risk_flag === 'extreme_macro_pressure') {
+    return 'purple';
+  }
+  if (gate.state === 'downgraded') {
+    return 'amber';
+  }
+  if (gate.risk_flag === 'aligned') {
+    return 'green';
+  }
+  if (gate.risk_flag === 'neutral') {
+    return 'muted';
+  }
+  return 'blue';
+}
+
+function sentimentGateLabel(gate: MlPredictionRow['sentiment_gate']): string {
+  if (!gate) {
+    return 'n/a';
+  }
+  if (gate.state === 'blocked') {
+    return 'Blocked';
+  }
+  if (gate.state === 'downgraded') {
+    return gate.risk_flag === 'extreme_macro_pressure' ? 'High risk' : 'Downgraded';
+  }
+  if (gate.risk_flag === 'aligned') {
+    return 'Aligned';
+  }
+  if (gate.risk_flag === 'neutral') {
+    return 'Neutral';
+  }
+  return gate.sentiment_bias;
+}
+
+function sentimentGateSummary(gate: MlPredictionRow['sentiment_gate']): string {
+  if (!gate) {
+    return 'No crypto macro sentiment gate was applied to this prediction.';
+  }
+  return gate.reason;
+}
+
 function ActionButton({ tone, children, disabled, onClick }: { tone: ActionTone; children: React.ReactNode; disabled?: boolean; onClick?: () => void }): React.ReactElement {
   const t = getActionTone(tone);
   return (
@@ -1297,7 +1345,7 @@ const MachineLearning: React.FC = () => {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr>
-                {['Symbol', 'Asset', 'Direction', 'Confidence', '↓', '—', '↑', 'Top driver', 'Candle', 'Action'].map((h) => (
+                {['Symbol', 'Asset', 'Direction', 'Confidence', '↓', '—', '↑', 'Top driver', 'Candle', 'Sentiment', 'Action'].map((h) => (
                   <th key={h} style={{ padding: '8px 12px', fontSize: 9, fontWeight: 400, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3, borderBottom: `0.5px solid ${S.border}`, textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -1305,15 +1353,15 @@ const MachineLearning: React.FC = () => {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>Loading live predictions…</td>
+                  <td colSpan={11} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>Loading live predictions…</td>
                 </tr>
               ) : predictionError ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '14px 12px', color: S.red, borderBottom: `0.5px solid ${S.border}` }}>Unable to load live predictions: {predictionError}</td>
+                  <td colSpan={11} style={{ padding: '14px 12px', color: S.red, borderBottom: `0.5px solid ${S.border}` }}>Unable to load live predictions: {predictionError}</td>
                 </tr>
               ) : visiblePredictions.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>No live predictions are available yet. Train active models and ensure persisted candle history exists for the selected assets.</td>
+                  <td colSpan={11} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>No live predictions are available yet. Train active models and ensure persisted candle history exists for the selected assets.</td>
                 </tr>
               ) : visiblePredictions.map((prediction) => {
                 const dirColor = prediction.direction === 'long' ? S.green : prediction.direction === 'short' ? S.red : S.text3;
@@ -1339,6 +1387,14 @@ const MachineLearning: React.FC = () => {
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, textAlign: 'center', fontSize: 10, color: S.green }}>{Math.round(prediction.class_probabilities.up * 100)}%</td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{prediction.top_driver}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3 }}>{formatTimestamp(prediction.candle_time)}</td>
+                    <td
+                      title={sentimentGateSummary(prediction.sentiment_gate)}
+                      style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}
+                    >
+                      <Badge v={sentimentGateTone(prediction.sentiment_gate)}>
+                        {sentimentGateLabel(prediction.sentiment_gate)}
+                      </Badge>
+                    </td>
                     <td style={{ padding: '9px 12px', borderBottom: `0.5px solid ${S.border}` }}><Badge v={actionV}>{actionLabel}</Badge></td>
                   </tr>
                 );
@@ -1368,6 +1424,11 @@ const MachineLearning: React.FC = () => {
           <CardHeader title={`SHAP explainability · ${selectedPrediction?.symbol ?? 'no prediction selected'}`}>
             {selectedPrediction ? <DirPill dir={selectedPrediction.direction} /> : <Badge v="muted">No prediction</Badge>}
             {selectedPrediction ? <Badge v={shapReadout.tone}>{shapReadout.regime}</Badge> : null}
+            {selectedPrediction ? (
+              <Badge v={sentimentGateTone(selectedPrediction.sentiment_gate)}>
+                {sentimentGateLabel(selectedPrediction.sentiment_gate)}
+              </Badge>
+            ) : null}
             <span style={{ fontSize: 9, color: S.text3 }}>Cached local SHAP</span>
             <Badge v="muted">{selectedShapResponse ? `${selectedShapResponse.count} rows` : 'Per-trade'}</Badge>
             <ActionButton tone={selectedShapLimit === 10 ? 'blue' : 'muted'} onClick={() => setSelectedShapLimit(10)}>
@@ -1385,6 +1446,17 @@ const MachineLearning: React.FC = () => {
               {selectedPrediction ? (
                 <span style={{ display: 'block', marginTop: 6, color: getBadgeTone(shapReadout.tone).color }}>
                   {shapReadout.regime}: {shapReadout.summary}
+                </span>
+              ) : null}
+              {selectedPrediction ? (
+                <span
+                  style={{
+                    display: 'block',
+                    marginTop: 6,
+                    color: getBadgeTone(sentimentGateTone(selectedPrediction.sentiment_gate)).color,
+                  }}
+                >
+                  Macro sentiment: {sentimentGateSummary(selectedPrediction.sentiment_gate)}
                 </span>
               ) : null}
             </div>
