@@ -352,6 +352,8 @@ Separate once-daily ML prediction bias from live trade/readiness context so Rese
 
 * [x] Slice 5 — Research UI visibility for ML bias, macro weather, symbol forecast, intraday proof, final decision, risk mode, and reason
 * [x] Slice 5.1 — Wire Research intraday proof to stored trading candles instead of placeholder pending state
+* [x] Slice 5.2 — Clean Research table decision badges and wire BTC/ETH macro-weather fallback
+* [x] Slice 5.3 — Stabilize row-level decision badges, split watch/reduce columns, and normalize DOGE/XDG lookups
 
 ### Promotion
 

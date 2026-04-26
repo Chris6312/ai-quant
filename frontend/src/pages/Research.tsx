@@ -4,11 +4,13 @@ import {
   clearResearchCryptoWatchlist,
   getMlPredictions,
   getResearchIntradayDecision,
+  getResearchMacroSentimentDecision,
   getResearchScope,
   setResearchCryptoWatchlist,
   type MlPredictionRow,
   type MlPredictionsResponse,
   type ResearchIntradayDecisionResponse,
+  type ResearchMacroSentimentDecisionResponse,
   type ResearchScopeResponse,
 } from "../api";
 import { useResearch } from "../hooks/useResearch";
@@ -22,16 +24,6 @@ import type {
   InsiderTrade,
   ResearchSignal,
 } from "../hooks/useResearch";
-
-function ScorePill({ score }: { score: number | null }): React.ReactElement {
-  if (score === null) {
-    return <span className="wl-source">—</span>;
-  }
-  const rounded = Math.round(score);
-  const cls =
-    rounded >= 70 ? "score-hi" : rounded >= 50 ? "score-mid" : "score-lo";
-  return <span className={`score-pill ${cls}`}>{rounded}</span>;
-}
 
 const SIG_ICON_CLASS: Record<string, string> = {
   congress_buy: "sig-congress",
@@ -52,6 +44,21 @@ const SIG_ICON_LABEL: Record<string, string> = {
 type ResearchScopeItem = WatchlistItem & {
   scope_origin: "stock_watchlist" | "crypto_scope";
 };
+
+function getSymbolLookupAliases(symbol: string): string[] {
+  const aliases = new Set<string>([symbol]);
+  if (symbol === "DOGE/USD") {
+    aliases.add("XDG/USD");
+  }
+  if (symbol === "XDG/USD") {
+    aliases.add("DOGE/USD");
+  }
+  return Array.from(aliases);
+}
+
+function getIntradayLookupSymbol(symbol: string): string {
+  return symbol === "XDG/USD" ? "DOGE/USD" : symbol;
+}
 
 function buildCryptoScopeItems(
   scope: ResearchScopeResponse | null,
@@ -368,14 +375,75 @@ function buildLatestPredictionMap(
 ): Map<string, MlPredictionRow> {
   const latest = new Map<string, MlPredictionRow>();
   rows.forEach((row) => {
-    const current = latest.get(row.symbol);
-    if (!current || isNewerPrediction(row, current)) {
-      latest.set(row.symbol, row);
-    }
+    getSymbolLookupAliases(row.symbol).forEach((alias) => {
+      const current = latest.get(alias);
+      if (!current || isNewerPrediction(row, current)) {
+        latest.set(alias, row);
+      }
+    });
   });
   return latest;
 }
 
+
+function getTablePrediction(
+  item: ResearchScopeItem,
+  predictionBySymbol: Map<string, MlPredictionRow>,
+): MlPredictionRow | null {
+  return predictionBySymbol.get(item.symbol) ?? null;
+}
+
+function getTableMlBias(
+  item: ResearchScopeItem,
+  predictionBySymbol: Map<string, MlPredictionRow>,
+): string | null {
+  const prediction = getTablePrediction(item, predictionBySymbol);
+  if (!prediction) {
+    return null;
+  }
+  return prediction.direction === "flat" ? "neutral" : prediction.direction;
+}
+
+function getTableIntradayDecision(
+  item: ResearchScopeItem,
+  intradayBySymbol: Map<string, ResearchIntradayDecisionResponse>,
+): ResearchIntradayDecisionResponse | null {
+  return intradayBySymbol.get(item.symbol) ?? null;
+}
+
+function getTableIntradayProof(
+  item: ResearchScopeItem,
+  intradayBySymbol: Map<string, ResearchIntradayDecisionResponse>,
+): string | null {
+  return getTableIntradayDecision(item, intradayBySymbol)?.confirmation.trend ?? null;
+}
+
+function getTableFinalDecision(
+  item: ResearchScopeItem,
+  predictionBySymbol: Map<string, MlPredictionRow>,
+  intradayBySymbol: Map<string, ResearchIntradayDecisionResponse>,
+): string | null {
+  const prediction = getTablePrediction(item, predictionBySymbol);
+  if (!prediction) {
+    return null;
+  }
+  return getDecisionAction(
+    prediction,
+    getTableIntradayDecision(item, intradayBySymbol),
+  );
+}
+
+function getTableDecisionColumnValue(
+  action: string | null,
+  column: "watch" | "reduce",
+): string | null {
+  if (column === "watch") {
+    return action === "watch" || action === "allow" || action === "boost"
+      ? action
+      : null;
+  }
+  return action === "reduce" || action === "block" ? action : null;
+}
 
 type DecisionVisibility = {
   mlBias: string;
@@ -395,11 +463,68 @@ function formatDecisionText(value: string): string {
   return value.replace(/_/g, " ");
 }
 
-function formatMultiplier(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) {
-    return "n/a";
+function badgeClassForValue(value: string): string {
+  if (["allow", "boost", "long", "bullish", "signal"].includes(value)) {
+    return "cb-green";
   }
-  return `${value.toFixed(2)}x`;
+  if (["reduce", "watch", "neutral", "mixed", "flat"].includes(value)) {
+    return "cb-blue";
+  }
+  if (["block", "no_trade", "short", "bearish"].includes(value)) {
+    return "cb-amber";
+  }
+  return "cb-amber";
+}
+
+function MiniDecisionBadge({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null;
+}): React.ReactElement {
+  if (!value) {
+    return <span className="wl-source">—</span>;
+  }
+  return (
+    <span
+      className={`card-badge ${badgeClassForValue(value)}`}
+      style={{ fontSize: 9 }}
+      title={label}
+    >
+      {formatDecisionText(value)}
+    </span>
+  );
+}
+
+function getMacroWeatherFromDecision(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  if (macroError) {
+    return "unknown";
+  }
+  return macroDecision?.bias ?? "neutral";
+}
+
+function getMacroWeatherDetail(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  if (macroError) {
+    return "Macro weather request failed; unknown is reserved for this error state.";
+  }
+  if (!macroDecision) {
+    return "Loading BTC/ETH macro weather.";
+  }
+  const score = formatSignedSentiment(macroDecision.score);
+  const asOf = macroDecision.as_of
+    ? ` · as of ${formatCandleTime(macroDecision.as_of)}`
+    : "";
+  if (macroDecision.status === "neutral_fallback") {
+    return "No macro reading available · treated as neutral weather.";
+  }
+  return `${macroDecision.effect} · score ${score} · ${macroDecision.article_count} articles · ${macroDecision.source_symbols.join(" + ")}${asOf}`;
 }
 
 function getSymbolForecast(row: MlPredictionRow): string {
@@ -571,12 +696,11 @@ function formatIntradayDetail(
 function buildDecisionVisibility(
   row: MlPredictionRow,
   intraday: ResearchIntradayDecisionResponse | null,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
 ): DecisionVisibility {
-  const macroBias = row.sentiment_gate?.sentiment_bias ?? "unknown";
-  const macroRisk = row.sentiment_gate?.risk_flag ?? "missing_sentiment";
+  const macroBias = getMacroWeatherFromDecision(macroDecision, macroError);
   const symbolForecast = getSymbolForecast(row);
-  const sizeMultiplier = row.sentiment_gate?.position_multiplier ?? null;
-  const confidenceMultiplier = row.sentiment_gate?.confidence_multiplier ?? null;
 
   return {
     mlBias: row.direction === "flat" ? "neutral" : row.direction,
@@ -584,11 +708,7 @@ function buildDecisionVisibility(
       row.confidence,
     )} · candle ${formatCandleTime(row.candle_time)}`,
     macroWeather: macroBias,
-    macroWeatherDetail: `${formatDecisionText(
-      macroRisk,
-    )} · size ${formatMultiplier(sizeMultiplier)} · confidence ${formatMultiplier(
-      confidenceMultiplier,
-    )}`,
+    macroWeatherDetail: getMacroWeatherDetail(macroDecision, macroError),
     symbolForecast,
     symbolForecastDetail: getSentimentText(row),
     intradayProof: intraday?.confirmation.trend ?? "pending",
@@ -655,9 +775,13 @@ function DecisionTile({
 
 function DecisionVisibilityPanel({
   intradayDecision,
+  macroDecision,
+  macroError,
   prediction,
 }: {
   intradayDecision: ResearchIntradayDecisionResponse | null;
+  macroDecision: ResearchMacroSentimentDecisionResponse | null;
+  macroError: string | null;
   prediction: MlPredictionRow | null;
 }): React.ReactElement {
   if (!prediction) {
@@ -669,7 +793,12 @@ function DecisionVisibilityPanel({
     );
   }
 
-  const visibility = buildDecisionVisibility(prediction, intradayDecision);
+  const visibility = buildDecisionVisibility(
+    prediction,
+    intradayDecision,
+    macroDecision,
+    macroError,
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -839,9 +968,17 @@ const Research: React.FC = () => {
   const [predictionsLoading, setPredictionsLoading] = useState(true);
   const [intradayDecision, setIntradayDecision] =
     useState<ResearchIntradayDecisionResponse | null>(null);
+  const [intradayDecisionBySymbol, setIntradayDecisionBySymbol] = useState<
+    Map<string, ResearchIntradayDecisionResponse>
+  >(() => new Map());
   const [intradayDecisionError, setIntradayDecisionError] = useState<
     string | null
   >(null);
+  const [macroDecision, setMacroDecision] =
+    useState<ResearchMacroSentimentDecisionResponse | null>(null);
+  const [macroDecisionError, setMacroDecisionError] = useState<string | null>(
+    null,
+  );
 
   const loadScope = useCallback(async (): Promise<void> => {
     try {
@@ -911,6 +1048,35 @@ const Research: React.FC = () => {
   }, [tab]);
 
   useEffect(() => {
+    let active = true;
+
+    const loadMacroDecision = async (): Promise<void> => {
+      try {
+        const payload = await getResearchMacroSentimentDecision();
+        if (active) {
+          setMacroDecision(payload);
+          setMacroDecisionError(null);
+        }
+      } catch {
+        if (active) {
+          setMacroDecision(null);
+          setMacroDecisionError("BTC/ETH macro weather unavailable");
+        }
+      }
+    };
+
+    void loadMacroDecision();
+    const intervalId = window.setInterval(() => {
+      void loadMacroDecision();
+    }, 60000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selected) {
       setIntradayDecision(null);
       setIntradayDecisionError(null);
@@ -921,7 +1087,9 @@ const Research: React.FC = () => {
 
     const loadIntradayDecision = async (): Promise<void> => {
       try {
-        const payload = await getResearchIntradayDecision(selected);
+        const payload = await getResearchIntradayDecision(
+          getIntradayLookupSymbol(selected),
+        );
         if (active) {
           setIntradayDecision(payload);
           setIntradayDecisionError(null);
@@ -967,6 +1135,55 @@ const Research: React.FC = () => {
     }
   }, [allItems, cryptoItems, filter, stockItems]);
 
+  useEffect(() => {
+    const symbols = displayList
+      .filter((item) => item.asset_class === "crypto")
+      .map((item) => item.symbol);
+    if (symbols.length === 0) {
+      setIntradayDecisionBySymbol(new Map());
+      return;
+    }
+
+    let active = true;
+
+    const loadIntradayDecisionSummaries = async (): Promise<void> => {
+      const pairs = await Promise.all(
+        symbols.map(async (symbol) => {
+          try {
+            const payload = await getResearchIntradayDecision(
+              getIntradayLookupSymbol(symbol),
+            );
+            return [symbol, payload] as const;
+          } catch {
+            return [symbol, null] as const;
+          }
+        }),
+      );
+
+      if (!active) {
+        return;
+      }
+
+      const next = new Map<string, ResearchIntradayDecisionResponse>();
+      pairs.forEach(([symbol, payload]) => {
+        if (payload) {
+          next.set(symbol, payload);
+        }
+      });
+      setIntradayDecisionBySymbol(next);
+    };
+
+    void loadIntradayDecisionSummaries();
+    const intervalId = window.setInterval(() => {
+      void loadIntradayDecisionSummaries();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [displayList]);
+
   const predictionRows = useMemo(
     () => predictions?.predictions ?? [],
     [predictions],
@@ -981,7 +1198,9 @@ const Research: React.FC = () => {
   );
 
   const selectedPrediction = selected
-    ? (predictionBySymbol.get(selected) ?? null)
+    ? (getSymbolLookupAliases(selected)
+        .map((alias) => predictionBySymbol.get(alias) ?? null)
+        .find((row) => row !== null) ?? null)
     : null;
 
   const {
@@ -1215,41 +1434,67 @@ const Research: React.FC = () => {
                   <tr>
                     <th>Symbol</th>
                     <th>Class</th>
-                    <th>Score</th>
-                    <th>Source</th>
+                    <th>Watch</th>
+                    <th>Reduce</th>
+                    <th>ML</th>
+                    <th>Intraday</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {displayList.map((item) => (
-                    <tr
-                      key={`${item.scope_origin}:${item.symbol}`}
-                      className={selected === item.symbol ? "selected" : ""}
-                      onClick={() => setSelected(item.symbol)}
-                    >
-                      <td style={{ fontWeight: 500 }}>{item.symbol}</td>
-                      <td>
-                        <span className={`badge badge-${item.asset_class}`}>
-                          {item.asset_class}
-                        </span>
-                      </td>
-                      <td>
-                        {item.scope_origin === "crypto_scope" ? (
-                          <span className="wl-source">scope</span>
-                        ) : (
-                          <ScorePill score={item.research_score} />
-                        )}
-                      </td>
-                      <td>
-                        <span className="wl-source">
-                          {item.scope_origin === "crypto_scope"
-                            ? (item.added_by === "promoted_crypto"
-                                ? "promoted"
-                                : "crypto scope")
-                            : (item.added_by ?? "manual")}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {displayList.map((item) => {
+                    const rowDecision = getTableFinalDecision(
+                      item,
+                      predictionBySymbol,
+                      intradayDecisionBySymbol,
+                    );
+                    return (
+                      <tr
+                        key={`${item.scope_origin}:${item.symbol}`}
+                        className={selected === item.symbol ? "selected" : ""}
+                        onClick={() => setSelected(item.symbol)}
+                      >
+                        <td style={{ fontWeight: 500 }}>{item.symbol}</td>
+                        <td>
+                          <span className={`badge badge-${item.asset_class}`}>
+                            {item.asset_class}
+                          </span>
+                        </td>
+                        <td>
+                          <MiniDecisionBadge
+                            label="watch decision"
+                            value={getTableDecisionColumnValue(
+                              rowDecision,
+                              "watch",
+                            )}
+                          />
+                        </td>
+                        <td>
+                          <MiniDecisionBadge
+                            label="reduced-risk decision"
+                            value={getTableDecisionColumnValue(
+                              rowDecision,
+                              "reduce",
+                            )}
+                          />
+                        </td>
+                        <td>
+                          <MiniDecisionBadge
+                            label="ML bias"
+                            value={getTableMlBias(item, predictionBySymbol)}
+                          />
+                        </td>
+                        <td>
+                          <MiniDecisionBadge
+                            label="intraday proof"
+                            value={getTableIntradayProof(
+                              item,
+                              intradayDecisionBySymbol,
+                            )}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1389,6 +1634,8 @@ const Research: React.FC = () => {
                     <>
                       <DecisionVisibilityPanel
                         intradayDecision={intradayDecision}
+                        macroDecision={macroDecision}
+                        macroError={macroDecisionError}
                         prediction={selectedPrediction}
                       />
                       <PredictionFeed prediction={selectedPrediction} />
