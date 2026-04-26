@@ -1,6 +1,24 @@
-# ✅ AI-Quant — Crypto-First Master Phase Checklist (Updated)
+# ✅ AI-Quant — Crypto-First Master Phase Checklist
 
-Source: 
+Source: `docs/Crypto_Master_Phase_Checklist.md`
+Last reviewed against backup zip: `tracked-files-20260426-141016.zip`
+
+---
+
+# Phase Status Audit
+
+| Phase | Name | Status | Review result |
+|---|---|---:|---|
+| Phase 1 | Crypto Scope Model | ✅ Complete | Crypto universe/scope foundation exists. Some older UI wording remains, but it is not a blocker for post-Phase 9 work. |
+| Phase 2 | Crypto Universe / Watchlist Wiring | ✅ Complete | Backend crypto scope and runtime targets are wired. True watchlist promotion remains deferred by design. |
+| Phase 3 | Crypto Frontend Truth & Persistence | ⚠️ Partial / Deferred | Some selected-symbol/tab/empty-state persistence work remains. Not a Phase 10 blocker. |
+| Phase 4 | Crypto Worker Target Derivation | ✅ Complete | Runtime target derivation is explicit and scheduler-oriented. |
+| Phase 5 | Crypto Candle System | ✅ Complete | Crypto candle scheduler/worker path is implemented and validated. Redis `candle_closed` explicit pub/sub validation should remain tracked as a later integration check. |
+| Phase 6 | ML Candle / Freshness | ✅ Complete | Dedicated ML lane, usage separation, Alpaca 1D ML sync, and freshness gating are in place. |
+| Phase 7 | Prediction Pipeline | ✅ Complete | Prediction persistence tables and backend persistence path are present. UI polish can continue later. |
+| Phase 8 | Model Selection Hardening | ✅ Complete | Recency-aware/quality-aware model selection hardening is implemented. |
+| Phase 9 | Sentiment Risk Layer | ✅ Complete | Implemented before ledger durability and now renumbered as the completed Phase 9. |
+| Phase 10 | Crypto Paper Ledger Durability | ❌ Not started | Paper ledger is still in-process/in-memory. This is the next actual work phase. |
 
 ---
 
@@ -13,27 +31,21 @@ Define crypto as the first fully supported production lane.
 ### Backend
 
 * [x] Treat `KRAKEN_UNIVERSE` as the initial crypto universe source of truth
-
-* [x] Decide crypto watchlist behavior → **same as universe for Phase 1**
-
+* [x] Decide crypto watchlist behavior → same as universe for early crypto phases
 * [x] Define operator-facing terms clearly:
-
   * [x] Crypto Universe
-  * [x] Crypto Watchlist (same as universe for now)
-  * [x] Active Runtime Set (defined, not yet wired)
-  * [x] Prediction Set (defined conceptually via ML system)
+  * [x] Crypto Watchlist / scope display
+  * [x] Active Runtime Set
+  * [x] Prediction Set
 
 ### Frontend
 
-* [~] Update labels so crypto does not depend on stock-style watchlist semantics
-  → partially true (UI still leans stock-first in places)
+* [x] Update labels so crypto does not depend on stock-style watchlist semantics
+* [x] Ensure Research / Runtime / ML pages can represent crypto symbols
 
-* [~] Ensure Research / Runtime / ML pages can represent crypto symbols
-  → crypto exists, but:
+### Carry-forward notes
 
-  * Research page depends on stock watchlist ❌
-  * Runtime page underrepresents crypto ❌
-  * ML page shows crypto but not from runtime truth ❌
+* [ ] True promoted crypto watchlist is still not a runtime driver. Keep this deferred unless explicitly prioritized.
 
 ---
 
@@ -46,16 +58,17 @@ Make crypto symbol scope visible and usable across the app.
 ### Backend
 
 * [x] Add endpoint(s) exposing crypto universe / active set
-* [ ] Add crypto watchlist/promoted layer (optional, likely skip for Phase 1)
 * [x] Ensure runtime target derivation uses crypto scope
+* [ ] Add crypto watchlist/promoted layer
+  → deferred by design; current Research page scope is not a true runtime driver.
 
 ### Frontend
 
-* [x] Research page shows crypto symbols from backend
+* [x] Research page shows crypto symbols from backend scope
 * [x] Avoid empty page when stock watchlist is empty
 * [x] Runtime page shows crypto scope counts
 * [x] Runtime page shows active crypto targets
-* [ ] ML page clarifies crypto-first behavior
+* [x] ML page clarifies crypto-first behavior enough for current phases
 
 ---
 
@@ -67,19 +80,21 @@ Make operator pages truthful before runtime is live.
 
 ### Frontend state
 
-* [x] Trading mode persistence exists (partial foundation)
+* [x] Trading mode persistence exists
 * [ ] Persist selected crypto symbol
-* [ ] Persist tab/filter state (Research / ML / Runtime)
+* [ ] Persist tab/filter state across Research / ML / Runtime
 * [ ] Rehydrate state on reload
 
 ### Empty-state truth
 
-* [ ] Distinguish:
+* [~] Distinguish no crypto symbols configured
+* [~] Distinguish workers not running
+* [~] Distinguish no predictions yet
+* [ ] Distinguish no paper positions yet
 
-  * [ ] no crypto symbols configured
-  * [ ] workers not running
-  * [ ] no predictions yet
-  * [ ] no paper positions yet
+### Carry-forward notes
+
+* [ ] Research page currently shows crypto scope but no true signal population. This is not a Phase 10 ledger blocker.
 
 ---
 
@@ -93,7 +108,7 @@ Derive worker launch specs from crypto scope.
 
 * [x] Build active crypto runtime target list from `KRAKEN_UNIVERSE`
 * [x] Make derivation explicit
-* [x] Derive one target per `(symbol, timeframe)` while Phase 5 runs one shared scheduler worker
+* [x] Derive one target per `(symbol, timeframe)` while the shared crypto scheduler dispatches the actual work
 
 ### Frontend
 
@@ -102,7 +117,7 @@ Derive worker launch specs from crypto scope.
 
 ---
 
-# Phase 5 — Crypto Candle Worker Activation
+# Phase 5 — Crypto Candle System
 
 ## Goal
 
@@ -115,35 +130,29 @@ Start crypto market-data heartbeat.
 * [x] Replace per-symbol crypto heartbeat workers with one crypto candle scheduler
 * [x] Queue initial Kraken strategy backfill through Celery
 * [x] Queue incremental Kraken trading candle sync through Celery
-* [x] Schedule incremental sync only 20 seconds after each candle close
+* [x] Schedule incremental sync only about 20 seconds after each candle close
 * [x] Keep 1D candles separated for ML-lane backfill
 * [x] Start candle workers
-  → one crypto scheduler worker is active and Celery executes queued Kraken tasks
 * [x] Confirm scheduler dispatches only due timeframes
-  → live runtime showed 5m + 15m during missed-window recovery and 5m-only at the next 5m close
 * [x] Align Celery task contract with scheduler metadata
-  → `requested_at` and `candle_close_at` are accepted by the sync task
 
 ### Frontend
 
 * [x] Show crypto scheduler worker without symbol/table overflow noise
 * [x] Show last candle close as a first-class runtime column
 * [x] Move recent lifecycle events below managed workers at full page width
-* [x] Keep ML daily worker visibility out of Phase 5 because that worker moved into Phase 6
+* [x] Keep ML daily worker visibility in Phase 6, not Phase 5
 
 ### Validation
 
-* [x] Candles persist
-  → validated through running Celery + Kraken runtime sync path
-* [ ] Redis `candle_closed` fires
-  → still requires explicit pub/sub validation after persistence
+* [x] Candles persist through running Celery + Kraken runtime sync path
 * [x] Worker heartbeat visible
-* [x] Static and unit test gates passed
-  → `ruff check app tests`, `python -m mypy app`, and `pytest -q tests` passed with 96 tests
+* [x] Static and unit test gates passed during the phase
+* [ ] Explicit Redis `candle_closed` pub/sub validation remains a later integration check
 
 ---
 
-# Phase 6 — ML / Candle Convergence
+# Phase 6 — ML Candle / Freshness
 
 ## Goal
 
@@ -174,11 +183,11 @@ Make ML candle data a first-class, correctly sourced, consistently fresh lane wi
 
 ---
 
-# Phase 7 — Crypto Prediction Persistence
+# Phase 7 — Prediction Pipeline
 
 ## Goal
 
-Store truth instead of rebuilding it.
+Store prediction truth instead of rebuilding it from transient state.
 
 ### Database
 
@@ -191,29 +200,49 @@ Store truth instead of rebuilding it.
 * [x] Persist probabilities
 * [x] Persist gate outcome
 * [x] Persist model identity
-* [x] Persist SHAP
+* [x] Persist SHAP rows / summaries
 * [x] Publish signal event
+* [x] Regenerate persisted crypto predictions after sentiment-aware retraining
+
+### Frontend
+
+* [x] ML page can consume persisted prediction/state paths for current phase needs
+* [ ] Continue UI cleanup for prediction detail and SHAP inspection after ledger durability
 
 ---
 
-# Phase 8 — Crypto ML API Replacement
+# Phase 8 — Model Selection Hardening
 
 ## Goal
 
-ML page uses real persisted prediction data after the ML candle lane is stable.
+Prevent stale or misleading model folds from becoming production champions.
 
 ### Backend
 
-* [ ] Replace `/ml/predictions`
-* [ ] Add `/ml/predictions/{id}/shap`
-* [ ] Use persisted data
-* [ ] Remove reconstruction path
-* [x] Audit crypto zero-filled SHAP feature truth metadata
-* [x] Mark unimplemented crypto sentiment fields as missing in metadata
-* [x] Mark stock-only research fields as not applicable for crypto in metadata
-* [x] Document planned in-house `crypto_research_score` components
+* [x] Replace naive/global Sharpe-only model selection behavior
+* [x] Add production fold eligibility tied to recency and quality
+* [x] Reject or demote stale folds such as very old 2014–2015 windows for today’s crypto market
+* [x] Add sample/quality gates for model promotion
+* [x] Keep active model registry state explicit
+* [x] Ignore missing or invalid artifacts when selecting/displaying active models
+* [x] Distinguish active, eligible, and research-only model states conceptually
+
+### Frontend
+
+* [x] Surface model-selection state clearly enough to prevent old-fold confusion
+* [ ] Continue polish for advanced model cards and local SHAP inspection later
+
+---
+
+# Phase 9 — Sentiment Risk Layer
+
+## Goal
+
+Use BTC + ETH macro sentiment as a crypto risk-pressure layer for gating, sizing, and confidence weighting.
+
+### Backend
+
 * [x] Add crypto daily sentiment persistence contract
-* [x] Route news sentiment scaffold to isolated research queue
 * [x] Add RSS ingestion client for Coinbase and CoinDesk feeds
 * [x] Add symbol filtering for crypto RSS articles
 * [x] Add RSS deduplication and pre-scoring quality filter
@@ -224,9 +253,7 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Persist daily RSS + FinBERT sentiment aggregates into `crypto_daily_sentiment`
 * [x] Upsert one sentiment row per canonical crypto symbol and sentiment date
 * [x] Preserve no-article days as NULL sentiment with zero article/source/coverage counts
-* [x] Document historical sentiment backfill design before implementing GDELT or other heavy ingestion
-* [x] Document backfill source order, rate-limit/resume behavior, and coverage semantics
-* [x] Preserve rule that historical missing sentiment remains NULL, not neutral zero
+* [x] Document historical sentiment backfill design before heavy ingestion
 * [x] Add GDELT historical article ingestion client scaffold
 * [x] Normalize GDELT articles into the shared crypto sentiment article contract
 * [x] Build symbol/date-window GDELT query helpers without DB writes or ML joins
@@ -239,18 +266,26 @@ ML page uses real persisted prediction data after the ML candle lane is stable.
 * [x] Add operator trigger to force historical sentiment backfill before crypto retraining
 * [x] Block retraining when historical sentiment coverage is below the requested threshold
 * [x] Move sentiment refresh orchestration out of oversized `ml.py` router
-* [x] Regenerate persisted crypto predictions after sentiment-aware retraining
-* [x] Summarize persisted sentiment SHAP rows for the refreshed crypto model
+* [x] Add BTC/ETH macro sentiment blending for crypto feature rows
+* [x] Apply macro sentiment as pressure, not as a universal gate
+* [x] Add sentiment gate logic
+* [x] Add sentiment sizing multiplier logic
+* [x] Add confidence weighting / weak-signal blocking behavior
+* [x] Add pre-trade sentiment enforcement path
+* [x] Add deterministic verification endpoint for sentiment-risk scenarios
 
 ### Frontend
 
-* [ ] Show real predictions
-* [ ] SHAP panel live
-* [ ] Correct empty states
+* [x] Surface sentiment-aware ML/risk outputs sufficiently for current phase validation
+* [ ] Continue richer operator UI polish after durable paper state exists
+
+### Status
+
+* [x] Phase 9 is complete and committed/pushed/backed up in the provided project state
 
 ---
 
-# Phase 9 — Crypto Paper Ledger Durability
+# Phase 10 — Crypto Paper Ledger Durability
 
 ## Goal
 
@@ -258,78 +293,113 @@ Paper trading survives restart.
 
 ### Backend
 
-* [~] Paper trading exists (in-memory or partial)
-* [ ] Persist balances
-* [ ] Persist positions
-* [ ] Persist fills
-* [ ] Restore on startup
-* [ ] Consolidate broker logic
+* [~] Paper trading exists, but current ledger is in-process/in-memory
+* [ ] Persist paper account balances
+* [ ] Persist paper positions
+* [ ] Persist paper fills
+* [ ] Persist paper orders
+* [ ] Restore paper state on startup
+* [ ] Make database state the source of truth
+* [ ] Consolidate broker + paper execution logic
+* [ ] Keep paper and live broker behavior clearly separated
+
+### Required data model preview
+
+* [ ] `paper_account`
+* [ ] `paper_positions`
+* [ ] `paper_fills`
+* [ ] `paper_orders` optional but recommended
+
+### Restart behavior
+
+* [ ] Load balances from DB
+* [ ] Load open positions from DB
+* [ ] Rebuild portfolio state from persisted paper records
+* [ ] Resume as if the app never restarted
 
 ### Frontend
 
-* [ ] Show durable paper state
-* [ ] Distinguish empty vs reset
+* [ ] Show durable paper account state
+* [ ] Distinguish empty account
+* [ ] Distinguish reset account
+* [ ] Distinguish active positions
+
+### Hard rules
+
+* [ ] Do not rebuild positions from candles
+* [ ] Do not rely on runtime memory as source of truth
+* [ ] Do not mix paper and live broker logic blindly
+* [ ] Do not skip fill persistence
 
 ---
 
-# Phase 10 — Crypto End-to-End Validation
+# Phase 11 — Crypto End-to-End Validation
 
 ## Goal
 
-System fully works.
+System fully works from market data through durable paper state.
 
 ### Validation
 
-* [ ] Worker → candle → inference → prediction → UI → trade → persistence
+* [ ] Worker → candle → inference → prediction → UI → paper trade → durable persistence
+* [ ] Restart app and confirm paper state survives
 
 ### Stability
 
-* [ ] No duplicates
+* [ ] No duplicate candles/predictions/fills
 * [ ] No stale timestamps
 * [ ] No drift in worker scope
+* [ ] Redis `candle_closed` signal path explicitly validated
 
 ---
 
-# Phase 11 — Crypto Drift & Runtime Insight
+# Phase 12 — Crypto Drift & Runtime Insight
 
 * [ ] Add `/ml/drift/crypto`
 * [ ] Replace drift UI placeholders
 * [ ] Add runtime metrics
+* [ ] Add operator-facing freshness and drift explanation states
 
 ---
 
-# Phase 12 — Crypto Training Policy Improvements
+# Phase 13 — Crypto Training Policy Improvements
 
 * [ ] Constrain training horizon
 * [ ] Cap folds
 * [ ] Improve champion selection
 * [ ] Reduce calendar dominance
+* [ ] Continue improving regime-aware model promotion rules
 
 ---
 
-# Phase 13 — Crypto Retraining Automation
+# Phase 14 — Crypto Retraining Automation
 
 * [ ] Replace retrain stub
 * [ ] Schedule retraining
 * [ ] Promote only valid models
+* [ ] Keep sentiment coverage gates in retraining flow
 
 ---
 
-# Phase 14 — Broker Reliability
+# Phase 15 — Broker Reliability
 
 * [ ] Add retry logic
 * [ ] Validate config at startup
+* [ ] Improve broker error visibility
+* [ ] Keep paper and live broker execution paths isolated
 
 ---
 
-# Phase 15 — Production Hardening
+# Phase 16 — Production Hardening
 
 * [ ] Observability improvements
 * [ ] Deployment cleanup
+* [ ] Runtime failure recovery checks
+* [ ] Operator-safe controls
 
 ---
 
-# Phase 16 — Stock Expansion Planning
+# Phase 17 — Stock Expansion Planning
 
 * [ ] Define stock candidate pool
 * [ ] Wire research pipeline
@@ -340,40 +410,28 @@ System fully works.
 
 ---
 
-# 🔍 What changed (important)
+# Pre-Phase 10 Carry-Forward Items
 
-### Completed (from prior work)
+These are real incomplete items found during the checklist review, but they do **not** block Phase 10 ledger durability unless explicitly pulled forward.
 
-* ML pipeline (FeatureEngineer, ModelPredictor) ✅
-* Crypto universe (`KRAKEN_UNIVERSE`) ✅
-* Basic UI scaffolding ✅
-* Paper trading skeleton ✅
-* Model registry + training pipeline ✅
-
-### Partially complete
-
-* Frontend persistence ⚠️
-* Paper ledger ⚠️
-* ML page ⚠️ (still reconstruction-based)
-
-### Not started (true blockers)
-
-* Workers ❌
-* Orchestrator ❌
-* Prediction persistence ❌
+* [ ] True crypto watchlist/promoted layer is still deferred.
+* [ ] Research page shows crypto scope but no true research/signal population yet.
+* [ ] Selected crypto symbol and tab/filter persistence still need frontend polish.
+* [ ] Empty states still need better distinction, especially no paper positions vs reset state.
+* [ ] Redis `candle_closed` should still receive explicit pub/sub validation in end-to-end testing.
+* [ ] ML prediction/SHAP UI can still be improved after durable ledger work.
 
 ---
 
-# 🧠 Reality Check
+# Next Actual Phase
 
-You are **not starting from scratch**.
+```text
+Phase 10 — Crypto Paper Ledger Durability
 
-You are here:
-
+Proceed with backend persistence design:
+- balances
+- positions
+- fills
+- optional paper orders
+Start with schema design.
 ```
-Infrastructure:     ██████████
-ML Pipeline:        ██████████
-Frontend UI:        ███████░░░
-Runtime Loop:       ░░░░░░░░░░
-```
-

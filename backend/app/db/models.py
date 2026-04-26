@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -152,6 +153,131 @@ class InsiderTradeRow(Base):
         default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
+
+
+
+class PaperAccountRow(Base):
+    """Durable paper cash ledger by asset class."""
+
+    __tablename__ = "paper_account"
+    __table_args__ = (
+        UniqueConstraint("asset_class", name="uq_paper_account_asset_class"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    cash_balance: Mapped[float] = mapped_column(Numeric, nullable=False)
+    default_cash_balance: Mapped[float] = mapped_column(Numeric, nullable=False)
+    realized_pnl: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    reset_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+
+
+class PaperPositionRow(Base):
+    """Durable paper position state restored after restart."""
+
+    __tablename__ = "paper_positions"
+    __table_args__ = (
+        Index("ix_paper_positions_symbol_status", "symbol", "status"),
+        Index("ix_paper_positions_asset_status", "asset_class", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    size: Mapped[float] = mapped_column(Numeric, nullable=False)
+    average_entry_price: Mapped[float] = mapped_column(Numeric, nullable=False)
+    realized_pnl: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaperOrderRow(Base):
+    """Durable paper order record used before and after restart."""
+
+    __tablename__ = "paper_orders"
+    __table_args__ = (
+        Index("ix_paper_orders_symbol_created", "symbol", "created_at"),
+        Index("ix_paper_orders_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    requested_size: Mapped[float] = mapped_column(Numeric, nullable=False)
+    limit_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    filled_size: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    average_fill_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    remaining_size: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="paper")
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaperFillRow(Base):
+    """Durable paper fill event used for audit and restart recovery."""
+
+    __tablename__ = "paper_fills"
+    __table_args__ = (
+        Index("ix_paper_fills_order", "order_id"),
+        Index("ix_paper_fills_symbol_filled", "symbol", "filled_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    order_id: Mapped[str] = mapped_column(
+        ForeignKey("paper_orders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    position_id: Mapped[str | None] = mapped_column(
+        ForeignKey("paper_positions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_class: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    fill_size: Mapped[float] = mapped_column(Numeric, nullable=False)
+    fill_price: Mapped[float] = mapped_column(Numeric, nullable=False)
+    gross: Mapped[float] = mapped_column(Numeric, nullable=False)
+    commission: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Numeric, nullable=False, default=0.0)
+    cash_after: Mapped[float] = mapped_column(Numeric, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="paper")
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PositionRow(Base):
