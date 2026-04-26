@@ -223,7 +223,7 @@ class FakeHistoricalResult:
 
 
 class FakeHistoricalClient:
-    """Historical client returning one BTC article and no DOGE coverage."""
+    """Historical client returning one BTC window article and no DOGE coverage."""
 
     async def search_articles(
         self,
@@ -232,7 +232,8 @@ class FakeHistoricalClient:
         start_date: date,
         end_date: date,
     ) -> FakeHistoricalResult:
-        assert start_date == end_date
+        assert start_date == date(2026, 4, 24)
+        assert end_date == date(2026, 4, 25)
         if symbol == "BTC/USD":
             return FakeHistoricalResult(
                 (
@@ -240,7 +241,7 @@ class FakeHistoricalClient:
                         title="Bitcoin ETF inflows rise",
                         url=f"https://example.test/btc/{start_date.isoformat()}",
                         published_at=datetime.combine(start_date, datetime.min.time(), tzinfo=UTC),
-                        source="GDELT:Example",
+                        source="CoinDesk:Sitemap",
                         summary="BTC and crypto markets moved higher after inflows improved.",
                     ),
                 )
@@ -277,6 +278,7 @@ def test_historical_sentiment_payload_targets_backfill_task() -> None:
         "symbols": ["BTC/USD"],
         "start_date": "2026-04-01",
         "end_date": "2026-04-02",
+        "window_granularity": "yearly",
     }
 
 
@@ -305,30 +307,39 @@ async def test_backfill_historical_crypto_sentiment_upserts_symbol_date_rows(
     result = await backfill_historical_crypto_sentiment(
         symbols=["BTC/USD", "XDG/USD"],
         start_date="2026-04-24",
-        end_date="2026-04-24",
+        end_date="2026-04-25",
         client=FakeHistoricalClient(),
         session_factory=fake_session_factory,
         scorer=FakeCryptoSentimentScorer(),
     )
 
     assert result["status"] == "completed"
-    assert result["rows_upserted"] == 2
+    assert result["rows_upserted"] == 4
     assert result["failed_window_count"] == 0
+    assert result["request_window_count"] == 2
     assert result["pipeline"] == [
-        "historical_article_search",
-        "symbol_date_chunk",
+        "coindesk_sitemap_archive_fetch",
+        "yearly_symbol_window",
+        "local_daily_grouping",
         "dedupe",
         "pre_scoring_filter",
         "finbert",
         "daily_aggregate",
         "crypto_daily_sentiment_upsert",
     ]
-    assert [row.id for row in upserted_rows] == ["BTC/USD:2026-04-24", "XDG/USD:2026-04-24"]
+    assert [row.id for row in upserted_rows] == [
+        "BTC/USD:2026-04-24",
+        "BTC/USD:2026-04-25",
+        "XDG/USD:2026-04-24",
+        "XDG/USD:2026-04-25",
+    ]
     assert upserted_rows[0].compound_score == 0.60
     assert upserted_rows[0].article_count == 1
     assert upserted_rows[1].compound_score is None
     assert upserted_rows[1].article_count == 0
-    assert upserted_rows[1].coverage_score == 0.0
+    assert upserted_rows[2].compound_score is None
+    assert upserted_rows[2].article_count == 0
+    assert upserted_rows[2].coverage_score == 0.0
 
 
 async def test_backfill_historical_crypto_sentiment_does_not_write_failed_windows(

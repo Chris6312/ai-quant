@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+import httpx
+import pytest
+
 from app.research.gdelt_client import (
+    GdeltHistoricalNewsClient,
     build_gdelt_article_search_request,
     build_gdelt_query_params,
     parse_gdelt_articles,
@@ -89,3 +93,108 @@ def test_parse_gdelt_articles_rejects_unusable_rows() -> None:
     )
 
     assert articles == ()
+
+
+@pytest.mark.asyncio
+async def test_gdelt_client_returns_empty_articles_for_empty_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty 200 responses should not fail a historical backfill window."""
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        params: object | None = None,
+    ) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        return httpx.Response(status_code=200, content=b"", request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    client = GdeltHistoricalNewsClient(
+        base_url="https://gdelt.example.test/doc",
+        rate_limit_pause_s=0.0,
+        rate_limit_retries=0,
+    )
+
+    result = await client.search_articles(
+        symbol="BTC/USD",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 1, 31),
+    )
+
+    assert result.symbol == "BTC/USD"
+    assert result.articles == ()
+
+
+@pytest.mark.asyncio
+async def test_gdelt_client_returns_empty_articles_after_exhausted_429(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GDELT 429 exhaustion should cool down and return an empty window result."""
+
+    calls = 0
+
+    async def fake_sleep(delay: float) -> None:
+        assert delay == 0.0
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        params: object | None = None,
+    ) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("GET", url)
+        return httpx.Response(status_code=429, content=b"rate limited", request=request)
+
+    monkeypatch.setattr("app.research.gdelt_client.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    client = GdeltHistoricalNewsClient(
+        base_url="https://gdelt.example.test/doc",
+        rate_limit_pause_s=0.0,
+        rate_limit_retries=1,
+    )
+
+    result = await client.search_articles(
+        symbol="ETH/USD",
+        start_date=date(2025, 2, 1),
+        end_date=date(2025, 2, 28),
+    )
+
+    assert calls == 2
+    assert result.symbol == "ETH/USD"
+    assert result.articles == ()
+
+
+@pytest.mark.asyncio
+async def test_gdelt_client_returns_empty_articles_for_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Network timeouts should not mark the whole sentiment window failed."""
+
+    async def fake_get(
+        self: httpx.AsyncClient,
+        url: str,
+        params: object | None = None,
+    ) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    client = GdeltHistoricalNewsClient(
+        base_url="https://gdelt.example.test/doc",
+        rate_limit_pause_s=0.0,
+        rate_limit_retries=0,
+    )
+
+    result = await client.search_articles(
+        symbol="BTC/USD",
+        start_date=date(2025, 3, 1),
+        end_date=date(2025, 3, 1),
+    )
+
+    assert result.symbol == "BTC/USD"
+    assert result.articles == ()

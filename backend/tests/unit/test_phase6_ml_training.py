@@ -123,8 +123,13 @@ async def test_run_training_job_registers_active_model(
         for index in range(260)
     ]
 
-    async def _fake_train_crypto_model_from_db(session: object) -> tuple[TrainResult, object]:
+    async def _fake_train_crypto_model_from_db(
+        session: object,
+        *,
+        symbols: list[str] | None = None,
+    ) -> tuple[TrainResult, object]:
         del session
+        assert symbols is None
         result = await _FakeTrainer(TrainerConfig()).train(
             candles,
             "crypto",
@@ -138,7 +143,7 @@ async def test_run_training_job_registers_active_model(
         _fake_train_crypto_model_from_db,
     )
 
-    job = ml_router._new_job("crypto_train", ["BTC/USD"])
+    job = ml_router._new_job("crypto_train", [ml_router.ALL_CRYPTO_TRAINING_SYMBOL])
     await ml_router._run_training_job(str(job["job_id"]), "crypto")
 
     stored_job = job_store.get_job(str(job["job_id"]))
@@ -153,6 +158,87 @@ async def test_run_training_job_registers_active_model(
     assert models[0]["best_fold"] == 2
     assert len(models[0]["folds"]) == 2
 
+
+
+@pytest.mark.asyncio
+async def test_train_crypto_endpoint_uses_all_crypto_metadata_and_no_symbol_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Crypto training should advertise ALL_CRYPTO and pass no symbol filter downstream."""
+
+    runtime_dir = tmp_path / ".runtime"
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "model_crypto_fold2.lgbm").write_text("fake model", encoding="utf-8")
+    monkeypatch.setattr(job_store, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(job_store, "_JOB_STORE_PATH", runtime_dir / "ml_jobs.json")
+    monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(model_registry, "_BACKEND_DIR", tmp_path)
+    monkeypatch.setattr(model_registry, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
+    monkeypatch.setattr(ml_router, "load_jobs", lambda: job_store.list_jobs())
+
+    captured_symbols: list[str] | None | object = object()
+
+    async def _fake_train_crypto_model_from_db(
+        session: object,
+        *,
+        symbols: list[str] | None = None,
+    ) -> tuple[TrainResult, object]:
+        nonlocal captured_symbols
+        del session
+        captured_symbols = symbols
+        return (
+            TrainResult(
+                asset_class="crypto",
+                validation_sharpe=1.24,
+                validation_accuracy=0.68,
+                n_train_samples=180,
+                n_test_samples=40,
+                feature_importances={"returns_5": 0.27},
+                model_path="models/model_crypto_fold2.lgbm",
+                folds=[],
+                fold_count=2,
+                best_fold_index=2,
+            ),
+            object(),
+        )
+
+    class _FakeSession:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: object,
+        ) -> None:
+            del exc_type, exc, tb
+            return None
+
+    monkeypatch.setattr(ml_router, "get_settings", lambda: object())
+    monkeypatch.setattr(ml_router, "build_engine", lambda settings: object())
+    monkeypatch.setattr(ml_router, "build_session_factory", lambda engine: lambda: _FakeSession())
+    monkeypatch.setattr(
+        ml_router,
+        "train_crypto_model_from_db_impl",
+        _fake_train_crypto_model_from_db,
+    )
+
+    client = TestClient(app)
+    response = client.post("/ml/train/crypto")
+
+    assert response.status_code == 200
+    assert captured_symbols is None
+    jobs = job_store.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["symbols"] == [ml_router.ALL_CRYPTO_TRAINING_SYMBOL]
 
 def test_train_endpoint_blocks_when_job_running(
     monkeypatch: pytest.MonkeyPatch,
@@ -199,7 +285,12 @@ def test_get_model_importances_endpoint_returns_sorted_rows(
     """Feature importance endpoint should expose sorted live weights for the UI."""
 
     runtime_dir = tmp_path / ".runtime"
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "model_crypto_fold2.lgbm").write_text("fake model", encoding="utf-8")
     monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(model_registry, "_BACKEND_DIR", tmp_path)
+    monkeypatch.setattr(model_registry, "_PROJECT_DIR", tmp_path)
     monkeypatch.setattr(
         model_registry,
         "_REGISTRY_PATH",
@@ -245,6 +336,112 @@ def test_get_model_importances_endpoint_returns_sorted_rows(
         "macd_hist",
     ]
 
+
+
+def test_model_registry_rejects_and_filters_stock_txt_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Placeholder stock .txt artifacts should never register or surface as active models."""
+
+    runtime_dir = tmp_path / ".runtime"
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "model_crypto_fold2.lgbm").write_text("fake model", encoding="utf-8")
+    monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(model_registry, "_BACKEND_DIR", tmp_path)
+    monkeypatch.setattr(model_registry, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
+
+    with pytest.raises(ValueError, match="invalid model artifact"):
+        model_registry.register_model(
+            {
+                "model_id": "stock-placeholder",
+                "asset_class": "stock",
+                "status": "active",
+                "artifact_path": "models/stock_fold_0.txt",
+                "trained_at": "2026-04-25T10:00:00+00:00",
+                "fold_count": 0,
+                "best_fold": 0,
+                "validation_accuracy": 0.72,
+                "validation_sharpe": 1.5,
+                "train_samples": 200,
+                "test_samples": 40,
+                "feature_count": 1,
+                "confidence_threshold": 0.6,
+                "latest_job_id": "job-1",
+                "feature_importances": {"news_sentiment_7d": 4.0},
+                "folds": [],
+                "created_at": "2026-04-25T10:00:00+00:00",
+            }
+        )
+
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "ml_model_registry.json").write_text(
+        """[
+          {
+            "model_id": "stock-placeholder",
+            "asset_class": "stock",
+            "status": "active",
+            "artifact_path": "models/stock_fold_0.txt"
+          },
+          {
+            "model_id": "crypto-real",
+            "asset_class": "crypto",
+            "status": "active",
+            "artifact_path": "models/model_crypto_fold2.lgbm"
+          }
+        ]""",
+        encoding="utf-8",
+    )
+
+    assert model_registry.list_models("stock") == []
+    assert model_registry.get_active_model("stock") is None
+    assert model_registry.get_active_model("crypto") is not None
+
+
+def test_model_registry_ignores_active_models_with_missing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active records should not surface when their .lgbm artifact is missing."""
+
+    runtime_dir = tmp_path / ".runtime"
+    monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(model_registry, "_BACKEND_DIR", tmp_path)
+    monkeypatch.setattr(model_registry, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
+
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "ml_model_registry.json").write_text(
+        """[
+          {
+            "model_id": "crypto-missing",
+            "asset_class": "crypto",
+            "status": "active",
+            "artifact_path": "models/model_crypto_missing.lgbm"
+          },
+          {
+            "model_id": "stock-missing",
+            "asset_class": "stock",
+            "status": "active",
+            "artifact_path": "models/model_stock_missing.lgbm"
+          }
+        ]""",
+        encoding="utf-8",
+    )
+
+    assert model_registry.list_models() == []
+    assert model_registry.get_active_model("crypto") is None
+    assert model_registry.get_active_model("stock") is None
 
 
 def test_feature_parity_endpoint_reports_valid_contract() -> None:

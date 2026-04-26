@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -16,6 +18,8 @@ from app.research.rss_client import SYMBOL_KEYWORDS, RssArticle
 GDELT_SYMBOL_ALIASES: Final[dict[str, str]] = {"XBT/USD": "BTC/USD"}
 GDELT_DOC_BASE_URL: Final[str] = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_MAX_RECORDS: Final[int] = 250
+GDELT_RATE_LIMIT_STATUS: Final[int] = 429
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +59,14 @@ class GdeltHistoricalNewsClient:
         base_url: str = GDELT_DOC_BASE_URL,
         timeout_s: float = 15.0,
         max_records: int = GDELT_MAX_RECORDS,
+        rate_limit_pause_s: float = 60.0,
+        rate_limit_retries: int = 1,
     ) -> None:
         self.base_url = base_url
         self.timeout_s = timeout_s
         self.max_records = max_records
+        self.rate_limit_pause_s = rate_limit_pause_s
+        self.rate_limit_retries = rate_limit_retries
 
     async def search_articles(
         self,
@@ -76,15 +84,110 @@ class GdeltHistoricalNewsClient:
             max_records=self.max_records,
         )
         async with httpx.AsyncClient(timeout=self.timeout_s, follow_redirects=True) as client:
-            response = await client.get(self.base_url, params=build_gdelt_query_params(request))
-            response.raise_for_status()
-            payload = response.json()
+            try:
+                response = await _get_with_rate_limit_pause(
+                    client=client,
+                    url=self.base_url,
+                    params=build_gdelt_query_params(request),
+                    pause_s=self.rate_limit_pause_s,
+                    retries=self.rate_limit_retries,
+                )
+            except httpx.RequestError as exc:
+                LOGGER.warning(
+                    "GDELT request failed for %s %s..%s: %s",
+                    request.symbol,
+                    request.window.start_date.isoformat(),
+                    request.window.end_date.isoformat(),
+                    exc.__class__.__name__,
+                )
+                return _empty_gdelt_result(request)
+
+            if response.status_code == GDELT_RATE_LIMIT_STATUS:
+                LOGGER.warning(
+                    "GDELT rate limit exhausted for %s %s..%s",
+                    request.symbol,
+                    request.window.start_date.isoformat(),
+                    request.window.end_date.isoformat(),
+                )
+                return _empty_gdelt_result(request)
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                LOGGER.warning(
+                    "GDELT HTTP error for %s %s..%s: %s",
+                    request.symbol,
+                    request.window.start_date.isoformat(),
+                    request.window.end_date.isoformat(),
+                    exc.response.status_code,
+                )
+                return _empty_gdelt_result(request)
+
+            payload = _safe_gdelt_json(response)
         return GdeltArticleSearchResult(
             symbol=request.symbol,
             window=request.window,
             query=request.query,
             articles=parse_gdelt_articles(payload),
         )
+
+
+async def _get_with_rate_limit_pause(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    params: Mapping[str, str | int],
+    pause_s: float,
+    retries: int,
+) -> httpx.Response:
+    """GET with one or more cooldown pauses when GDELT returns HTTP 429."""
+
+    attempts = max(retries, 0) + 1
+    response: httpx.Response | None = None
+    for attempt in range(attempts):
+        response = await client.get(url, params=params)
+        if response.status_code != GDELT_RATE_LIMIT_STATUS or attempt == attempts - 1:
+            return response
+
+        retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+        await asyncio.sleep(retry_after if retry_after is not None else pause_s)
+
+    if response is None:  # pragma: no cover - defensive fallback
+        raise RuntimeError("GDELT request did not return a response")
+    return response
+
+
+def _empty_gdelt_result(request: GdeltArticleSearchRequest) -> GdeltArticleSearchResult:
+    return GdeltArticleSearchResult(
+        symbol=request.symbol,
+        window=request.window,
+        query=request.query,
+        articles=(),
+    )
+
+
+def _safe_gdelt_json(response: httpx.Response) -> Mapping[str, object]:
+    if not response.content.strip():
+        return {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    return payload
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    if parsed < 0.0:
+        return None
+    return parsed
 
 
 def build_gdelt_article_search_request(

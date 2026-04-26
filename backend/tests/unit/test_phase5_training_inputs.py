@@ -318,7 +318,7 @@ async def test_train_stock_model_from_db_passes_non_default_research_lookup() ->
                 n_train_samples=123,
                 n_test_samples=20,
                 feature_importances={"watchlist_research_score": 10.0},
-                model_path="models/stock_fold_0.txt",
+                model_path="models/model_stock_fold1.lgbm",
             )
 
     trainer = StubTrainer()
@@ -358,7 +358,7 @@ def test_train_stock_model_endpoint_returns_dataset_summary(
                 n_train_samples=200,
                 n_test_samples=40,
                 feature_importances={"news_sentiment_7d": 4.0},
-                model_path="models/stock_fold_0.txt",
+                model_path="models/model_stock_fold1.lgbm",
             ),
             StockTrainingDataset(
                 candles=_build_domain_candles("AAPL"),

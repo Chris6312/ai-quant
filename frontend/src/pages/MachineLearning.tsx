@@ -138,18 +138,6 @@ const ACTION_TONES: Record<ActionTone, { bg: string; color: string; border: stri
   danger: { bg: S.redBg, color: S.red, border: S.red3 },
 };
 
-const CRYPTO_FOLDS: Fold[] = [
-  { label: 'Fold 1', window: 'Jan 2024 → Jun 2024 | Jul 2024', trainL: 0, trainW: 80, testL: 80, testW: 20, sharpe: 0.94, acc: 68.2 },
-  { label: 'Fold 2', window: 'Feb 2024 → Jul 2024 | Aug 2024', trainL: 12.5, trainW: 75, testL: 87.5, testW: 12.5, sharpe: -0.12, acc: 51.8 },
-  { label: 'Fold 3', window: 'Mar 2024 → Aug 2024 | Sep 2024', trainL: 25, trainW: 62.5, testL: 87.5, testW: 12.5, sharpe: 1.18, acc: 71.5 },
-  { label: 'Fold 4', window: 'Apr 2024 → Sep 2024 | Oct 2024', trainL: 37.5, trainW: 50, testL: 87.5, testW: 12.5, sharpe: 1.05, acc: 69.0 },
-  { label: 'Fold 5', window: 'May 2024 → Oct 2024 | Nov 2024', trainL: 50, trainW: 37.5, testL: 87.5, testW: 12.5, sharpe: 1.42, acc: 74.3, best: true },
-  { label: 'Fold 6', window: 'Jun 2024 → Nov 2024 | Dec 2024', trainL: 62.5, trainW: 25, testL: 87.5, testW: 12.5, sharpe: 0.77, acc: 63.1 },
-  { label: 'Fold 7', window: 'Jul 2024 → Dec 2024 | Jan 2025', trainL: 75, trainW: 12.5, testL: 87.5, testW: 12.5, sharpe: -0.31, acc: 54.7 },
-  { label: 'Fold 8', window: 'Aug 2024 → Jan 2025 | Feb 2025', trainL: 75, trainW: 12.5, testL: 87.5, testW: 12.5, sharpe: 1.12, acc: 70.9 },
-];
-
-
 function sumContributions(rows: MlPredictionShapRow[], matcher: (featureName: string) => boolean): number {
   return rows
     .filter((row) => matcher(row.feature_name.toLowerCase()))
@@ -846,7 +834,7 @@ const MachineLearning: React.FC = () => {
 
   const cryptoModel: ModelCardData = toModelCardData(
     activeCryptoModel,
-    'Crypto model · BTC/USD basis',
+    'Crypto model · global crypto universe',
     S.blue2,
     'blue',
     S.green,
@@ -864,7 +852,7 @@ const MachineLearning: React.FC = () => {
 
   const liveCryptoFolds = useMemo(() => {
     if (!activeCryptoModel || activeCryptoModel.folds.length === 0) {
-      return CRYPTO_FOLDS;
+      return [];
     }
 
     return activeCryptoModel.folds.map((fold) => ({
@@ -1039,32 +1027,50 @@ const MachineLearning: React.FC = () => {
             <Badge v="muted">objective: up / flat / down</Badge>
           </CardHeader>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <PipeNode n="1" label="Data ingested" status={totalCandles > 0 ? 'done' : 'waiting'} />
-              <PipeConnector done={totalCandles > 0} />
-              <PipeNode n="2" label="Features built" status={featureContract ? 'done' : 'waiting'} />
-              <PipeConnector done={Boolean(featureContract)} />
-              <PipeNode n="3" label="Walk-forward train" status={currentStep3} />
-              <PipeConnector done={false} />
-              <PipeNode n="4" label="Validate Sharpe" status={currentStep4} />
-              <PipeConnector done={false} />
-              <PipeNode n="5" label="Promote model" status="waiting" />
-              <PipeConnector done={false} />
-              <PipeNode n="6" label="Live inference" status="waiting" />
-            </div>
+            {activeJob ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <PipeNode n="1" label="Data ingested" status="done" />
+                  <PipeConnector done />
+                  <PipeNode n="2" label="Features built" status="done" />
+                  <PipeConnector done />
+                  <PipeNode n="3" label="Walk-forward train" status={currentStep3} />
+                  <PipeConnector done={false} />
+                  <PipeNode n="4" label="Validate Sharpe" status={currentStep4} />
+                  <PipeConnector done={false} />
+                  <PipeNode n="5" label="Promote model" status="waiting" />
+                  <PipeConnector done={false} />
+                  <PipeNode n="6" label="Live inference" status="waiting" />
+                </div>
 
-            {activeJob && (
-              <div style={{ padding: '12px 14px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: 10, color: S.text2 }}>{activeJob.type} · {activeJob.asset_class}</span>
-                  <span style={{ fontSize: 10, color: S.text3 }}>{activeJob.done_symbols}/{activeJob.total_symbols} symbols</span>
+                <div style={{ padding: '12px 14px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 10, color: S.text2 }}>{activeJob.type} · {activeJob.asset_class}</span>
+                    <span style={{ fontSize: 10, color: S.text3 }}>{activeJob.done_symbols}/{activeJob.total_symbols} symbols</span>
+                  </div>
+                  <div style={{ height: 6, background: S.bg3, borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${activeJob.progress_pct}%`, height: '100%', background: `linear-gradient(90deg, ${S.blue}, ${S.green})` }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 8, fontSize: 10, color: S.text3 }}>
+                    <span>{activeJob.status_message ?? 'running'}</span>
+                    <span>{activeJob.current_symbol ?? 'queue'}</span>
+                  </div>
                 </div>
-                <div style={{ height: 6, background: S.bg3, borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ width: `${activeJob.progress_pct}%`, height: '100%', background: `linear-gradient(90deg, ${S.blue}, ${S.green})` }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginTop: 8, fontSize: 10, color: S.text3 }}>
-                  <span>{activeJob.status_message ?? 'running'}</span>
-                  <span>{activeJob.current_symbol ?? 'queue'}</span>
+              </>
+            ) : (
+              <div style={{ padding: '14px 16px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: S.text3, marginBottom: 5 }}>
+                      Pipeline idle
+                    </div>
+                    <div style={{ fontSize: 13, color: S.text }}>
+                      Start a training job to run walk-forward validation, promote the best fold, and register a usable model artifact.
+                    </div>
+                  </div>
+                  <Badge v={activeCryptoModel ? 'green' : 'muted'}>
+                    {activeCryptoModel ? 'crypto model active' : 'awaiting training'}
+                  </Badge>
                 </div>
               </div>
             )}
@@ -1106,23 +1112,42 @@ const MachineLearning: React.FC = () => {
       </div>
 
       <Card>
-        <CardHeader title="Walk-forward validation · crypto model · 8 folds">
+        <CardHeader
+          title={
+            activeCryptoModel
+              ? `Walk-forward validation · crypto model · ${activeCryptoModel.fold_count} folds`
+              : 'Walk-forward validation · no trained crypto model'
+          }
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 4, background: 'rgba(77,159,255,0.5)', borderRadius: 1 }} /><span style={{ fontSize: 9, color: S.text3 }}>Train</span></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 4, background: 'rgba(0,229,160,0.5)', borderRadius: 1 }} /><span style={{ fontSize: 9, color: S.text3 }}>Test</span></div>
-            <Badge v="muted">{activeCryptoModel ? "Live model folds" : "Preview until first trained model lands"}</Badge>
+            <Badge v={activeCryptoModel ? 'green' : 'muted'}>{activeCryptoModel ? 'Live model folds' : 'Train crypto model to populate folds'}</Badge>
           </div>
         </CardHeader>
         <div style={{ padding: '10px 16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 54px', gap: 10, padding: '0 0 6px', borderBottom: `0.5px solid ${S.border}` }}>
-            {['Fold', 'Time window', 'Sharpe', 'Accuracy', 'Status'].map((h) => <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3 }}>{h}</span>)}
-          </div>
-          <div style={{ marginTop: 6 }}>
-            {liveCryptoFolds.map((fold) => <FoldRow key={fold.label} fold={fold} />)}
-          </div>
+          {activeCryptoModel ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 54px', gap: 10, padding: '0 0 6px', borderBottom: `0.5px solid ${S.border}` }}>
+                {['Fold', 'Time window', 'Sharpe', 'Accuracy', 'Status'].map((h) => <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3 }}>{h}</span>)}
+              </div>
+              <div style={{ marginTop: 6 }}>
+                {liveCryptoFolds.length > 0 ? (
+                  liveCryptoFolds.map((fold) => <FoldRow key={fold.label} fold={fold} />)
+                ) : (
+                  <div style={{ padding: '18px 0', fontSize: 10, color: S.text3 }}>
+                    This registered crypto model has no walk-forward fold payload. Retrain crypto to regenerate model metadata.
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ padding: '18px 0', fontSize: 10, color: S.text3 }}>
+              No walk-forward validation is available because there is no usable crypto model artifact registered.
+            </div>
+          )}
         </div>
       </Card>
-
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Card>
           <CardHeader title={`Feature importance · ${selectedImportanceAsset} model · gain-based`}>

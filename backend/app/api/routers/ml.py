@@ -176,6 +176,9 @@ STOCK_DAILY_LOOKBACK_DAYS = 1600
 CRYPTO_DAILY_TIMEFRAME = "1Day"
 CRYPTO_FRESHNESS_MAX_AGE_DAYS = 2
 STOCK_FRESHNESS_MAX_AGE_DAYS = 5
+ALL_CRYPTO_TRAINING_SYMBOL = "ALL_CRYPTO"
+VALID_MODEL_ARTIFACT_SUFFIX = ".lgbm"
+
 
 def _crypto_csv_source_dir() -> Path:
     """Return the repo-level crypto-history folder used for manual ML CSV imports."""
@@ -578,6 +581,13 @@ def _register_training_result(
     result: TrainResult,
     latest_job_id: str | None,
 ) -> model_registry.ModelRecord:
+    artifact_path = str(result.model_path)
+    if asset_class == "stock" and not artifact_path.endswith(VALID_MODEL_ARTIFACT_SUFFIX):
+        raise ValueError(
+            "Refusing to register stock model with invalid artifact path: "
+            f"{artifact_path}"
+        )
+
     trained_at = datetime.now(tz=UTC).isoformat()
     model_id = f"{asset_class}-{uuid4()}"
     trainer_config = TrainerConfig()
@@ -589,7 +599,7 @@ def _register_training_result(
         "model_id": model_id,
         "asset_class": asset_class,
         "status": "active",
-        "artifact_path": result.model_path,
+        "artifact_path": artifact_path,
         "trained_at": trained_at,
         "fold_count": int(fold_count),
         "best_fold": int(best_fold),
@@ -614,7 +624,10 @@ async def _train_crypto_result() -> TrainResult:
     session_factory = build_session_factory(engine)
 
     async with session_factory() as session:
-        result, _dataset = await train_crypto_model_from_db_impl(session)
+        result, _dataset = await train_crypto_model_from_db_impl(
+            session,
+            symbols=None,
+        )
 
     return result
 
@@ -1868,7 +1881,7 @@ async def train_crypto_after_sentiment_backfill(
 @router.post("/train/crypto")
 async def train_crypto() -> Mapping[str, object]:
     _ensure_no_running_job()
-    job = _new_job("crypto_train", ["BTC/USD"])
+    job = _new_job("crypto_train", [ALL_CRYPTO_TRAINING_SYMBOL])
     record, _ = await _run_registered_training_job(
         asset_class="crypto",
         latest_job_id=str(job["job_id"]),

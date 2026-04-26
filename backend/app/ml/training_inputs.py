@@ -22,6 +22,10 @@ from app.db.models import (
     WatchlistRow,
 )
 from app.ml.features import FeatureEngineer, ResearchInputs
+from app.ml.macro_sentiment import (
+    DailyMacroSentimentSource,
+    build_macro_sentiment_features,
+)
 from app.ml.trainer import TrainResult, WalkForwardTrainer
 from app.models.domain import Candle
 
@@ -53,7 +57,9 @@ class StockTrainingInputAssembler:
             timeframe=timeframe,
         )
         candles = tuple(self._row_to_candle(row) for row in candle_rows)
-        candle_symbols = tuple(self._ordered_unique_symbols(candle.symbol for candle in candles))
+        candle_symbols = tuple(
+            self._ordered_unique_symbols(candle.symbol for candle in candles)
+        )
         research_lookup = cast(
             Mapping[str | tuple[str, date], ResearchInputs],
             await self._build_research_lookup(session, candle_symbols),
@@ -206,12 +212,18 @@ class StockTrainingInputAssembler:
 
         news_rows = [row for row in signals if "news" in row.signal_type.lower()]
         analyst_rows = [row for row in signals if "analyst" in row.signal_type.lower()]
-        congress_signal_rows = [row for row in signals if "congress" in row.signal_type.lower()]
-        insider_signal_rows = [row for row in signals if "insider" in row.signal_type.lower()]
+        congress_signal_rows = [
+            row for row in signals if "congress" in row.signal_type.lower()
+        ]
+        insider_signal_rows = [
+            row for row in signals if "insider" in row.signal_type.lower()
+        ]
 
         recent_news_1d = [row for row in news_rows if row.created_at >= one_day_ago]
         recent_news_7d = [row for row in news_rows if row.created_at >= seven_days_ago]
-        recent_analyst_rows = [row for row in analyst_rows if row.created_at >= thirty_days_ago]
+        recent_analyst_rows = [
+            row for row in analyst_rows if row.created_at >= thirty_days_ago
+        ]
         recent_congress_signal_rows = [
             row for row in congress_signal_rows if row.created_at >= thirty_days_ago
         ]
@@ -494,7 +506,6 @@ class StockTrainingInputAssembler:
         return None
 
 
-
 @dataclass(slots=True, frozen=True)
 class CryptoTrainingDataset:
     """Concrete crypto training inputs assembled from ML candles and sentiment rows."""
@@ -504,7 +515,7 @@ class CryptoTrainingDataset:
 
 
 class CryptoTrainingInputAssembler:
-    """Load crypto ML candles and map daily sentiment into date-specific inputs."""
+    """Load crypto ML candles and map BTC/ETH macro sentiment into all crypto inputs."""
 
     async def assemble(
         self,
@@ -513,7 +524,7 @@ class CryptoTrainingInputAssembler:
         symbols: Sequence[str] | None = None,
         timeframe: str = "1Day",
     ) -> CryptoTrainingDataset:
-        """Return DB-backed crypto candles plus daily sentiment research inputs."""
+        """Return DB-backed crypto candles plus shared BTC/ETH macro sentiment inputs."""
 
         normalized_symbols = self._normalize_symbols(symbols)
         candle_rows = await self._load_candle_rows(
@@ -522,7 +533,9 @@ class CryptoTrainingInputAssembler:
             timeframe=timeframe,
         )
         candles = tuple(self._row_to_candle(row) for row in candle_rows)
-        candle_symbols = tuple(self._ordered_unique_symbols(candle.symbol for candle in candles))
+        candle_symbols = tuple(
+            self._ordered_unique_symbols(candle.symbol for candle in candles)
+        )
         candle_dates = tuple({candle.time.date() for candle in candles})
         research_lookup = await self._build_sentiment_lookup(
             session,
@@ -563,41 +576,81 @@ class CryptoTrainingInputAssembler:
         symbols: Sequence[str],
         sentiment_dates: Sequence[date],
     ) -> dict[tuple[str, date], ResearchInputs]:
-        """Build date-specific crypto ResearchInputs from persisted daily sentiment."""
+        """Build shared BTC/ETH macro sentiment and apply it to every crypto symbol/date."""
 
         if not symbols or not sentiment_dates:
             return {}
+
         normalized_symbols = tuple(self._ordered_unique_symbols(symbols))
         unique_dates = tuple(sorted(set(sentiment_dates)))
+        if not unique_dates:
+            return {}
+
+        start_date = unique_dates[0] - timedelta(days=6)
+        end_date = unique_dates[-1]
         result = await session.execute(
             select(CryptoDailySentimentRow)
-            .where(CryptoDailySentimentRow.symbol.in_(normalized_symbols))
+            .where(CryptoDailySentimentRow.symbol.in_(("BTC/USD", "ETH/USD")))
             .where(CryptoDailySentimentRow.asset_class == "crypto")
-            .where(CryptoDailySentimentRow.sentiment_date.in_(unique_dates))
+            .where(CryptoDailySentimentRow.sentiment_date >= start_date)
+            .where(CryptoDailySentimentRow.sentiment_date <= end_date)
             .order_by(
                 CryptoDailySentimentRow.symbol.asc(),
                 CryptoDailySentimentRow.sentiment_date.asc(),
             )
         )
         rows = list(result.scalars().all())
-        rows_by_key = {(row.symbol.upper(), row.sentiment_date): row for row in rows}
+        rows_by_symbol = self._macro_rows_by_symbol(rows)
+
+        macro_by_date: dict[date, ResearchInputs] = {}
+        for sentiment_date in unique_dates:
+            macro_by_date[sentiment_date] = self._macro_rows_to_research_inputs(
+                sentiment_date=sentiment_date,
+                btc_rows=rows_by_symbol["BTC/USD"],
+                eth_rows=rows_by_symbol["ETH/USD"],
+            )
+
         lookup: dict[tuple[str, date], ResearchInputs] = {}
         for symbol in normalized_symbols:
-            trailing_rows: list[CryptoDailySentimentRow] = []
             for sentiment_date in unique_dates:
-                row = rows_by_key.get((symbol, sentiment_date))
-                if row is not None:
-                    trailing_rows.append(row)
-                trailing_rows = [
-                    item
-                    for item in trailing_rows
-                    if 0 <= (sentiment_date - item.sentiment_date).days <= 6
-                ]
-                lookup[(symbol, sentiment_date)] = self._sentiment_rows_to_research_inputs(
-                    one_day=row,
-                    trailing_rows=trailing_rows,
-                )
+                lookup[(symbol, sentiment_date)] = macro_by_date[sentiment_date]
         return lookup
+
+    def _macro_rows_by_symbol(
+        self,
+        rows: Sequence[CryptoDailySentimentRow],
+    ) -> dict[str, list[CryptoDailySentimentRow]]:
+        """Group source-backed macro sentiment rows by BTC/ETH symbol."""
+
+        grouped: dict[str, list[CryptoDailySentimentRow]] = {
+            "BTC/USD": [],
+            "ETH/USD": [],
+        }
+        for row in rows:
+            symbol = row.symbol.upper()
+            if symbol in grouped:
+                grouped[symbol].append(row)
+        return grouped
+
+    def _macro_rows_to_research_inputs(
+        self,
+        *,
+        sentiment_date: date,
+        btc_rows: Sequence[CryptoDailySentimentRow],
+        eth_rows: Sequence[CryptoDailySentimentRow],
+    ) -> ResearchInputs:
+        """Convert BTC/ETH source rows into the existing crypto research feature contract."""
+
+        macro_features = build_macro_sentiment_features(
+            sentiment_date=sentiment_date,
+            btc_rows=self._to_macro_sources(btc_rows),
+            eth_rows=self._to_macro_sources(eth_rows),
+        )
+        return ResearchInputs(
+            news_sentiment_1d=self._feature_float(macro_features.news_sentiment_1d),
+            news_sentiment_7d=self._feature_float(macro_features.news_sentiment_7d),
+            news_article_count_7d=macro_features.news_article_count_7d,
+        )
 
     def _sentiment_rows_to_research_inputs(
         self,
@@ -605,23 +658,47 @@ class CryptoTrainingInputAssembler:
         one_day: CryptoDailySentimentRow | None,
         trailing_rows: Sequence[CryptoDailySentimentRow],
     ) -> ResearchInputs:
-        """Convert daily sentiment rows into the existing ML research feature contract."""
+        """Compatibility helper for legacy sentiment feature join tests."""
 
-        one_day_sentiment = self._observed_compound_score(one_day)
-        seven_day_scores = [
-            score
-            for score in (self._observed_compound_score(row) for row in trailing_rows)
-            if score is not None
-        ]
-        seven_day_sentiment = (
-            sum(seven_day_scores) / float(len(seven_day_scores)) if seven_day_scores else 0.0
+        if one_day is None and not trailing_rows:
+            return ResearchInputs()
+        target_date = (
+            one_day.sentiment_date
+            if one_day is not None
+            else max(row.sentiment_date for row in trailing_rows)
         )
-        article_count = sum(max(0, int(row.article_count)) for row in trailing_rows)
-        return ResearchInputs(
-            news_sentiment_1d=one_day_sentiment if one_day_sentiment is not None else 0.0,
-            news_sentiment_7d=seven_day_sentiment,
-            news_article_count_7d=article_count,
+        return self._macro_rows_to_research_inputs(
+            sentiment_date=target_date,
+            btc_rows=trailing_rows,
+            eth_rows=(),
         )
+
+    def _to_macro_sources(
+        self,
+        rows: Sequence[CryptoDailySentimentRow],
+    ) -> list[DailyMacroSentimentSource]:
+        """Convert DB sentiment rows into macro blend source rows."""
+
+        sources: list[DailyMacroSentimentSource] = []
+        for row in rows:
+            sources.append(
+                DailyMacroSentimentSource(
+                    symbol=row.symbol.upper(),
+                    sentiment_date=row.sentiment_date,
+                    compound_score=self._observed_compound_score(row),
+                    article_count=max(0, int(row.article_count)),
+                    coverage_score=max(
+                        0.0,
+                        self._coerce_float(row.coverage_score) or 0.0,
+                    ),
+                )
+            )
+        return sources
+
+    def _feature_float(self, value: float | None) -> float:
+        """Convert optional macro sentiment into the current non-null feature contract."""
+
+        return value if value is not None else 0.0
 
     def _observed_compound_score(self, row: CryptoDailySentimentRow | None) -> float | None:
         """Return compound sentiment only when the row has source-backed coverage."""
@@ -741,7 +818,6 @@ async def train_stock_model_from_db(
     engineer = feature_engineer or FeatureEngineer()
 
     dataset = await dataset_assembler.assemble(session, symbols=symbols, timeframe=timeframe)
-
     if not dataset.candles:
         raise ValueError("No persisted stock candles found for training")
 
@@ -751,5 +827,4 @@ async def train_stock_model_from_db(
         engineer,
         research_lookup=dataset.research_lookup,
     )
-
     return result, dataset
