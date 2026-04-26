@@ -72,6 +72,36 @@ class SentimentSizingInput:
     maximum_multiplier: float = 1.25
 
 
+@dataclass(frozen=True, slots=True)
+class SentimentConfidenceInput:
+    """Confidence weighting policy for sentiment risk-pressure decisions.
+
+    This creates a final confidence value for ranking and UI visibility. It does
+    not place trades and does not override the hard gate. Execution/pre-trade
+    layers must explicitly consume the output in a later Phase 9 slice.
+    """
+
+    decision: SentimentGateDecision
+    model_confidence: float
+    aligned_multiplier: float = 1.05
+    macro_pressure_multiplier: float = 0.90
+    extreme_macro_pressure_multiplier: float = 0.80
+    weak_coverage_multiplier: float = 0.90
+    missing_sentiment_multiplier: float = 0.90
+    neutral_multiplier: float = 1.0
+    minimum_confidence: float = 0.0
+    maximum_confidence: float = 0.95
+
+
+@dataclass(frozen=True, slots=True)
+class SentimentConfidenceResult:
+    """Weighted confidence result after applying macro sentiment pressure."""
+
+    final_confidence: float
+    confidence_multiplier: float
+    confidence_delta: float
+
+
 def evaluate_sentiment_gate(gate_input: SentimentGateInput) -> SentimentGateDecision:
     """Evaluate macro sentiment as a risk-pressure layer, not a universal gate."""
 
@@ -160,6 +190,42 @@ def calculate_position_multiplier(sizing_input: SentimentSizingInput) -> float:
         maximum=sizing_input.maximum_multiplier,
     )
 
+
+def compute_sentiment_confidence(
+    confidence_input: SentimentConfidenceInput,
+) -> SentimentConfidenceResult:
+    """Blend ML confidence with crypto macro sentiment pressure.
+
+    The model remains the directional source of truth. Sentiment only nudges
+    confidence up or down after the gate decision is known. Blocked candidates
+    receive a final confidence of zero so they cannot rank as tradable.
+    """
+
+    _validate_confidence_input(confidence_input)
+
+    decision = confidence_input.decision
+    if not decision.allowed or decision.state == "blocked":
+        final_confidence = 0.0
+        return SentimentConfidenceResult(
+            final_confidence=final_confidence,
+            confidence_multiplier=0.0,
+            confidence_delta=round(
+                final_confidence - confidence_input.model_confidence,
+                6,
+            ),
+        )
+
+    multiplier = _confidence_multiplier_for_decision(confidence_input)
+    final_confidence = _clamp_multiplier(
+        confidence_input.model_confidence * multiplier,
+        minimum=confidence_input.minimum_confidence,
+        maximum=confidence_input.maximum_confidence,
+    )
+    return SentimentConfidenceResult(
+        final_confidence=final_confidence,
+        confidence_multiplier=multiplier,
+        confidence_delta=round(final_confidence - confidence_input.model_confidence, 6),
+    )
 
 def classify_sentiment_bias(
     sentiment: float | None,
@@ -326,6 +392,56 @@ def _validate_sizing_input(sizing_input: SentimentSizingInput) -> None:
     if sizing_input.minimum_multiplier > sizing_input.maximum_multiplier:
         raise ValueError("minimum_multiplier cannot exceed maximum_multiplier")
 
+
+def _confidence_multiplier_for_decision(
+    confidence_input: SentimentConfidenceInput,
+) -> float:
+    decision = confidence_input.decision
+    if decision.risk_flag == "aligned":
+        return confidence_input.aligned_multiplier
+    if decision.risk_flag == "macro_pressure":
+        return confidence_input.macro_pressure_multiplier
+    if decision.risk_flag == "extreme_macro_pressure":
+        return confidence_input.extreme_macro_pressure_multiplier
+    if decision.risk_flag == "weak_coverage":
+        return confidence_input.weak_coverage_multiplier
+    if decision.risk_flag == "missing_sentiment":
+        return confidence_input.missing_sentiment_multiplier
+    if decision.risk_flag == "neutral":
+        return confidence_input.neutral_multiplier
+    return 1.0
+
+
+def _validate_confidence_input(
+    confidence_input: SentimentConfidenceInput,
+) -> None:
+    _validate_confidence(
+        confidence_input.model_confidence,
+        field_name="model_confidence",
+    )
+    multipliers = {
+        "aligned_multiplier": confidence_input.aligned_multiplier,
+        "macro_pressure_multiplier": confidence_input.macro_pressure_multiplier,
+        "extreme_macro_pressure_multiplier": (
+            confidence_input.extreme_macro_pressure_multiplier
+        ),
+        "weak_coverage_multiplier": confidence_input.weak_coverage_multiplier,
+        "missing_sentiment_multiplier": confidence_input.missing_sentiment_multiplier,
+        "neutral_multiplier": confidence_input.neutral_multiplier,
+    }
+    for field_name, value in multipliers.items():
+        if value < 0.0:
+            raise ValueError(f"{field_name} cannot be negative")
+    if confidence_input.minimum_confidence > confidence_input.maximum_confidence:
+        raise ValueError("minimum_confidence cannot exceed maximum_confidence")
+    _validate_confidence(
+        confidence_input.minimum_confidence,
+        field_name="minimum_confidence",
+    )
+    _validate_confidence(
+        confidence_input.maximum_confidence,
+        field_name="maximum_confidence",
+    )
 
 def _validate_normalized_sentiment(value: float, *, field_name: str) -> None:
     if not -1.0 <= value <= 1.0:

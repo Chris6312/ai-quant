@@ -311,7 +311,13 @@ function sentimentGateSummary(gate: MlPredictionRow['sentiment_gate']): string {
   if (!gate) {
     return 'No crypto macro sentiment gate was applied to this prediction.';
   }
-  return gate.reason;
+  const finalConfidence = gate.final_confidence !== null
+    ? ` Final confidence: ${Math.round(gate.final_confidence * 100)}%.`
+    : '';
+  const confidenceDelta = gate.confidence_delta !== null
+    ? ` Confidence delta: ${gate.confidence_delta >= 0 ? '+' : ''}${Math.round(gate.confidence_delta * 100)}%.`
+    : '';
+  return `${gate.reason}${finalConfidence}${confidenceDelta}`;
 }
 
 function ActionButton({ tone, children, disabled, onClick }: { tone: ActionTone; children: React.ReactNode; disabled?: boolean; onClick?: () => void }): React.ReactElement {

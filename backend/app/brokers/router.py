@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.brokers.base import BaseBroker, Order
@@ -9,6 +10,7 @@ from app.brokers.kraken import KrakenBroker
 from app.brokers.tradier import TradierBroker
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
 from app.models.domain import Position
+from app.risk.pre_trade import enforce_sentiment_pre_trade
 
 
 @dataclass(slots=True)
@@ -38,11 +40,31 @@ class BrokerRouter:
         size: float,
         order_type: str,
         limit_price: float | None = None,
+        sentiment_gate: Mapping[str, object] | None = None,
     ) -> Order:
-        """Submit an order to the appropriate broker."""
+        """Submit an order to the appropriate broker after pre-trade checks."""
 
-        broker = self.route(symbol)
-        return await broker.submit_order(symbol, side, size, order_type, limit_price)
+        is_crypto = self.is_crypto(symbol)
+        asset_class = "crypto" if is_crypto else "stock"
+        decision = enforce_sentiment_pre_trade(
+            symbol=symbol,
+            asset_class=asset_class,
+            side=side,
+            requested_size=size,
+            sentiment_gate=sentiment_gate,
+        )
+
+        if not decision.allowed:
+            raise ValueError(decision.reason)
+
+        broker = self.kraken if is_crypto else self.tradier
+        return await broker.submit_order(
+            symbol,
+            side,
+            decision.adjusted_size,
+            order_type,
+            limit_price,
+        )
 
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
         """Cancel an order with the broker handling the symbol."""

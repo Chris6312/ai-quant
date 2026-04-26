@@ -57,11 +57,13 @@ from app.ml.training_inputs import (
 from app.models.domain import Candle
 from app.repositories.candles import CandleRepository
 from app.risk.sentiment_risk import (
+    SentimentConfidenceInput,
     SentimentGateDecision,
     SentimentGateInput,
     SentimentSizingInput,
     TradeDirection,
     calculate_position_multiplier,
+    compute_sentiment_confidence,
     evaluate_sentiment_gate,
 )
 
@@ -912,11 +914,32 @@ def _prediction_action_after_sentiment_gate(
 
 def _sentiment_gate_api_payload(
     sentiment_gate: SentimentGateDecision | None,
+    *,
+    model_confidence: float | None = None,
 ) -> dict[str, object] | None:
     """Serialize a sentiment decision without leaking dataclass internals."""
 
     if sentiment_gate is None:
         return None
+
+    confidence_payload: dict[str, float | None] = {
+        "confidence_multiplier": None,
+        "final_confidence": None,
+        "confidence_delta": None,
+    }
+    if model_confidence is not None:
+        confidence_result = compute_sentiment_confidence(
+            SentimentConfidenceInput(
+                decision=sentiment_gate,
+                model_confidence=model_confidence,
+            )
+        )
+        confidence_payload = {
+            "confidence_multiplier": confidence_result.confidence_multiplier,
+            "final_confidence": confidence_result.final_confidence,
+            "confidence_delta": confidence_result.confidence_delta,
+        }
+
     return {
         "state": sentiment_gate.state,
         "allowed": sentiment_gate.allowed,
@@ -926,6 +949,7 @@ def _sentiment_gate_api_payload(
         "position_multiplier": calculate_position_multiplier(
             SentimentSizingInput(decision=sentiment_gate)
         ),
+        **confidence_payload,
     }
 
 def _format_driver_value(feature: str, value: float) -> str:
@@ -1715,7 +1739,10 @@ async def _build_asset_predictions(
                 "candle_time": candle_time,
                 "action": action,
                 "confidence_threshold": threshold,
-                "sentiment_gate": _sentiment_gate_api_payload(sentiment_gate),
+                "sentiment_gate": _sentiment_gate_api_payload(
+                    sentiment_gate,
+                    model_confidence=prediction.confidence,
+                ),
                 "feature_values": {name: float(features[name]) for name in ALL_FEATURES},
                 "shap_values": shap_values,
             }

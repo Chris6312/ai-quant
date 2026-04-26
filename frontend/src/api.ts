@@ -457,6 +457,10 @@ export type MlSentimentGate = {
     | 'neutral'
     | 'missing_sentiment';
   reason: string;
+  position_multiplier: number;
+  confidence_multiplier: number | null;
+  final_confidence: number | null;
+  confidence_delta: number | null;
 };
 
 export type MlPredictionRow = {

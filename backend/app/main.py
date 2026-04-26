@@ -18,6 +18,7 @@ from app.api.routers.orders import router as orders_router
 from app.api.routers.paper import router as paper_router
 from app.api.routers.research import router as research_router
 from app.api.routers.runtime import router as runtime_router
+from app.api.routers.sentiment_risk import router as sentiment_risk_router
 from app.api.routers.watchlist import router as watchlist_router
 from app.config.constants import APP_NAME, APP_VERSION
 from app.config.settings import get_settings
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(ml_router)
     app.include_router(orders_router)
     app.include_router(config_router)
+    app.include_router(sentiment_risk_router)
     return app
 
 

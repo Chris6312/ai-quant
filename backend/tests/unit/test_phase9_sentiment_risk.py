@@ -11,11 +11,13 @@ from app.api.routers.ml import (
     _sentiment_gate_for_prediction,
 )
 from app.risk.sentiment_risk import (
+    SentimentConfidenceInput,
     SentimentGateInput,
     SentimentSizingInput,
     calculate_intraday_sentiment_change,
     calculate_position_multiplier,
     classify_sentiment_bias,
+    compute_sentiment_confidence,
     evaluate_sentiment_gate,
 )
 from app.tasks.worker import celery_app
@@ -405,6 +407,108 @@ def test_position_multiplier_rejects_negative_policy_values() -> None:
         )
 
 
+
+def test_confidence_weighting_zeroes_blocked_candidates() -> None:
+    """Blocked sentiment decisions should not rank as tradable confidence."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=-0.55,
+            article_count_7d=8,
+            model_confidence=0.50,
+        )
+    )
+    result = compute_sentiment_confidence(
+        SentimentConfidenceInput(decision=decision, model_confidence=0.50)
+    )
+
+    assert result.final_confidence == 0.0
+    assert result.confidence_multiplier == 0.0
+    assert result.confidence_delta == -0.5
+
+
+def test_confidence_weighting_reduces_macro_pressure() -> None:
+    """Macro pressure should lower confidence without killing strong setups."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=-0.45,
+            article_count_7d=8,
+            model_confidence=0.72,
+        )
+    )
+    result = compute_sentiment_confidence(
+        SentimentConfidenceInput(decision=decision, model_confidence=0.72)
+    )
+
+    assert result.final_confidence == 0.648
+    assert result.confidence_multiplier == 0.9
+    assert result.confidence_delta == -0.072
+
+
+def test_confidence_weighting_reduces_extreme_macro_pressure_more() -> None:
+    """Extreme pressure should reduce confidence more than normal pressure."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=-0.74,
+            article_count_7d=8,
+            model_confidence=0.78,
+        )
+    )
+    result = compute_sentiment_confidence(
+        SentimentConfidenceInput(decision=decision, model_confidence=0.78)
+    )
+
+    assert result.final_confidence == 0.624
+    assert result.confidence_multiplier == 0.8
+    assert result.confidence_delta == -0.156
+
+
+def test_confidence_weighting_boosts_aligned_signal_with_cap() -> None:
+    """Aligned sentiment can boost confidence, but not beyond the safety cap."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=0.52,
+            article_count_7d=8,
+            model_confidence=0.92,
+        )
+    )
+    result = compute_sentiment_confidence(
+        SentimentConfidenceInput(decision=decision, model_confidence=0.92)
+    )
+
+    assert result.final_confidence == 0.95
+    assert result.confidence_multiplier == 1.05
+    assert result.confidence_delta == 0.03
+
+
+def test_confidence_weighting_rejects_negative_policy_values() -> None:
+    """Confidence policy multipliers should never become negative."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=0.52,
+            article_count_7d=8,
+            model_confidence=0.62,
+        )
+    )
+
+    with pytest.raises(ValueError, match="macro_pressure_multiplier"):
+        compute_sentiment_confidence(
+            SentimentConfidenceInput(
+                decision=decision,
+                model_confidence=0.62,
+                macro_pressure_multiplier=-0.10,
+            )
+        )
+
 def test_crypto_prediction_sentiment_gate_downgrades_strong_conflicting_signal() -> None:
     """Strong crypto longs should stay signalable under bearish macro pressure."""
 
@@ -497,6 +601,34 @@ def test_prediction_sentiment_gate_is_crypto_only_for_this_slice() -> None:
     )
 
 
+
+def test_sentiment_gate_payload_includes_weighted_confidence() -> None:
+    """API payload should expose confidence weighting for UI and ranking visibility."""
+
+    decision = evaluate_sentiment_gate(
+        SentimentGateInput(
+            direction="long",
+            news_sentiment_1d=-0.45,
+            article_count_7d=8,
+            model_confidence=0.72,
+        )
+    )
+
+    assert _sentiment_gate_api_payload(decision, model_confidence=0.72) == {
+        "state": "downgraded",
+        "allowed": True,
+        "sentiment_bias": "bearish",
+        "risk_flag": "macro_pressure",
+        "reason": (
+            "BTC/ETH macro sentiment conflicts with the trade; "
+            "downgrade instead of universally blocking."
+        ),
+        "position_multiplier": 0.75,
+        "confidence_multiplier": 0.9,
+        "final_confidence": 0.648,
+        "confidence_delta": -0.072,
+    }
+
 def test_prediction_signal_event_carries_sentiment_gate_payload() -> None:
     """Signal events should include sentiment context for downstream debugging."""
 
@@ -530,4 +662,7 @@ def test_prediction_signal_event_carries_sentiment_gate_payload() -> None:
         "risk_flag": "aligned",
         "reason": "Trade direction is aligned with crypto macro sentiment.",
         "position_multiplier": 1.1,
+        "confidence_multiplier": None,
+        "final_confidence": None,
+        "confidence_delta": None,
     }
