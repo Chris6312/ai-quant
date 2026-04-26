@@ -7,6 +7,12 @@ from app.decision.intraday import (
     build_intraday_snapshot,
     build_intraday_snapshot_from_repository,
 )
+from app.decision.sentiment import (
+    build_macro_sentiment_decision,
+    build_symbol_sentiment_decision,
+    classify_sentiment_bias,
+    merge_sentiment_decisions,
+)
 from app.decision.visibility import (
     DecisionAction,
     DecisionDirection,
@@ -17,6 +23,7 @@ from app.decision.visibility import (
     MacroSentimentDecision,
     MlBiasDecision,
     SentimentBias,
+    SentimentDecisionMerge,
     SymbolSentimentDecision,
     build_no_trade_decision,
 )
@@ -33,9 +40,14 @@ __all__ = [
     "MacroSentimentDecision",
     "MlBiasDecision",
     "SentimentBias",
+    "SentimentDecisionMerge",
     "SymbolSentimentDecision",
     "TimeframeTechnicalSnapshot",
     "build_intraday_snapshot",
     "build_intraday_snapshot_from_repository",
+    "build_macro_sentiment_decision",
     "build_no_trade_decision",
+    "build_symbol_sentiment_decision",
+    "classify_sentiment_bias",
+    "merge_sentiment_decisions",
 ]

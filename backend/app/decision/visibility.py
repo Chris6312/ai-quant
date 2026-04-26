@@ -19,6 +19,16 @@ DecisionRiskMode = Literal["normal", "reduced", "boosted", "blocked", "watch_onl
 FreshnessState = Literal["fresh", "stale", "missing", "unknown"]
 SentimentBias = Literal["bullish", "bearish", "neutral", "unknown"]
 SentimentEffect = Literal["tailwind", "headwind", "neutral", "unknown"]
+FinalSentimentDecision = Literal[
+    "aligned",
+    "macro_headwind",
+    "macro_tailwind",
+    "symbol_headwind",
+    "symbol_tailwind",
+    "mixed",
+    "neutral",
+    "unknown",
+]
 IntradayTrend = Literal["bullish", "bearish", "mixed", "neutral", "unknown"]
 VolatilityState = Literal["compressed", "normal", "expanded", "unknown"]
 DecisionExpiry = Literal["next_closed_candle", "end_of_day", "manual_refresh"]
@@ -52,6 +62,21 @@ class SymbolSentimentDecision(BaseModel):
     score: float | None = Field(default=None, ge=-1.0, le=1.0)
     article_count: int = Field(default=0, ge=0)
     as_of: datetime | None = None
+
+
+class SentimentDecisionMerge(BaseModel):
+    """Merged sentiment context for decision visibility.
+
+    This exposes macro weather, symbol forecast, and the final sentiment-only
+    decision separately so BTC/ETH headwinds never silently hide local strength.
+    """
+
+    macro_sentiment_bias: SentimentBias
+    symbol_sentiment_bias: SentimentBias
+    final_sentiment_decision: FinalSentimentDecision
+    effect: SentimentEffect = "unknown"
+    reason: str = Field(min_length=1)
+    conflicts: list[str] = Field(default_factory=list)
 
 
 class IntradayConfirmation(BaseModel):

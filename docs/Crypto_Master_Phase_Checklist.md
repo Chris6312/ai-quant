@@ -345,7 +345,7 @@ Separate once-daily ML prediction bias from live trade/readiness context so Rese
 
 * [x] Slice 1 — Decision schema only: add typed backend decision models/helpers with no trading changes
 * [x] Slice 2 — Intraday technical snapshot using closed 15m / 1h / 4h candles
-* [ ] Slice 3 — Sentiment decision merge with BTC/ETH as macro weather, not an iron gate
+* [x] Slice 3 — Sentiment decision merge with BTC/ETH as macro weather, not an iron gate
 * [ ] Slice 4 — Final decision composer combining ML bias, sentiment, and intraday confirmation
 
 ### Frontend
