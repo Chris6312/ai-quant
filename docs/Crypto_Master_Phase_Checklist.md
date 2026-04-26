@@ -1,7 +1,7 @@
 # ✅ AI-Quant — Crypto-First Master Phase Checklist
 
 Source: `docs/Crypto_Master_Phase_Checklist.md`
-Last reviewed against backup zip: `tracked-files-20260426-141016.zip`
+Last reviewed against backup zip: `tracked-files-20260426-161505.zip`
 
 ---
 
@@ -10,15 +10,15 @@ Last reviewed against backup zip: `tracked-files-20260426-141016.zip`
 | Phase | Name | Status | Review result |
 |---|---|---:|---|
 | Phase 1 | Crypto Scope Model | ✅ Complete | Crypto universe/scope foundation exists. Some older UI wording remains, but it is not a blocker for post-Phase 9 work. |
-| Phase 2 | Crypto Universe / Watchlist Wiring | ✅ Complete | Backend crypto scope and runtime targets are wired. True watchlist promotion remains deferred by design. |
-| Phase 3 | Crypto Frontend Truth & Persistence | ⚠️ Partial / Deferred | Some selected-symbol/tab/empty-state persistence work remains. Not a Phase 10 blocker. |
+| Phase 2 | Crypto Universe / Watchlist Wiring | ✅ Complete | Backend crypto scope and runtime targets are wired. Research-only promoted crypto list is implemented as a soft operator-focus layer. |
+| Phase 3 | Crypto Frontend Truth & Persistence | ✅ Complete | Research now surfaces persisted ML predictions, latest-per-symbol truth, no-trade explanations, sentiment values, and localStorage state rehydration for current Research scope. |
 | Phase 4 | Crypto Worker Target Derivation | ✅ Complete | Runtime target derivation is explicit and scheduler-oriented. |
 | Phase 5 | Crypto Candle System | ✅ Complete | Crypto candle scheduler/worker path is implemented and validated. Redis `candle_closed` explicit pub/sub validation should remain tracked as a later integration check. |
 | Phase 6 | ML Candle / Freshness | ✅ Complete | Dedicated ML lane, usage separation, Alpaca 1D ML sync, and freshness gating are in place. |
 | Phase 7 | Prediction Pipeline | ✅ Complete | Prediction persistence tables and backend persistence path are present. UI polish can continue later. |
 | Phase 8 | Model Selection Hardening | ✅ Complete | Recency-aware/quality-aware model selection hardening is implemented. |
 | Phase 9 | Sentiment Risk Layer | ✅ Complete | Implemented before ledger durability and now renumbered as the completed Phase 9. |
-| Phase 10 | Crypto Paper Ledger Durability | ❌ Not started | Paper ledger is still in-process/in-memory. This is the next actual work phase. |
+| Phase 10 | Crypto Paper Ledger Durability | ✅ Complete | Durable paper ledger schema/service/API/UI path was implemented and validated in the current project state. |
 
 ---
 
@@ -59,8 +59,8 @@ Make crypto symbol scope visible and usable across the app.
 
 * [x] Add endpoint(s) exposing crypto universe / active set
 * [x] Ensure runtime target derivation uses crypto scope
-* [ ] Add crypto watchlist/promoted layer
-  → deferred by design; current Research page scope is not a true runtime driver.
+* [x] Add crypto watchlist/promoted layer
+  → implemented as a Research-only promoted list. It influences operator focus only and does not change workers, ML, paper trading, or live execution.
 
 ### Frontend
 
@@ -81,20 +81,22 @@ Make operator pages truthful before runtime is live.
 ### Frontend state
 
 * [x] Trading mode persistence exists
-* [ ] Persist selected crypto symbol
-* [ ] Persist tab/filter state across Research / ML / Runtime
-* [ ] Rehydrate state on reload
+* [x] Persist selected crypto symbol for Research
+* [x] Persist Research tab/filter state
+* [x] Rehydrate Research state on reload
+* [ ] Extend equivalent tab/filter persistence across ML / Runtime if needed later
 
 ### Empty-state truth
 
-* [~] Distinguish no crypto symbols configured
-* [~] Distinguish workers not running
-* [~] Distinguish no predictions yet
-* [ ] Distinguish no paper positions yet
+* [x] Distinguish no crypto symbols configured for Research scope
+* [x] Distinguish no predictions yet / no high-confidence predictions
+* [x] Distinguish prediction exists vs tradable signal
+* [x] Distinguish sentiment unavailable vs scored sentiment
+* [x] Distinguish no paper positions / empty paper state through Phase 10 durable paper UI
 
 ### Carry-forward notes
 
-* [ ] Research page currently shows crypto scope but no true signal population. This is not a Phase 10 ledger blocker.
+* [x] Research page now shows persisted ML predictions as observation/signals, latest prediction per symbol, no-trade explanations, sentiment values, and promoted-symbol focus.
 
 ---
 
@@ -293,43 +295,85 @@ Paper trading survives restart.
 
 ### Backend
 
-* [~] Paper trading exists, but current ledger is in-process/in-memory
-* [ ] Persist paper account balances
-* [ ] Persist paper positions
-* [ ] Persist paper fills
-* [ ] Persist paper orders
-* [ ] Restore paper state on startup
-* [ ] Make database state the source of truth
-* [ ] Consolidate broker + paper execution logic
-* [ ] Keep paper and live broker behavior clearly separated
+* [x] Paper trading exists with durable ledger backing
+* [x] Persist paper account balances
+* [x] Persist paper positions
+* [x] Persist paper fills
+* [x] Persist paper orders
+* [x] Restore paper state on startup
+* [x] Make database state the source of truth
+* [x] Consolidate broker + paper execution logic sufficiently for current durable-paper phase
+* [x] Keep paper and live broker behavior clearly separated
 
 ### Required data model preview
 
-* [ ] `paper_account`
-* [ ] `paper_positions`
-* [ ] `paper_fills`
-* [ ] `paper_orders` optional but recommended
+* [x] `paper_account`
+* [x] `paper_positions`
+* [x] `paper_fills`
+* [x] `paper_orders`
 
 ### Restart behavior
 
-* [ ] Load balances from DB
-* [ ] Load open positions from DB
-* [ ] Rebuild portfolio state from persisted paper records
-* [ ] Resume as if the app never restarted
+* [x] Load balances from DB
+* [x] Load open positions from DB
+* [x] Rebuild portfolio state from persisted paper records
+* [x] Resume as if the app never restarted
 
 ### Frontend
 
-* [ ] Show durable paper account state
-* [ ] Distinguish empty account
-* [ ] Distinguish reset account
-* [ ] Distinguish active positions
+* [x] Show durable paper account state
+* [x] Distinguish empty account
+* [x] Distinguish reset account
+* [x] Distinguish active positions
 
 ### Hard rules
 
-* [ ] Do not rebuild positions from candles
-* [ ] Do not rely on runtime memory as source of truth
-* [ ] Do not mix paper and live broker logic blindly
-* [ ] Do not skip fill persistence
+* [x] Do not rebuild positions from candles
+* [x] Do not rely on runtime memory as source of truth
+* [x] Do not mix paper and live broker logic blindly
+* [x] Do not skip fill persistence
+
+---
+
+# Phase 9.1 — Decision Layer Visibility
+
+## Goal
+
+Make Phase 9 sentiment-risk decisions visible in the same operator-facing decision object as ML predictions.
+
+### Why this exists
+
+Phase 9 sentiment-risk logic was implemented and manually verified, but Research currently surfaces mostly the ML prediction, confidence gate, and no-trade action. The operator needs to see the distinction between:
+
+* ML prediction direction
+* macro sentiment bias from BTC/ETH market weather
+* symbol sentiment bias / local forecast
+* final sentiment decision
+* risk-reduced vs blocked vs boosted outcome
+
+### Backend
+
+* [ ] Add visible `macro_sentiment_bias` to prediction/decision payloads
+* [ ] Add visible `symbol_sentiment_bias` to prediction/decision payloads
+* [ ] Add visible `final_sentiment_decision` to prediction/decision payloads
+* [ ] Add visible confidence adjustment / size multiplier where available
+* [ ] Preserve Phase 9 rule: BTC/ETH macro sentiment is a headwind/tailwind, not a universal iron gate
+* [ ] Preserve allowed-but-risk-reduced behavior when macro is bearish but symbol setup is strong
+* [ ] Do not change execution behavior until the visible decision object is validated
+
+### Frontend
+
+* [ ] Show ML prediction separately from final decision context
+* [ ] Show macro weather vs symbol forecast clearly
+* [ ] Show blocked / risk-reduced / boosted reason labels
+* [ ] Keep Research as signal visibility, not auto-execution
+
+### Validation scenarios
+
+* [ ] BTC/ETH bearish + SOL strongly bullish = allowed but risk-reduced
+* [ ] BTC/ETH bearish + SOL neutral/weak = blocked or downgraded
+* [ ] BTC/ETH bullish + SOL bullish = allowed normal or boosted
+* [ ] Stocks remain unscoped by crypto macro sentiment
 
 ---
 
@@ -410,28 +454,27 @@ System fully works from market data through durable paper state.
 
 ---
 
-# Pre-Phase 10 Carry-Forward Items
+# Carry-Forward Items Before Phase 11
 
-These are real incomplete items found during the checklist review, but they do **not** block Phase 10 ledger durability unless explicitly pulled forward.
+These are real incomplete items, but they should remain scoped instead of being allowed to blur into unrelated feature work.
 
-* [ ] True crypto watchlist/promoted layer is still deferred.
-* [ ] Research page shows crypto scope but no true research/signal population yet.
-* [ ] Selected crypto symbol and tab/filter persistence still need frontend polish.
-* [ ] Empty states still need better distinction, especially no paper positions vs reset state.
-* [ ] Redis `candle_closed` should still receive explicit pub/sub validation in end-to-end testing.
-* [ ] ML prediction/SHAP UI can still be improved after durable ledger work.
+* [ ] Phase 5: explicit Redis `candle_closed` pub/sub validation remains a later end-to-end integration check.
+* [ ] Phase 9.1: expose sentiment-risk decision context so Research can show macro weather, symbol forecast, and final decision separately from raw ML prediction.
+* [ ] ML prediction/SHAP UI can still be improved, but should not block Phase 9.1 unless directly needed for decision visibility.
+* [ ] Auto-promoted Research candidates are approved as a future Phase 2B concept, but should not be mixed into Phase 2A manual promoted-list validation.
 
 ---
 
 # Next Actual Phase
 
 ```text
-Phase 10 — Crypto Paper Ledger Durability
+Phase 9.1 — Decision Layer Visibility
 
-Proceed with backend persistence design:
-- balances
-- positions
-- fills
-- optional paper orders
-Start with schema design.
+Proceed with a visibility-only patch:
+- expose macro_sentiment_bias
+- expose symbol_sentiment_bias
+- expose final_sentiment_decision
+- expose risk-reduced / blocked / boosted reason
+- do not change execution behavior yet
 ```
+

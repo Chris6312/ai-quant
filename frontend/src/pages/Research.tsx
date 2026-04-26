@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  clearResearchCryptoWatchlist,
   getMlPredictions,
   getResearchScope,
+  setResearchCryptoWatchlist,
   type MlPredictionRow,
   type MlPredictionsResponse,
   type ResearchScopeResponse,
@@ -56,14 +58,17 @@ function buildCryptoScopeItems(
     return [];
   }
 
+  const promoted = new Set(scope.crypto_promoted_symbols);
   return scope.crypto_watchlist_symbols.map((symbol) => ({
     symbol,
     asset_class: "crypto",
     added_at: "",
-    added_by: "crypto_scope",
+    added_by: promoted.has(symbol) ? "promoted_crypto" : "crypto_scope",
     research_score: null,
     is_active: true,
-    notes: "Derived from backend crypto scope",
+    notes: promoted.has(symbol)
+      ? "Research-only promoted crypto"
+      : "Derived from backend crypto scope",
     scope_origin: "crypto_scope",
   }));
 }
@@ -461,43 +466,35 @@ const Research: React.FC = () => {
   const [scope, setScope] = useState<ResearchScopeResponse | null>(null);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [scopeLoading, setScopeLoading] = useState(true);
+  const [scopeUpdating, setScopeUpdating] = useState(false);
   const [predictions, setPredictions] = useState<MlPredictionsResponse | null>(
     null,
   );
   const [predictionsError, setPredictionsError] = useState<string | null>(null);
   const [predictionsLoading, setPredictionsLoading] = useState(true);
 
+  const loadScope = useCallback(async (): Promise<void> => {
+    try {
+      const payload = await getResearchScope();
+      setScope(payload);
+      setScopeError(null);
+    } catch {
+      setScopeError("Crypto scope unavailable");
+    } finally {
+      setScopeLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
-
-    const loadScope = async (): Promise<void> => {
-      try {
-        const payload = await getResearchScope();
-        if (active) {
-          setScope(payload);
-          setScopeError(null);
-        }
-      } catch {
-        if (active) {
-          setScopeError("Crypto scope unavailable");
-        }
-      } finally {
-        if (active) {
-          setScopeLoading(false);
-        }
-      }
-    };
-
     void loadScope();
     const intervalId = window.setInterval(() => {
       void loadScope();
     }, 30000);
 
     return () => {
-      active = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [loadScope]);
 
   useEffect(() => {
     let active = true;
@@ -606,6 +603,51 @@ const Research: React.FC = () => {
     rawPredictionCount - predictionCount,
     0,
   );
+  const promotedSymbols = scope?.crypto_promoted_symbols ?? [];
+  const promotedSymbolSet = useMemo(
+    () => new Set(promotedSymbols),
+    [promotedSymbols],
+  );
+  const selectedIsCrypto = selected
+    ? promotedSymbolSet.has(selected) ||
+      (scope?.crypto_universe_symbols.includes(selected) ?? false)
+    : false;
+  const selectedIsPromoted = selected ? promotedSymbolSet.has(selected) : false;
+  const cryptoScopeSource = scope?.crypto_watchlist_source ?? "crypto scope";
+
+  const updatePromotedSymbols = async (symbols: string[]): Promise<void> => {
+    setScopeUpdating(true);
+    try {
+      await setResearchCryptoWatchlist(symbols);
+      await loadScope();
+    } catch {
+      setScopeError("Crypto promoted list update failed");
+    } finally {
+      setScopeUpdating(false);
+    }
+  };
+
+  const toggleSelectedPromotion = (): void => {
+    if (!selected || !selectedIsCrypto || scopeUpdating) {
+      return;
+    }
+    const nextSymbols = selectedIsPromoted
+      ? promotedSymbols.filter((symbol) => symbol !== selected)
+      : [...promotedSymbols, selected];
+    void updatePromotedSymbols(nextSymbols);
+  };
+
+  const clearPromotedSymbols = async (): Promise<void> => {
+    setScopeUpdating(true);
+    try {
+      await clearResearchCryptoWatchlist();
+      await loadScope();
+    } catch {
+      setScopeError("Crypto promoted list reset failed");
+    } finally {
+      setScopeUpdating(false);
+    }
+  };
 
   return (
     <div className="page active">
@@ -616,20 +658,40 @@ const Research: React.FC = () => {
               Research scope · {stockCount} stock · {cryptoCount} crypto ·{" "}
               {signalCount} tradable / {predictionCount} latest predictions
             </span>
-            <button
-              onClick={() => {
-                refresh();
-              }}
-              style={{
-                fontSize: 9,
-                color: "var(--text3)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              ↻ refresh
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {promotedSymbols.length > 0 ? (
+                <button
+                  disabled={scopeUpdating}
+                  onClick={() => {
+                    void clearPromotedSymbols();
+                  }}
+                  style={{
+                    fontSize: 9,
+                    color: "var(--amber)",
+                    background: "none",
+                    border: "none",
+                    cursor: scopeUpdating ? "wait" : "pointer",
+                  }}
+                >
+                  clear promoted
+                </button>
+              ) : null}
+              <button
+                onClick={() => {
+                  refresh();
+                  void loadScope();
+                }}
+                style={{
+                  fontSize: 9,
+                  color: "var(--text3)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                ↻ refresh
+              </button>
+            </div>
           </div>
 
           <div
@@ -641,9 +703,14 @@ const Research: React.FC = () => {
               lineHeight: 1.7,
             }}
           >
-            Stocks come from the research watchlist. Crypto comes from backend
-            crypto scope truth; persisted ML predictions are shown as
-            observations unless they clear the confidence gate.
+            Stocks come from the research watchlist. Crypto uses the
+            Research-only promoted list when populated, otherwise it falls back
+            to backend crypto scope truth. This does not change workers, ML,
+            paper trading, or live execution.
+            <div style={{ marginTop: 6, color: "var(--text4)" }}>
+              Crypto scope source: {cryptoScopeSource}. Promoted symbols: {" "}
+              {promotedSymbols.length > 0 ? promotedSymbols.join(", ") : "none"}.
+            </div>
             {allPredictionsSkipped ? (
               <div style={{ marginTop: 6, color: "var(--amber)" }}>
                 No high-confidence crypto signals right now. {skipCount} latest
@@ -769,7 +836,9 @@ const Research: React.FC = () => {
                       <td>
                         <span className="wl-source">
                           {item.scope_origin === "crypto_scope"
-                            ? "crypto scope"
+                            ? (item.added_by === "promoted_crypto"
+                                ? "promoted"
+                                : "crypto scope")
                             : (item.added_by ?? "manual")}
                         </span>
                       </td>
@@ -799,6 +868,16 @@ const Research: React.FC = () => {
             {selected && !predictionsLoading && !selectedPrediction && (
               <span className="card-badge cb-amber">No prediction</span>
             )}
+            {selectedIsCrypto ? (
+              <button
+                disabled={scopeUpdating}
+                onClick={toggleSelectedPromotion}
+                className="card-badge cb-blue"
+                style={{ cursor: scopeUpdating ? "wait" : "pointer" }}
+              >
+                {selectedIsPromoted ? "Unpromote" : "Promote"}
+              </button>
+            ) : null}
           </div>
 
           {!selected ? (

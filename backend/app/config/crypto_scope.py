@@ -34,6 +34,14 @@ CRYPTO_ML_SYMBOL_ALIASES: Final[dict[str, str]] = {
 }
 """Storage aliases for the ML candle lane. Runtime can still display DOGE/USD."""
 
+_RESEARCH_CRYPTO_PROMOTED_SYMBOLS: list[str] = []
+"""Process-local soft watchlist for Research visibility only.
+
+This intentionally does not feed worker, ML, or execution scope. It exists so
+Phase 2A can let the operator focus the Research page without changing runtime
+behavior before the later execution-scope phases.
+"""
+
 
 def canonicalize_crypto_ml_symbol(symbol: str) -> str:
     """Return the canonical storage symbol for crypto ML candles and scoring."""
@@ -55,9 +63,14 @@ CRYPTO_SCOPE_MODEL: Final[dict[str, str]] = {
         "a narrower active set."
     ),
     "crypto_watchlist": (
-        "Operator-facing crypto list. It is intentionally identical to the "
-        "crypto universe right now so the app does not invent a second source "
-        "of truth before runtime derivation exists."
+        "Runtime-facing crypto list. It intentionally remains identical to the "
+        "crypto universe right now so workers and ML do not inherit the Phase "
+        "2A research-only promoted list."
+    ),
+    "research_crypto_promoted": (
+        "Operator-facing soft watchlist for the Research page. If empty, "
+        "Research falls back to the full crypto universe. It is visibility-only "
+        "and does not drive workers, ML, paper trading, or live execution."
     ),
     "active_runtime_set": (
         "Symbols that currently have runtime workers attached. This starts "
@@ -71,7 +84,8 @@ CRYPTO_SCOPE_MODEL: Final[dict[str, str]] = {
 
 CRYPTO_SCOPE_MAPPING: Final[dict[str, str]] = {
     "crypto_universe": "KRAKEN_UNIVERSE",
-    "crypto_watchlist": "Same as crypto universe for the current crypto-first phase",
+    "crypto_watchlist": "Same as crypto universe for runtime during this phase",
+    "research_crypto_promoted": "Research-only soft watchlist with universe fallback",
     "active_runtime_set": "Derived from attached runtime workers when available",
     "prediction_set": "Derived from persisted inference output",
 }
@@ -87,9 +101,60 @@ def list_crypto_universe_symbols() -> list[str]:
 
 
 def list_crypto_watchlist_symbols() -> list[str]:
-    """Return the current operator-facing crypto watchlist symbols."""
+    """Return the runtime-facing crypto watchlist symbols."""
 
     return list_crypto_universe_symbols()
+
+
+def _normalize_research_symbol(symbol: str) -> str:
+    return symbol.strip().upper()
+
+
+def list_research_crypto_promoted_symbols() -> list[str]:
+    """Return the Research-only promoted crypto symbols."""
+
+    return list(_RESEARCH_CRYPTO_PROMOTED_SYMBOLS)
+
+
+def list_research_crypto_scope_symbols() -> list[str]:
+    """Return Research crypto scope, falling back to full universe when empty."""
+
+    promoted = list_research_crypto_promoted_symbols()
+    if promoted:
+        return promoted
+    return list_crypto_universe_symbols()
+
+
+def get_research_crypto_scope_source() -> str:
+    """Return a plain-English source label for the Research crypto scope."""
+
+    if _RESEARCH_CRYPTO_PROMOTED_SYMBOLS:
+        return "research promoted crypto"
+    return "crypto universe"
+
+
+def set_research_crypto_promoted_symbols(symbols: list[str]) -> list[str]:
+    """Replace the Research-only promoted crypto list after universe validation."""
+
+    normalized_unique = {_normalize_research_symbol(symbol) for symbol in symbols}
+    universe = list_crypto_universe_symbols()
+    universe_set = set(universe)
+    invalid_symbols = sorted(normalized_unique - universe_set)
+    if invalid_symbols:
+        invalid_text = ", ".join(invalid_symbols)
+        raise ValueError(f"Unknown crypto symbol(s): {invalid_text}")
+
+    _RESEARCH_CRYPTO_PROMOTED_SYMBOLS.clear()
+    _RESEARCH_CRYPTO_PROMOTED_SYMBOLS.extend(
+        symbol for symbol in universe if symbol in normalized_unique
+    )
+    return list_research_crypto_promoted_symbols()
+
+
+def clear_research_crypto_promoted_symbols() -> None:
+    """Clear the Research-only promoted crypto list."""
+
+    _RESEARCH_CRYPTO_PROMOTED_SYMBOLS.clear()
 
 
 def is_phase_1_crypto_symbol(symbol: str) -> bool:

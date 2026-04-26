@@ -4,19 +4,31 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_research_repository, get_session
 from app.config.crypto_scope import (
+    clear_research_crypto_promoted_symbols,
+    get_research_crypto_scope_source,
     list_crypto_universe_symbols,
-    list_crypto_watchlist_symbols,
+    list_research_crypto_promoted_symbols,
+    list_research_crypto_scope_symbols,
+    set_research_crypto_promoted_symbols,
 )
 from app.db.models import CongressTradeRow, InsiderTradeRow, ResearchSignalRow
 from app.repositories.research import ResearchRepository
 from app.repositories.watchlist import WatchlistRepository
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+
+class ResearchCryptoWatchlistRequest(BaseModel):
+    """Research-only soft crypto watchlist request body."""
+
+    symbols: list[str] = Field(default_factory=list)
+
 
 
 @router.get("/scope")
@@ -34,7 +46,8 @@ async def get_research_scope(
     ]
     stock_symbols = [row.symbol for row in stock_rows]
     crypto_universe_symbols = list_crypto_universe_symbols()
-    crypto_watchlist_symbols = list_crypto_watchlist_symbols()
+    crypto_watchlist_symbols = list_research_crypto_scope_symbols()
+    promoted_symbols = list_research_crypto_promoted_symbols()
 
     return {
         "stock_watchlist_symbols": stock_symbols,
@@ -45,7 +58,48 @@ async def get_research_scope(
         "crypto_universe_source": "KRAKEN_UNIVERSE",
         "crypto_watchlist_symbols": crypto_watchlist_symbols,
         "crypto_watchlist_count": len(crypto_watchlist_symbols),
-        "crypto_watchlist_source": "crypto universe",
+        "crypto_watchlist_source": get_research_crypto_scope_source(),
+        "crypto_promoted_symbols": promoted_symbols,
+        "crypto_promoted_count": len(promoted_symbols),
+        "crypto_promoted_source": "research-only soft watchlist",
+    }
+
+
+@router.put("/crypto-watchlist")
+async def set_research_crypto_watchlist(
+    request: ResearchCryptoWatchlistRequest,
+) -> dict[str, object]:
+    """Set Research-only promoted crypto symbols without changing runtime scope."""
+
+    try:
+        promoted_symbols = set_research_crypto_promoted_symbols(request.symbols)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    scope_symbols = list_research_crypto_scope_symbols()
+    return {
+        "crypto_promoted_symbols": promoted_symbols,
+        "crypto_promoted_count": len(promoted_symbols),
+        "crypto_watchlist_symbols": scope_symbols,
+        "crypto_watchlist_count": len(scope_symbols),
+        "crypto_watchlist_source": get_research_crypto_scope_source(),
+        "runtime_scope_changed": False,
+    }
+
+
+@router.delete("/crypto-watchlist")
+async def clear_research_crypto_watchlist() -> dict[str, object]:
+    """Clear Research-only promoted crypto symbols and restore universe fallback."""
+
+    clear_research_crypto_promoted_symbols()
+    scope_symbols = list_research_crypto_scope_symbols()
+    return {
+        "crypto_promoted_symbols": [],
+        "crypto_promoted_count": 0,
+        "crypto_watchlist_symbols": scope_symbols,
+        "crypto_watchlist_count": len(scope_symbols),
+        "crypto_watchlist_source": get_research_crypto_scope_source(),
+        "runtime_scope_changed": False,
     }
 
 

@@ -148,9 +148,32 @@ export type ResearchScopeResponse = {
   crypto_watchlist_symbols: string[];
   crypto_watchlist_count: number;
   crypto_watchlist_source: string;
+  crypto_promoted_symbols: string[];
+  crypto_promoted_count: number;
+  crypto_promoted_source: string;
+};
+
+export type ResearchCryptoWatchlistResponse = {
+  crypto_promoted_symbols: string[];
+  crypto_promoted_count: number;
+  crypto_watchlist_symbols: string[];
+  crypto_watchlist_count: number;
+  crypto_watchlist_source: string;
+  runtime_scope_changed: boolean;
 };
 
 export const getResearchScope = () => requestJson<ResearchScopeResponse>('/research/scope');
+
+export const setResearchCryptoWatchlist = (symbols: string[]) =>
+  requestJson<ResearchCryptoWatchlistResponse>('/research/crypto-watchlist', {
+    method: 'PUT',
+    body: JSON.stringify({ symbols }),
+  });
+
+export const clearResearchCryptoWatchlist = () =>
+  requestJson<ResearchCryptoWatchlistResponse>('/research/crypto-watchlist', {
+    method: 'DELETE',
+  });
 
 // ── Watchlist ─────────────────────────────────────────────────────────────
 export type WatchlistItem = {
