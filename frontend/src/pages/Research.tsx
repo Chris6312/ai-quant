@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { getResearchScope, type ResearchScopeResponse } from '../api';
+import {
+  getMlPredictions,
+  getResearchScope,
+  type MlPredictionRow,
+  type MlPredictionsResponse,
+  type ResearchScopeResponse,
+} from '../api';
 import { useResearch } from '../hooks/useResearch';
 import { useWatchlist, type WatchlistFilter, type WatchlistItem } from '../hooks/useWatchlist';
 import type { CongressTrade, InsiderTrade, ResearchSignal } from '../hooks/useResearch';
@@ -166,14 +172,122 @@ const FILTERS: { key: WatchlistFilter; label: string }[] = [
   { key: 'crypto', label: 'Crypto' },
 ];
 
+const TABS = ['signals', 'congress', 'insider'] as const;
+type ResearchTab = (typeof TABS)[number];
+
+const STORAGE_KEYS = {
+  filter: 'research.filter',
+  selected: 'research.selected_symbol',
+  tab: 'research.tab',
+} as const;
+
+function readStoredValue<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored && allowed.includes(stored as T)) {
+      return stored as T;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function readStoredSymbol(): string {
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.selected) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function storeValue(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Browser storage can be disabled; UI should still work without persistence.
+  }
+}
+
+function formatConfidence(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCandleTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
+}
+
+function predictionBadgeClass(row: MlPredictionRow): string {
+  return row.action === 'signal' ? 'cb-green' : 'cb-amber';
+}
+
+function PredictionFeed({ prediction }: { prediction: MlPredictionRow | null }): React.ReactElement {
+  if (!prediction) {
+    return (
+      <div style={{ padding: '14px 0', fontSize: 11, color: 'var(--text3)' }}>
+        No persisted ML prediction for this symbol yet. Run prediction generation before treating this symbol as signal-ready.
+      </div>
+    );
+  }
+
+  const gate = prediction.sentiment_gate;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+      <div
+        style={{
+          background: 'var(--bg2)',
+          border: '0.5px solid var(--border)',
+          borderRadius: 'var(--radius-md)',
+          padding: '10px 12px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>
+              ML prediction · {prediction.direction.toUpperCase()}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3 }}>
+              {prediction.action.toUpperCase()} · confidence {formatConfidence(prediction.confidence)} · threshold{' '}
+              {formatConfidence(prediction.confidence_threshold)}
+            </div>
+          </div>
+          <span className={`card-badge ${predictionBadgeClass(prediction)}`}>{prediction.action}</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 8, lineHeight: 1.6 }}>
+          Candle: {formatCandleTime(prediction.candle_time)}
+          <br />
+          Top driver: {prediction.top_driver || 'not available'}
+          {gate ? (
+            <>
+              <br />
+              Sentiment: {gate.state} · {gate.sentiment_bias} · {gate.reason}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const Research: React.FC = () => {
   const { watchlist, loading: wlLoading, error: wlError, refresh } = useWatchlist(30000);
-  const [filter, setFilter] = useState<WatchlistFilter>('all');
-  const [selected, setSelected] = useState<string>('');
-  const [tab, setTab] = useState<'signals' | 'congress' | 'insider'>('signals');
+  const [filter, setFilter] = useState<WatchlistFilter>(() =>
+    readStoredValue<WatchlistFilter>(STORAGE_KEYS.filter, 'all', ['all', 'stock', 'crypto']),
+  );
+  const [selected, setSelected] = useState<string>(() => readStoredSymbol());
+  const [tab, setTab] = useState<ResearchTab>(() =>
+    readStoredValue<ResearchTab>(STORAGE_KEYS.tab, 'signals', TABS),
+  );
   const [scope, setScope] = useState<ResearchScopeResponse | null>(null);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [scopeLoading, setScopeLoading] = useState(true);
+  const [predictions, setPredictions] = useState<MlPredictionsResponse | null>(null);
+  const [predictionsError, setPredictionsError] = useState<string | null>(null);
+  const [predictionsLoading, setPredictionsLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -207,6 +321,50 @@ const Research: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadPredictions = async (): Promise<void> => {
+      try {
+        const payload = await getMlPredictions(200, 'crypto');
+        if (active) {
+          setPredictions(payload);
+          setPredictionsError(null);
+        }
+      } catch {
+        if (active) {
+          setPredictionsError('Persisted ML predictions unavailable');
+        }
+      } finally {
+        if (active) {
+          setPredictionsLoading(false);
+        }
+      }
+    };
+
+    void loadPredictions();
+    const intervalId = window.setInterval(() => {
+      void loadPredictions();
+    }, 60000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    storeValue(STORAGE_KEYS.filter, filter);
+  }, [filter]);
+
+  useEffect(() => {
+    storeValue(STORAGE_KEYS.selected, selected);
+  }, [selected]);
+
+  useEffect(() => {
+    storeValue(STORAGE_KEYS.tab, tab);
+  }, [tab]);
+
   const stockItems = useMemo(() => buildStockScopeItems(watchlist), [watchlist]);
   const cryptoItems = useMemo(() => buildCryptoScopeItems(scope), [scope]);
   const allItems = useMemo(() => [...stockItems, ...cryptoItems], [cryptoItems, stockItems]);
@@ -222,18 +380,26 @@ const Research: React.FC = () => {
     }
   }, [allItems, cryptoItems, filter, stockItems]);
 
+  const predictionBySymbol = useMemo(() => {
+    const rows = predictions?.predictions ?? [];
+    return new Map(rows.map((row) => [row.symbol, row]));
+  }, [predictions]);
+
+  const selectedPrediction = selected ? predictionBySymbol.get(selected) ?? null : null;
+
   const { signals, congress, insider, loading: rLoading, hasData, error: rError } = useResearch(selected, 60000);
 
   const stockCount = scope?.stock_watchlist_count ?? stockItems.length;
   const cryptoCount = scope?.crypto_watchlist_count ?? cryptoItems.length;
   const scopeUnavailable = !scope && scopeError;
+  const predictionCount = predictions?.count ?? 0;
 
   return (
     <div className="page active">
       <div className="grid-2">
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Research scope · {stockCount} stock · {cryptoCount} crypto</span>
+            <span className="card-title">Research scope · {stockCount} stock · {cryptoCount} crypto · {predictionCount} signals</span>
             <button
               onClick={() => {
                 refresh();
@@ -245,7 +411,7 @@ const Research: React.FC = () => {
           </div>
 
           <div style={{ padding: '10px 14px', borderBottom: '0.5px solid var(--border)', fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-            Stocks come from the research watchlist. Crypto comes from backend crypto scope truth, which currently mirrors the canonical universe.
+            Stocks come from the research watchlist. Crypto comes from backend crypto scope truth; persisted ML predictions are now shown as the signal layer.
           </div>
 
           <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
@@ -326,20 +492,27 @@ const Research: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <span className="card-title">{selected ? `Research · ${selected}` : 'Select a symbol'}</span>
-            {selected && !hasData && !rLoading && <span className="card-badge cb-amber">No data yet</span>}
-            {selected && hasData && <span className="card-badge cb-green">Live data</span>}
+            {selected && predictionsLoading && <span className="card-badge cb-amber">Loading signals</span>}
+            {selected && !predictionsLoading && selectedPrediction && (
+              <span className={`card-badge ${predictionBadgeClass(selectedPrediction)}`}>
+                ML {selectedPrediction.action}
+              </span>
+            )}
+            {selected && !predictionsLoading && !selectedPrediction && (
+              <span className="card-badge cb-amber">No prediction</span>
+            )}
           </div>
 
           {!selected ? (
             <div style={{ padding: '24px 16px', fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
-              Click a symbol in the scope panel to view its research signals
+              Click a symbol in the scope panel to view persisted ML signals and research context
             </div>
           ) : rLoading ? (
             <div style={{ padding: '20px 16px', fontSize: 11, color: 'var(--text3)' }}>Loading…</div>
           ) : (
             <>
               <div style={{ display: 'flex', borderBottom: '0.5px solid var(--border)' }}>
-                {(['signals', 'congress', 'insider'] as const).map((item) => (
+                {TABS.map((item) => (
                   <button
                     key={item}
                     onClick={() => setTab(item)}
@@ -359,19 +532,28 @@ const Research: React.FC = () => {
                   >
                     {item}
                     <span style={{ marginLeft: 4, opacity: 0.6 }}>
-                      ({item === 'signals' ? signals.length : item === 'congress' ? congress.length : insider.length})
+                      ({item === 'signals' ? (selectedPrediction ? 1 : 0) + signals.length : item === 'congress' ? congress.length : insider.length})
                     </span>
                   </button>
                 ))}
               </div>
 
-              {rError && (
-                <div style={{ padding: '16px', fontSize: 11, color: 'var(--red)' }}>{rError}</div>
+              {predictionsError && (
+                <div style={{ padding: '16px', fontSize: 11, color: 'var(--red)' }}>{predictionsError}</div>
               )}
 
-              {!rError && (
+              {rError && !selectedPrediction && (
+                <div style={{ padding: '16px', fontSize: 11, color: 'var(--amber)' }}>{rError}</div>
+              )}
+
+              {!predictionsError && (
                 <div style={{ padding: '12px 16px' }}>
-                  {tab === 'signals' ? <SignalFeed signals={signals} /> : null}
+                  {tab === 'signals' ? (
+                    <>
+                      <PredictionFeed prediction={selectedPrediction} />
+                      <SignalFeed signals={signals} />
+                    </>
+                  ) : null}
                   {tab === 'congress' ? <CongressFeed trades={congress} /> : null}
                   {tab === 'insider' ? <InsiderFeed trades={insider} /> : null}
                 </div>
