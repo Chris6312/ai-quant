@@ -104,6 +104,8 @@ type Fold = {
   sharpe: number;
   acc: number;
   best?: boolean;
+  eligibilityStatus: string;
+  eligibilityReason: string;
 };
 
 type ModelCardData = {
@@ -409,9 +411,11 @@ function PipeConnector({ done }: { done: boolean }): React.ReactElement {
 }
 
 function FoldRow({ fold }: { fold: Fold }): React.ReactElement {
-  const pass = fold.sharpe >= 0.5;
+  const statusLabel = fold.best ? 'Active' : fold.eligibilityStatus === 'eligible' ? 'Eligible' : 'Research-only';
+  const statusTone: BadgeVariant = fold.best ? 'green' : fold.eligibilityStatus === 'eligible' ? 'blue' : 'muted';
+  const statusColors = BADGE_TONES[statusTone];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 54px', gap: 10, alignItems: 'center', padding: fold.best ? '7px 6px' : '7px 0', borderBottom: `0.5px solid ${S.border}`, background: fold.best ? 'rgba(0,229,160,0.03)' : 'transparent', borderRadius: fold.best ? S.rSm : 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 84px', gap: 10, alignItems: 'center', padding: fold.best ? '7px 6px' : '7px 0', borderBottom: `0.5px solid ${S.border}`, background: fold.best ? 'rgba(0,229,160,0.03)' : 'transparent', borderRadius: fold.best ? S.rSm : 0 }}>
       <span style={{ fontSize: 10, color: fold.best ? S.green : S.text3 }}>{fold.label}{fold.best ? ' ★' : ''}</span>
       <div>
         <div style={{ fontSize: 9, color: S.text3, marginBottom: 3 }}>{fold.window}</div>
@@ -422,7 +426,7 @@ function FoldRow({ fold }: { fold: Fold }): React.ReactElement {
       </div>
       <span style={{ textAlign: 'right', fontSize: 10, color: fold.sharpe >= 0 ? S.green : S.red, fontVariantNumeric: 'tabular-nums', fontWeight: fold.best ? 600 : 400 }}>{fold.sharpe >= 0 ? '+' : ''}{fold.sharpe.toFixed(2)}</span>
       <span style={{ textAlign: 'right', fontSize: 10, color: fold.best ? S.green : S.text2, fontVariantNumeric: 'tabular-nums' }}>{fold.acc.toFixed(1)}%</span>
-      <span style={{ textAlign: 'center', fontSize: 8, padding: '1px 5px', borderRadius: S.rSm, textTransform: 'uppercase', letterSpacing: '0.08em', background: pass ? S.greenBg : S.redBg, color: pass ? S.green : S.red, border: `0.5px solid ${pass ? S.green3 : S.red3}` }}>{pass ? 'Pass' : 'Fail'}</span>
+      <span title={fold.eligibilityReason.replaceAll('_', ' ')} style={{ textAlign: 'center', fontSize: 8, padding: '1px 5px', borderRadius: S.rSm, textTransform: 'uppercase', letterSpacing: '0.08em', background: statusColors.bg, color: statusColors.color, border: `0.5px solid ${statusColors.border}` }}>{statusLabel}</span>
     </div>
   );
 }
@@ -865,6 +869,8 @@ const MachineLearning: React.FC = () => {
       sharpe: fold.validation_sharpe,
       acc: fold.validation_accuracy * 100,
       best: fold.fold_index === activeCryptoModel.best_fold,
+      eligibilityStatus: fold.eligibility_status ?? (fold.fold_index === activeCryptoModel.best_fold ? "active" : "research_only"),
+      eligibilityReason: fold.eligibility_reason ?? "not_evaluated",
     }));
   }, [activeCryptoModel]);
 
@@ -1128,8 +1134,8 @@ const MachineLearning: React.FC = () => {
         <div style={{ padding: '10px 16px' }}>
           {activeCryptoModel ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 54px', gap: 10, padding: '0 0 6px', borderBottom: `0.5px solid ${S.border}` }}>
-                {['Fold', 'Time window', 'Sharpe', 'Accuracy', 'Status'].map((h) => <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3 }}>{h}</span>)}
+              <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 84px', gap: 10, padding: '0 0 6px', borderBottom: `0.5px solid ${S.border}` }}>
+                {['Fold', 'Time window', 'Sharpe', 'Accuracy', 'Eligibility'].map((h) => <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3 }}>{h}</span>)}
               </div>
               <div style={{ marginTop: 6 }}>
                 {liveCryptoFolds.length > 0 ? (

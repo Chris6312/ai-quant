@@ -571,6 +571,8 @@ def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryReco
                 "n_train_samples": fold.n_train_samples,
                 "n_test_samples": fold.n_test_samples,
                 "model_path": fold.model_path,
+                "eligibility_status": getattr(fold, "eligibility_status", "research_only"),
+                "eligibility_reason": getattr(fold, "eligibility_reason", "not_evaluated"),
             }
         )
     return serialized
@@ -612,6 +614,8 @@ def _register_training_result(
         "latest_job_id": latest_job_id,
         "feature_importances": result.feature_importances,
         "folds": serialized_folds,
+        "selection_regime": getattr(result, "selection_regime", "not_evaluated"),
+        "selection_policy": getattr(result, "selection_policy", {}),
         "created_at": trained_at,
     }
 

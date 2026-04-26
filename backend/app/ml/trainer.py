@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import date, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 import lightgbm as lgb
@@ -47,6 +48,14 @@ class TrainerConfig:
         }
     )
     model_dir: str = "models"
+    crypto_normal_max_age_days: int = 365
+    crypto_volatile_max_age_days: int = 180
+    crypto_min_validation_sharpe: float = 0.0
+    crypto_min_validation_accuracy: float = 0.25
+    crypto_min_test_samples: int = 300
+    crypto_volatility_ratio_threshold: float = 1.35
+    crypto_max_drawdown_threshold: float = -0.20
+    crypto_atr_percentile_threshold: float = 0.80
 
 
 @dataclass(slots=True, frozen=True)
@@ -64,6 +73,8 @@ class FoldResult:
     validation_sharpe: float
     passed: bool
     model_path: str
+    eligibility_status: str = "research_only"
+    eligibility_reason: str = "not_evaluated"
 
 
 @dataclass(slots=True, frozen=True)
@@ -80,6 +91,8 @@ class TrainResult:
     folds: list[FoldResult]
     fold_count: int
     best_fold_index: int
+    selection_regime: str = "not_evaluated"
+    selection_policy: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,6 +104,33 @@ class _TrainingSample:
     features: FeatureVector
     label: int
     next_return: float
+    symbol: str
+
+
+@dataclass(slots=True, frozen=True)
+class CryptoRegimeSnapshot:
+    """Current crypto regime inputs used to choose production fold age."""
+
+    regime: str
+    max_fold_age_days: int
+    btc_realized_vol_30d: float
+    btc_realized_vol_90d: float
+    btc_volatility_ratio: float
+    btc_max_drawdown_30d: float
+    average_atr_pct_14: float
+    atr_percentile_rank: float
+    reasons: tuple[str, ...]
+
+
+
+@dataclass(slots=True, frozen=True)
+class FoldSelectionResult:
+    """Result of applying production fold eligibility rules."""
+
+    best_fold: FoldResult
+    folds: list[FoldResult]
+    regime: str
+    policy: dict[str, object]
 
 
 class WalkForwardTrainer:
@@ -125,8 +165,7 @@ class WalkForwardTrainer:
             folds = [self._fallback_fold(samples)]
 
         fold_results: list[FoldResult] = []
-        best_fold: FoldResult | None = None
-        best_feature_importances: dict[str, float] | None = None
+        feature_importances_by_fold: dict[int, dict[str, float]] = {}
 
         total_folds = len(folds)
         for fold_index, fold in enumerate(folds, start=1):
@@ -139,16 +178,22 @@ class WalkForwardTrainer:
 
             fold_result, feature_importances = self._train_fold(asset_class, fold, fold_index)
             fold_results.append(fold_result)
-
-            if best_fold is None or fold_result.validation_sharpe > best_fold.validation_sharpe:
-                best_fold = fold_result
-                best_feature_importances = feature_importances
+            feature_importances_by_fold[fold_result.fold_index] = feature_importances
 
         if progress_callback is not None:
             progress_callback(total_folds, total_folds, "Training complete")
 
-        if best_fold is None or best_feature_importances is None:
-            raise ValueError("Unable to train a valid model from the provided candles")
+        selection = self._select_production_fold(
+            asset_class=asset_class,
+            candles=candles,
+            folds=fold_results,
+        )
+        fold_results = selection.folds
+        best_fold = selection.best_fold
+        best_feature_importances = feature_importances_by_fold.get(best_fold.fold_index)
+
+        if best_feature_importances is None:
+            raise ValueError("Unable to train a valid model from the selected fold")
 
         return TrainResult(
             asset_class=asset_class,
@@ -161,6 +206,8 @@ class WalkForwardTrainer:
             folds=fold_results,
             fold_count=len(fold_results),
             best_fold_index=best_fold.fold_index,
+            selection_regime=selection.regime,
+            selection_policy=selection.policy,
         )
 
     def _build_samples(
@@ -205,6 +252,7 @@ class WalkForwardTrainer:
                         features=features,
                         label=labels[index],
                         next_return=next_return,
+                        symbol=ordered[index].symbol,
                     )
                 )
 
@@ -222,9 +270,28 @@ class WalkForwardTrainer:
 
         if research_lookup is None:
             return None
+
         dated = research_lookup.get((symbol, sample_date))
         if dated is not None:
             return dated
+
+        candidate: ResearchInputs | None = None
+        closest_date: date | None = None
+
+        for key, value in research_lookup.items():
+            if not isinstance(key, tuple):
+                continue
+
+            key_symbol, key_date = key
+            if key_symbol == symbol and key_date <= sample_date and (
+                closest_date is None or key_date > closest_date
+            ):
+                closest_date = key_date
+                candidate = value
+
+        if candidate is not None:
+            return candidate
+
         return research_lookup.get(symbol)
 
     def _build_folds(
@@ -316,6 +383,242 @@ class WalkForwardTrainer:
         )
 
         return fold_result, feature_importances
+
+    def _select_production_fold(
+        self,
+        *,
+        asset_class: str,
+        candles: Sequence[Candle],
+        folds: Sequence[FoldResult],
+    ) -> FoldSelectionResult:
+        """Select the active production fold after applying age and quality gates."""
+
+        if not folds:
+            raise ValueError("Unable to train a valid model from the provided candles")
+
+        if asset_class != "crypto":
+            best = max(folds, key=lambda fold: fold.validation_sharpe)
+            stock_labeled = [
+                replace(
+                    fold,
+                    eligibility_status=(
+                        "active" if fold.fold_index == best.fold_index else "eligible"
+                    ),
+                    eligibility_reason="stock_selection_highest_sharpe",
+                )
+                for fold in folds
+            ]
+            active = next(
+                fold for fold in stock_labeled if fold.fold_index == best.fold_index
+            )
+            return FoldSelectionResult(
+                best_fold=active,
+                folds=stock_labeled,
+                regime="not_applicable",
+                policy={"selector": "highest_validation_sharpe"},
+            )
+
+        regime = self._detect_crypto_regime(candles)
+        reference_date = datetime.now(UTC).date()
+        min_test_end = reference_date - timedelta(days=regime.max_fold_age_days)
+        eligible: list[FoldResult] = []
+        labeled: list[FoldResult] = []
+
+        for fold in folds:
+            status, reason = self._crypto_fold_eligibility(
+                fold,
+                min_test_end=min_test_end,
+            )
+            updated = replace(fold, eligibility_status=status, eligibility_reason=reason)
+            labeled.append(updated)
+            if status == "eligible":
+                eligible.append(updated)
+
+        if not eligible:
+            raise ValueError(
+                "No production-eligible recent crypto fold passed model selection policy"
+            )
+
+        best = max(eligible, key=lambda fold: fold.validation_sharpe)
+        labeled = [
+            replace(
+                fold,
+                eligibility_status="active",
+                eligibility_reason="selected_highest_recent_sharpe",
+            )
+            if fold.fold_index == best.fold_index
+            else fold
+            for fold in labeled
+        ]
+        active = next(fold for fold in labeled if fold.fold_index == best.fold_index)
+        policy: dict[str, object] = {
+            "selector": "highest_recent_eligible_validation_sharpe",
+            "regime": regime.regime,
+            "max_fold_age_days": regime.max_fold_age_days,
+            "min_test_end": min_test_end.isoformat(),
+            "min_validation_sharpe": self.config.crypto_min_validation_sharpe,
+            "min_validation_accuracy": self.config.crypto_min_validation_accuracy,
+            "min_test_samples": self.config.crypto_min_test_samples,
+            "btc_realized_vol_30d": regime.btc_realized_vol_30d,
+            "btc_realized_vol_90d": regime.btc_realized_vol_90d,
+            "btc_volatility_ratio": regime.btc_volatility_ratio,
+            "btc_max_drawdown_30d": regime.btc_max_drawdown_30d,
+            "average_atr_pct_14": regime.average_atr_pct_14,
+            "atr_percentile_rank": regime.atr_percentile_rank,
+            "regime_reasons": list(regime.reasons),
+        }
+        return FoldSelectionResult(
+            best_fold=active,
+            folds=labeled,
+            regime=regime.regime,
+            policy=policy,
+        )
+
+    def _crypto_fold_eligibility(
+        self,
+        fold: FoldResult,
+        *,
+        min_test_end: date,
+    ) -> tuple[str, str]:
+        """Return production eligibility label and reason for one crypto fold."""
+
+        if fold.test_end.date() < min_test_end:
+            return "research_only", "too_old_for_current_regime"
+        if fold.validation_sharpe <= self.config.crypto_min_validation_sharpe:
+            return "research_only", "sharpe_not_positive"
+        if fold.validation_accuracy < self.config.crypto_min_validation_accuracy:
+            return "research_only", "accuracy_below_threshold"
+        if fold.n_test_samples < self.config.crypto_min_test_samples:
+            return "research_only", "insufficient_test_samples"
+        if not Path(fold.model_path).exists():
+            return "research_only", "missing_artifact"
+        return "eligible", "passes_production_policy"
+
+    def _detect_crypto_regime(self, candles: Sequence[Candle]) -> CryptoRegimeSnapshot:
+        """Detect whether current crypto conditions require a shorter fold age window."""
+
+        crypto_candles = [candle for candle in candles if candle.asset_class == "crypto"]
+        btc_candles = sorted(
+            (
+                candle
+                for candle in crypto_candles
+                if candle.symbol.upper() in {"BTC/USD", "BTCUSD", "XBT/USD", "XBTUSD"}
+            ),
+            key=lambda candle: candle.time,
+        )
+        btc_closes = [candle.close for candle in btc_candles if candle.close > 0]
+        btc_returns = self._daily_returns(btc_closes)
+        btc_vol_30d = self._realized_volatility(btc_returns[-30:])
+        btc_vol_90d = self._realized_volatility(btc_returns[-90:])
+        btc_ratio = btc_vol_30d / btc_vol_90d if btc_vol_90d > 0 else 0.0
+        btc_drawdown = self._max_drawdown(btc_closes[-30:])
+        atr_values = self._atr_pct_values(crypto_candles)
+        recent_atr = self._recent_average(atr_values, 30)
+        atr_percentile = self._percentile_rank(atr_values, recent_atr)
+
+        reasons: list[str] = []
+        if btc_ratio > self.config.crypto_volatility_ratio_threshold:
+            reasons.append("btc_30d_vol_gt_90d_vol_threshold")
+        if btc_drawdown <= self.config.crypto_max_drawdown_threshold:
+            reasons.append("btc_30d_drawdown_below_threshold")
+        if atr_percentile >= self.config.crypto_atr_percentile_threshold:
+            reasons.append("average_atr_pct_above_percentile_threshold")
+
+        very_volatile = len(reasons) > 0
+        return CryptoRegimeSnapshot(
+            regime="very_volatile" if very_volatile else "normal_stable",
+            max_fold_age_days=(
+                self.config.crypto_volatile_max_age_days
+                if very_volatile
+                else self.config.crypto_normal_max_age_days
+            ),
+            btc_realized_vol_30d=btc_vol_30d,
+            btc_realized_vol_90d=btc_vol_90d,
+            btc_volatility_ratio=btc_ratio,
+            btc_max_drawdown_30d=btc_drawdown,
+            average_atr_pct_14=recent_atr,
+            atr_percentile_rank=atr_percentile,
+            reasons=tuple(reasons),
+        )
+
+    def _daily_returns(self, closes: Sequence[float]) -> list[float]:
+        """Return close-to-close percentage returns."""
+
+        returns: list[float] = []
+        for previous, current in pairwise(closes):
+            if previous <= 0:
+                continue
+            returns.append((current - previous) / previous)
+        return returns
+
+    def _realized_volatility(self, returns: Sequence[float]) -> float:
+        """Return daily realized volatility for the supplied return window."""
+
+        if len(returns) < 2:
+            return 0.0
+        return float(np.std(np.asarray(returns, dtype=float), ddof=1))
+
+    def _max_drawdown(self, closes: Sequence[float]) -> float:
+        """Return the most negative drawdown in a close-price window."""
+
+        if not closes:
+            return 0.0
+        peak = closes[0]
+        max_drawdown = 0.0
+        for close in closes:
+            peak = max(peak, close)
+            if peak <= 0:
+                continue
+            drawdown = (close - peak) / peak
+            max_drawdown = min(max_drawdown, drawdown)
+        return max_drawdown
+
+    def _atr_pct_values(self, candles: Sequence[Candle]) -> list[float]:
+        """Compute simple ATR percent values by symbol for regime detection."""
+
+        grouped: dict[str, list[Candle]] = {}
+        for candle in candles:
+            if candle.asset_class != "crypto":
+                continue
+            grouped.setdefault(candle.symbol, []).append(candle)
+
+        atr_values: list[float] = []
+        for rows in grouped.values():
+            ordered = sorted(rows, key=lambda candle: candle.time)
+            true_ranges: list[float] = []
+            previous_close: float | None = None
+            for candle in ordered:
+                high_low = candle.high - candle.low
+                if previous_close is None:
+                    true_range = high_low
+                else:
+                    true_range = max(
+                        high_low,
+                        abs(candle.high - previous_close),
+                        abs(candle.low - previous_close),
+                    )
+                true_ranges.append(true_range)
+                if len(true_ranges) >= 14 and candle.close > 0:
+                    atr = float(np.mean(np.asarray(true_ranges[-14:], dtype=float)))
+                    atr_values.append(atr / candle.close)
+                previous_close = candle.close
+        return atr_values
+
+    def _recent_average(self, values: Sequence[float], window: int) -> float:
+        """Return average of the most recent values."""
+
+        if not values:
+            return 0.0
+        recent = values[-window:]
+        return float(np.mean(np.asarray(recent, dtype=float)))
+
+    def _percentile_rank(self, values: Sequence[float], target: float) -> float:
+        """Return the percentile rank of target within values as 0.0-1.0."""
+
+        if not values:
+            return 0.0
+        count = sum(1 for value in values if value <= target)
+        return count / len(values)
 
     def _fit_booster(
         self,

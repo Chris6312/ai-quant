@@ -25,6 +25,8 @@ class FoldSummaryRecord(TypedDict):
     n_train_samples: int
     n_test_samples: int
     model_path: str
+    eligibility_status: str
+    eligibility_reason: str
 
 
 class ModelRecord(TypedDict, total=False):
@@ -44,6 +46,8 @@ class ModelRecord(TypedDict, total=False):
     latest_job_id: str | None
     feature_importances: dict[str, float]
     folds: list[FoldSummaryRecord]
+    selection_regime: str
+    selection_policy: dict[str, object]
     created_at: str
     updated_at: str
 

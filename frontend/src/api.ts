@@ -407,6 +407,8 @@ export type ModelFold = {
   n_train_samples: number;
   n_test_samples: number;
   model_path: string;
+  eligibility_status?: string;
+  eligibility_reason?: string;
 };
 
 export type MlModelRecord = {
@@ -426,6 +428,8 @@ export type MlModelRecord = {
   latest_job_id: string | null;
   feature_importances: Record<string, number>;
   folds: ModelFold[];
+  selection_regime?: string;
+  selection_policy?: Record<string, unknown>;
 };
 
 export type MlModelImportance = {
