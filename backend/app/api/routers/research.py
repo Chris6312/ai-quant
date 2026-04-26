@@ -18,11 +18,22 @@ from app.config.crypto_scope import (
     list_research_crypto_scope_symbols,
     set_research_crypto_promoted_symbols,
 )
-from app.db.models import CongressTradeRow, InsiderTradeRow, ResearchSignalRow
+from app.db.models import (
+    CongressTradeRow,
+    CryptoDailySentimentRow,
+    InsiderTradeRow,
+    ResearchSignalRow,
+)
 from app.decision.intraday import (
     IntradayTechnicalSnapshot,
     build_intraday_snapshot_from_repository,
 )
+from app.decision.sentiment import (
+    BTC_MACRO_SYMBOL,
+    ETH_MACRO_SYMBOL,
+    build_macro_sentiment_decision,
+)
+from app.decision.visibility import MacroSentimentDecision
 from app.repositories.candles import CandleRepository
 from app.repositories.research import ResearchRepository
 from app.repositories.watchlist import WatchlistRepository
@@ -108,6 +119,79 @@ def _serialize_intraday_decision(
             for timeframe_snapshot in snapshot.timeframe_snapshots
         ],
         "generated_at": generated_at.isoformat(),
+    }
+
+
+
+async def build_research_macro_sentiment_decision(
+    repository: ResearchRepository,
+    *,
+    generated_at: datetime,
+) -> dict[str, object]:
+    """Build BTC/ETH macro weather from persisted sentiment rows."""
+
+    btc_row = await _latest_crypto_sentiment_row(repository, BTC_MACRO_SYMBOL)
+    eth_row = await _latest_crypto_sentiment_row(repository, ETH_MACRO_SYMBOL)
+    decision = build_macro_sentiment_decision(btc_row=btc_row, eth_row=eth_row)
+    status = "available" if decision.source_symbols else "neutral_fallback"
+    if not decision.source_symbols:
+        decision = MacroSentimentDecision(
+            bias="neutral",
+            effect="neutral",
+            article_count=0,
+        )
+
+    return _serialize_macro_sentiment_decision(
+        decision=decision,
+        generated_at=generated_at,
+        status=status,
+    )
+
+
+@router.get("/decision/macro-sentiment")
+async def get_research_macro_sentiment_decision(
+    repository: Annotated[ResearchRepository, Depends(get_research_repository)],
+) -> dict[str, object]:
+    """Return BTC/ETH macro sentiment weather for Research visibility."""
+
+    return await build_research_macro_sentiment_decision(
+        repository,
+        generated_at=datetime.now(tz=UTC),
+    )
+
+
+async def _latest_crypto_sentiment_row(
+    repository: ResearchRepository,
+    symbol: str,
+) -> CryptoDailySentimentRow | None:
+    rows = await repository.list_crypto_daily_sentiment(symbol, limit=1)
+    return rows[0] if rows else None
+
+
+def _serialize_macro_sentiment_decision(
+    *,
+    decision: MacroSentimentDecision,
+    generated_at: datetime,
+    status: str,
+) -> dict[str, object]:
+    if status == "available":
+        reason = "BTC/ETH macro sentiment is wired from persisted daily sentiment."
+    else:
+        reason = (
+            "No fresh BTC/ETH macro reading is available, so Research treats "
+            "weather as neutral instead of unknown."
+        )
+
+    return {
+        "bias": decision.bias,
+        "score": decision.score,
+        "effect": decision.effect,
+        "article_count": decision.article_count,
+        "source_symbols": decision.source_symbols,
+        "as_of": decision.as_of.isoformat() if decision.as_of is not None else None,
+        "generated_at": generated_at.isoformat(),
+        "status": status,
+        "reason": reason,
     }
 
 

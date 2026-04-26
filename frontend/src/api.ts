@@ -204,6 +204,23 @@ export type ResearchIntradayDecisionResponse = {
   timeframe_snapshots: ResearchIntradayTimeframeSnapshot[];
   generated_at: string;
 };
+export type ResearchMacroSentimentDecisionResponse = {
+  bias: 'bullish' | 'bearish' | 'neutral' | 'unknown';
+  score: number | null;
+  effect: 'tailwind' | 'headwind' | 'neutral' | 'unknown';
+  article_count: number;
+  source_symbols: string[];
+  as_of: string | null;
+  generated_at: string;
+  status: 'available' | 'neutral_fallback';
+  reason: string;
+};
+
+export const getResearchMacroSentimentDecision = () =>
+  requestJson<ResearchMacroSentimentDecisionResponse>(
+    '/research/decision/macro-sentiment',
+  );
+
 
 export const getResearchIntradayDecision = (symbol: string) =>
   requestJson<ResearchIntradayDecisionResponse>(
