@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.brokers.paper import PaperBroker
 from app.db.models import PaperAccountRow, PaperFillRow, PaperOrderRow, PaperPositionRow
 from app.paper.ledger_service import DEFAULT_PAPER_BALANCE, PaperLedgerService
 
@@ -291,3 +292,46 @@ async def test_sell_without_open_position_is_rejected_before_fill() -> None:
         await service.execute_market_fill("BTC/USD", "crypto", "sell", 1.0, 50_000.0)
 
     assert store.fills == []
+
+
+@pytest.mark.asyncio
+async def test_paper_broker_routes_fills_to_durable_ledger() -> None:
+    """Paper broker execution must write orders, fills, cash, and positions durably."""
+
+    store = InMemoryPaperLedgerStore()
+    service = PaperLedgerService(store)
+    broker = PaperBroker(ledger_service=service, rng_seed=7)
+    broker.set_market_data("BTC/USD", 50_000.0, 1_000_000.0)
+
+    order = await broker.submit_order("BTC/USD", "buy", 0.25, "market")
+
+    position = await broker.get_position("BTC/USD")
+    balance = await broker.get_account_balance()
+    account = store.accounts["crypto"]
+
+    assert order.status == "filled"
+    assert position is not None
+    assert position.symbol == "BTC/USD"
+    assert len(store.orders) == 1
+    assert len(store.fills) == 1
+    assert account.cash_balance == pytest.approx(balance["crypto_balance"])
+
+
+@pytest.mark.asyncio
+async def test_paper_broker_restores_durable_ledger_state() -> None:
+    """A fresh broker should rebuild its paper mirror from persisted ledger state."""
+
+    store = InMemoryPaperLedgerStore()
+    service = PaperLedgerService(store)
+    await service.execute_market_fill("ETH/USD", "crypto", "buy", 2.0, 2_500.0)
+
+    broker = PaperBroker(ledger_service=service)
+    await broker.restore_durable_state()
+
+    position = await broker.get_position("ETH/USD")
+    balance = await broker.get_account_balance()
+
+    assert position is not None
+    assert position.size == pytest.approx(2.0)
+    assert position.entry_price == pytest.approx(2_500.0)
+    assert balance["crypto_balance"] == pytest.approx(94_992.0)

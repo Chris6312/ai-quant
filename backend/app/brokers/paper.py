@@ -10,7 +10,9 @@ from uuid import uuid4
 
 from app.brokers.base import BaseBroker, Order, OrderSide, OrderStatus, OrderType
 from app.candle.kraken_worker import KRAKEN_UNIVERSE
+from app.db.models import PaperPositionRow
 from app.models.domain import Position
+from app.paper.ledger_service import PaperExecutionResult, PaperLedgerService
 from app.portfolio.sizer import PositionSizer
 from app.repositories.positions import PositionRepository
 from app.services.direction_gate import DirectionGate
@@ -47,6 +49,7 @@ class PaperBroker(BaseBroker):
         stock_commission_flat: float = 0.0,
         stock_commission_pct: float = 0.0,
         crypto_commission_pct: float = CRYPTO_TAKER_COMMISSION,
+        ledger_service: PaperLedgerService | None = None,
     ) -> None:
         self.starting_cash = starting_cash
         self.starting_crypto_cash = starting_crypto_cash
@@ -60,6 +63,7 @@ class PaperBroker(BaseBroker):
         self.stock_commission_pct = stock_commission_pct
         self.crypto_commission_pct = crypto_commission_pct
         self.direction_gate = DirectionGate()
+        self.ledger_service = ledger_service
         self._orders: dict[str, PaperOrderFill] = {}
         self._positions: dict[str, Position] = {}
         self._last_prices: dict[str, float] = {}
@@ -81,6 +85,19 @@ class PaperBroker(BaseBroker):
         """Allow new orders again."""
 
         self._halted = False
+
+    async def restore_durable_state(self) -> None:
+        """Load durable ledger balances and positions into the broker mirror."""
+
+        if self.ledger_service is None:
+            return
+        snapshot = await self.ledger_service.restore_snapshot()
+        self.paper_stock_balance = snapshot.stock_cash
+        self.paper_crypto_balance = snapshot.crypto_cash
+        self._positions = {
+            position.symbol: self._position_row_to_domain(position)
+            for position in snapshot.open_positions
+        }
 
     def set_market_data(self, symbol: str, last_price: float, last_volume: float) -> None:
         """Seed the latest market price and volume for a symbol."""
@@ -274,6 +291,9 @@ class PaperBroker(BaseBroker):
         """Fill an order immediately."""
 
         fill_size = min(fill_size, order.size)
+        if self.ledger_service is not None:
+            return await self._fill_order_durably(order, asset_class, fill_price, fill_size)
+
         commission = self._commission(asset_class, fill_size, fill_price)
         realized_delta = self._apply_position(asset_class, order, fill_price, fill_size)
         order = self._finalize_order(order, fill_size, fill_price)
@@ -295,26 +315,134 @@ class PaperBroker(BaseBroker):
         fill_size = min(fill.remaining_size, max_fill)
         if fill_size <= 0.0:
             return fill.order
+        is_partial = fill_size < fill.remaining_size
+        if self.ledger_service is not None:
+            updated_order = await self._fill_order_durably(
+                fill.order,
+                asset_class,
+                fill_price,
+                fill_size,
+                partial=is_partial,
+            )
+            self._update_pending_fill(fill, updated_order, fill_size)
+            return updated_order
+
         commission = self._commission(asset_class, fill_size, fill_price)
         realized_delta = self._apply_position(asset_class, fill.order, fill_price, fill_size)
         updated_order = self._finalize_order(
             fill.order,
             fill_size,
             fill_price,
-            partial=fill_size < fill.remaining_size,
+            partial=is_partial,
         )
         self._apply_cash_flow(asset_class, updated_order.side, fill_price, fill_size, commission)
         self.realized_pnl += realized_delta - commission
+        self._update_pending_fill(fill, updated_order, fill_size)
+        await self._persist_position(updated_order, asset_class, fill_price, fill_size)
+        return updated_order
+
+    async def _fill_order_durably(
+        self,
+        order: Order,
+        asset_class: str,
+        fill_price: float,
+        fill_size: float,
+        partial: bool = False,
+    ) -> Order:
+        """Fill an order through the durable paper ledger service."""
+
+        if self.ledger_service is None:
+            raise RuntimeError("durable fill requested without a ledger service")
+
+        result = await self.ledger_service.execute_market_fill(
+            symbol=order.symbol,
+            asset_class=asset_class,
+            side=order.side,
+            size=fill_size,
+            fill_price=fill_price,
+            order_type=order.order_type,
+            limit_price=order.limit_price,
+        )
+        self._sync_from_durable_result(result)
+        return self._durable_result_to_order(order, result, partial)
+
+    def _sync_from_durable_result(self, result: PaperExecutionResult) -> None:
+        """Mirror durable ledger state locally for broker contract compatibility."""
+
+        if result.account.asset_class == "crypto":
+            self.paper_crypto_balance = float(result.account.cash_balance)
+        else:
+            self.paper_stock_balance = float(result.account.cash_balance)
+        if result.fill.realized_pnl != 0.0:
+            self.realized_pnl += float(result.fill.realized_pnl)
+        self._sync_position_from_row(result.position)
+
+    def _sync_position_from_row(self, position: PaperPositionRow | None) -> None:
+        """Update or remove the local mirror position from a durable row."""
+
+        if position is None:
+            return
+        if position.status != "open" or float(position.size) <= 0.0:
+            self._positions.pop(position.symbol, None)
+            return
+        self._positions[position.symbol] = self._position_row_to_domain(position)
+
+    def _position_row_to_domain(self, position: PaperPositionRow) -> Position:
+        """Convert a durable paper position row to the broker position contract."""
+
+        return Position(
+            symbol=position.symbol,
+            asset_class=position.asset_class,
+            side=position.side,
+            entry_price=float(position.average_entry_price),
+            size=float(position.size),
+            sl_price=None,
+            tp_price=None,
+            strategy_id=position.strategy_id,
+            ml_confidence=None,
+            research_score=None,
+            status=position.status,
+        )
+
+    def _durable_result_to_order(
+        self,
+        original_order: Order,
+        result: PaperExecutionResult,
+        partial: bool,
+    ) -> Order:
+        """Convert a durable fill result back into the shared broker order model."""
+
+        status: OrderStatus = "partial" if partial else "filled"
+        return Order(
+            id=result.order.id,
+            symbol=result.order.symbol,
+            side=original_order.side,
+            size=original_order.size,
+            order_type=original_order.order_type,
+            limit_price=original_order.limit_price,
+            status=status,
+            filled_size=float(result.order.filled_size),
+            average_fill_price=float(result.order.average_fill_price or 0.0),
+            created_at=result.order.created_at,
+            updated_at=result.order.updated_at,
+        )
+
+    def _update_pending_fill(
+        self,
+        fill: PaperOrderFill,
+        updated_order: Order,
+        fill_size: float,
+    ) -> None:
+        """Update pending in-memory order state after a partial or final fill."""
+
         fill.remaining_size -= fill_size
         if fill.remaining_size <= 0.0:
             self._orders.pop(fill.order.id, None)
-        else:
-            self._orders[fill.order.id] = PaperOrderFill(
-                order=updated_order,
-                remaining_size=fill.remaining_size,
-            )
-        await self._persist_position(updated_order, asset_class, fill_price, fill_size)
-        return updated_order
+            return
+        self._orders[fill.order.id] = PaperOrderFill(
+            order=updated_order,
+            remaining_size=fill.remaining_size,
+        )
 
     def _commission(self, asset_class: str, size: float, fill_price: float) -> float:
         """Return the commission for a fill."""

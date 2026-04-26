@@ -145,8 +145,10 @@ class PaperLedgerService:
         size: float,
         fill_price: float,
         strategy_id: str | None = None,
+        order_type: str = "market",
+        limit_price: float | None = None,
     ) -> PaperExecutionResult:
-        """Persist a market order, fill, account update, and position update atomically enough."""
+        """Persist an order, fill, account update, and position update atomically enough."""
 
         self._validate_fill_request(side, size, fill_price)
         normalized_symbol = symbol.upper()
@@ -155,9 +157,9 @@ class PaperLedgerService:
             symbol=normalized_symbol,
             asset_class=asset_class,
             side=side,
-            order_type="market",
+            order_type=order_type,
             requested_size=size,
-            limit_price=None,
+            limit_price=limit_price,
             strategy_id=strategy_id,
             status="submitted",
         )
