@@ -1,5 +1,9 @@
 """Decision visibility layer models and helpers."""
 
+from app.decision.composer import (
+    compose_dynamic_decision,
+    compose_final_decision,
+)
 from app.decision.intraday import (
     INTRADAY_DECISION_TIMEFRAMES,
     IntradayTechnicalSnapshot,
@@ -49,5 +53,7 @@ __all__ = [
     "build_no_trade_decision",
     "build_symbol_sentiment_decision",
     "classify_sentiment_bias",
+    "compose_dynamic_decision",
+    "compose_final_decision",
     "merge_sentiment_decisions",
 ]
