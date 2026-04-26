@@ -199,6 +199,70 @@ export const postHalt = () =>
   });
 
 // ── Paper ledger ──────────────────────────────────────────────────────────
+export type PaperAccount = {
+  id: string;
+  asset_class: string;
+  cash_balance: number;
+  default_cash_balance: number;
+  realized_pnl: number;
+  reset_count: number;
+  last_reset_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type PaperPosition = {
+  id: string;
+  symbol: string;
+  asset_class: string;
+  side: string;
+  size: number;
+  average_entry_price: number;
+  realized_pnl: number;
+  status: string;
+  strategy_id: string | null;
+  opened_at: string | null;
+  updated_at: string | null;
+  closed_at: string | null;
+};
+
+export type PaperOrder = {
+  id: string;
+  symbol: string;
+  asset_class: string;
+  side: string;
+  order_type: string;
+  requested_size: number;
+  limit_price: number | null;
+  status: string;
+  filled_size: number;
+  average_fill_price: number | null;
+  remaining_size: number;
+  strategy_id: string | null;
+  source: string;
+  reject_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  closed_at: string | null;
+};
+
+export type PaperFill = {
+  id: string;
+  order_id: string;
+  position_id: string | null;
+  symbol: string;
+  asset_class: string;
+  side: string;
+  fill_size: number;
+  fill_price: number;
+  gross: number;
+  commission: number;
+  realized_pnl: number;
+  cash_after: number;
+  source: string;
+  filled_at: string | null;
+};
+
 export type PaperBalance = {
   stock_balance: number;
   crypto_balance: number;
@@ -206,9 +270,20 @@ export type PaperBalance = {
   crypto_default: number;
   realized_pnl: number;
   nav: number;
+  accounts?: PaperAccount[];
+  source?: string;
+};
+
+export type PaperState = {
+  balance: PaperBalance;
+  positions: PaperPosition[];
+  orders: PaperOrder[];
+  fills: PaperFill[];
+  source: string;
 };
 
 export const getPaperBalance = () => requestJson<PaperBalance>('/paper/balance');
+export const getPaperState = () => requestJson<PaperState>('/paper/state');
 
 export const setPaperBalance = (stock?: number, crypto?: number) => {
   const q = new URLSearchParams();
