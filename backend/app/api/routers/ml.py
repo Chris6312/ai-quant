@@ -74,7 +74,11 @@ logger = logging.getLogger(__name__)
 _CRYPTO_ALPACA_REQUEST_ALIASES: dict[str, str] = {
     "XDG/USD": "DOGE/USD",
 }
-
+_SENTIMENT_PREDICTION_FEATURES: tuple[str, ...] = (
+    "news_sentiment_1d",
+    "news_sentiment_7d",
+    "news_article_count_7d",
+)
 
 
 class GainersFetcher(Protocol):
@@ -340,6 +344,34 @@ def _coerce_numeric(value: object | None) -> float:
     if hasattr(value, "__float__"):
         return float(cast(FloatLike, value))
     raise TypeError("numeric value could not be coerced to float")
+
+
+def _coerce_optional_numeric(value: object | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return _coerce_numeric(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _prediction_sentiment_payload(
+    feature_values: Mapping[str, object],
+) -> dict[str, object]:
+    score_1d = _coerce_optional_numeric(feature_values.get("news_sentiment_1d"))
+    score_7d = _coerce_optional_numeric(feature_values.get("news_sentiment_7d"))
+    article_count = _coerce_optional_numeric(
+        feature_values.get("news_article_count_7d")
+    )
+    return {
+        "news_sentiment_1d": score_1d,
+        "news_sentiment_7d": score_7d,
+        "news_article_count_7d": article_count,
+        "available": any(
+            value is not None for value in (score_1d, score_7d, article_count)
+        ),
+    }
+
 
 async def _load_training_candles(asset_class: str) -> list[Candle]:
     settings = get_settings()
@@ -1276,7 +1308,11 @@ def _prediction_signal_event(row: Mapping[str, object]) -> dict[str, object] | N
 
 
 
-def _prediction_api_row_from_db(row: PredictionRow) -> dict[str, object]:
+def _prediction_api_row_from_db(
+    row: PredictionRow,
+    *,
+    sentiment: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     """Serialize one persisted prediction row for the ML API."""
 
     return {
@@ -1295,6 +1331,7 @@ def _prediction_api_row_from_db(row: PredictionRow) -> dict[str, object]:
         "candle_time": row.candle_time.isoformat(),
         "action": row.action,
         "confidence_threshold": row.confidence_threshold,
+        "sentiment": dict(sentiment or _prediction_sentiment_payload({})),
     }
 
 
@@ -1306,6 +1343,32 @@ def _prediction_empty_freshness() -> dict[str, object]:
         "lag_days": None,
         "is_stale": True,
         "status": "no_data",
+    }
+
+
+async def _read_prediction_sentiment_features(
+    session: AsyncSession,
+    prediction_ids: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    if not prediction_ids:
+        return {}
+
+    statement = select(PredictionShapRow).where(
+        PredictionShapRow.prediction_id.in_(prediction_ids),
+        PredictionShapRow.feature.in_(_SENTIMENT_PREDICTION_FEATURES),
+    )
+    result = await session.scalars(statement)
+    features_by_prediction: dict[str, dict[str, object]] = {}
+    for shap_row in result.all():
+        feature_values = features_by_prediction.setdefault(
+            shap_row.prediction_id,
+            {},
+        )
+        feature_values[shap_row.feature] = shap_row.feature_value
+
+    return {
+        prediction_id: _prediction_sentiment_payload(feature_values)
+        for prediction_id, feature_values in features_by_prediction.items()
     }
 
 
@@ -1332,8 +1395,18 @@ async def _read_persisted_prediction_snapshot(
         ).limit(limit)
         result = await session.scalars(statement)
         prediction_rows = list(result.all())
+        sentiment_by_prediction = await _read_prediction_sentiment_features(
+            session,
+            [row.id for row in prediction_rows],
+        )
 
-    api_rows = [_prediction_api_row_from_db(row) for row in prediction_rows]
+    api_rows = [
+        _prediction_api_row_from_db(
+            row,
+            sentiment=sentiment_by_prediction.get(row.id),
+        )
+        for row in prediction_rows
+    ]
     freshness_by_asset: dict[str, object] = {}
     for asset in assets:
         asset_rows = [row for row in api_rows if row["asset_class"] == asset]
@@ -1765,11 +1838,17 @@ async def _build_asset_predictions(
 
 
 def _prediction_api_row(row: Mapping[str, object]) -> dict[str, object]:
-    return {
+    api_row = {
         key: value
         for key, value in row.items()
         if key not in {"feature_values", "shap_values"}
     }
+    feature_values = row.get("feature_values")
+    if isinstance(feature_values, Mapping):
+        api_row["sentiment"] = _prediction_sentiment_payload(feature_values)
+    else:
+        api_row["sentiment"] = _prediction_sentiment_payload({})
+    return api_row
 
 
 @router.get("/predictions")

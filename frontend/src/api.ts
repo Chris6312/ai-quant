@@ -538,6 +538,13 @@ export type MlSentimentGate = {
   confidence_delta: number | null;
 };
 
+export type MlPredictionSentiment = {
+  news_sentiment_1d: number | null;
+  news_sentiment_7d: number | null;
+  news_article_count_7d: number | null;
+  available: boolean;
+};
+
 export type MlPredictionRow = {
   prediction_id: string;
   model_id: string | null;
@@ -554,6 +561,7 @@ export type MlPredictionRow = {
   candle_time: string;
   action: 'signal' | 'skip';
   confidence_threshold: number;
+  sentiment: MlPredictionSentiment;
   sentiment_gate: MlSentimentGate | null;
 };
 
