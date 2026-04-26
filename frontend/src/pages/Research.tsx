@@ -3,10 +3,12 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   clearResearchCryptoWatchlist,
   getMlPredictions,
+  getResearchIntradayDecision,
   getResearchScope,
   setResearchCryptoWatchlist,
   type MlPredictionRow,
   type MlPredictionsResponse,
+  type ResearchIntradayDecisionResponse,
   type ResearchScopeResponse,
 } from "../api";
 import { useResearch } from "../hooks/useResearch";
@@ -374,6 +376,369 @@ function buildLatestPredictionMap(
   return latest;
 }
 
+
+type DecisionVisibility = {
+  mlBias: string;
+  mlBiasDetail: string;
+  macroWeather: string;
+  macroWeatherDetail: string;
+  symbolForecast: string;
+  symbolForecastDetail: string;
+  intradayProof: string;
+  intradayProofDetail: string;
+  finalDecision: string;
+  riskMode: string;
+  reason: string;
+};
+
+function formatDecisionText(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatMultiplier(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "n/a";
+  }
+  return `${value.toFixed(2)}x`;
+}
+
+function getSymbolForecast(row: MlPredictionRow): string {
+  const sentiment = row.sentiment.news_sentiment_1d;
+  if (!row.sentiment.available || sentiment === null) {
+    return "unknown";
+  }
+  if (sentiment >= 0.15) {
+    return "bullish";
+  }
+  if (sentiment <= -0.15) {
+    return "bearish";
+  }
+  return "neutral";
+}
+
+function intradayHasProof(
+  intraday: ResearchIntradayDecisionResponse | null,
+): boolean {
+  if (!intraday) {
+    return false;
+  }
+  const confirmation = intraday.confirmation;
+  return (
+    confirmation.trend === "bullish" ||
+    confirmation.trend === "bearish" ||
+    confirmation.breakout ||
+    confirmation.volume_expansion ||
+    confirmation.volatility_state === "expanded" ||
+    confirmation.volatility_state === "compressed"
+  );
+}
+
+function getIntradayDirection(
+  intraday: ResearchIntradayDecisionResponse | null,
+): "long" | "short" | "unknown" {
+  if (!intraday) {
+    return "unknown";
+  }
+  if (intraday.confirmation.trend === "bullish") {
+    return "long";
+  }
+  if (intraday.confirmation.trend === "bearish") {
+    return "short";
+  }
+  return "unknown";
+}
+
+function mlDirectionToDecisionDirection(
+  row: MlPredictionRow,
+): "long" | "short" | "unknown" {
+  if (row.direction === "long" || row.direction === "short") {
+    return row.direction;
+  }
+  return "unknown";
+}
+
+function getDecisionAction(
+  row: MlPredictionRow,
+  intraday: ResearchIntradayDecisionResponse | null,
+): string {
+  if (row.sentiment_gate?.state === "blocked" && !intradayHasProof(intraday)) {
+    return "block";
+  }
+  const intradayDirection = getIntradayDirection(intraday);
+  const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
+    if (intradayDirection !== mlDirection) {
+      return "reduce";
+    }
+    if (row.sentiment_gate?.state === "downgraded") {
+      return "reduce";
+    }
+    return row.action === "signal" ? "allow" : "watch";
+  }
+  if (row.sentiment_gate?.state === "downgraded") {
+    return "reduce";
+  }
+  if (row.action === "signal") {
+    return row.sentiment_gate?.risk_flag === "aligned" ? "allow" : "watch";
+  }
+  if (row.direction === "flat") {
+    return "no_trade";
+  }
+  return "watch";
+}
+
+function getRiskMode(
+  row: MlPredictionRow,
+  intraday: ResearchIntradayDecisionResponse | null,
+): string {
+  if (row.sentiment_gate?.state === "blocked" && !intradayHasProof(intraday)) {
+    return "blocked";
+  }
+  const intradayDirection = getIntradayDirection(intraday);
+  const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
+    if (intradayDirection !== mlDirection) {
+      return "reduced";
+    }
+    if (row.sentiment_gate?.state === "downgraded") {
+      return "reduced";
+    }
+  }
+  if (row.sentiment_gate?.state === "downgraded") {
+    return "reduced";
+  }
+  if (row.action === "signal") {
+    return "normal";
+  }
+  return "watch_only";
+}
+
+function getDecisionReason(
+  row: MlPredictionRow,
+  intraday: ResearchIntradayDecisionResponse | null,
+): string {
+  const intradayDirection = getIntradayDirection(intraday);
+  const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
+    if (intradayDirection !== mlDirection) {
+      return "Closed-candle intraday proof conflicts with daily ML bias, so the candidate stays visible with reduced risk.";
+    }
+    if (row.sentiment_gate?.state === "downgraded") {
+      return "Closed-candle intraday proof exists, but sentiment weather still calls for reduced risk.";
+    }
+    return "Closed-candle intraday proof is available from stored trading candles and supports a visible readiness decision.";
+  }
+  if (row.sentiment_gate) {
+    return row.sentiment_gate.reason;
+  }
+  if (row.confidence < row.confidence_threshold) {
+    return "Daily ML bias did not clear the confidence gate, so this remains visible as a watch/readiness item only.";
+  }
+  return "Daily ML bias is available, but no live decision layer has promoted it beyond observation.";
+}
+
+function formatIntradayDetail(
+  intraday: ResearchIntradayDecisionResponse | null,
+): string {
+  if (!intraday) {
+    return "Awaiting stored closed-candle confirmation from 15m / 1h / 4h trading candles.";
+  }
+  const confirmation = intraday.confirmation;
+  const timeframeSummary = intraday.timeframe_snapshots
+    .map((snapshot) => {
+      const flags = [
+        snapshot.breakout ? "breakout" : null,
+        snapshot.volume_expansion ? "volume" : null,
+        snapshot.volatility_state !== "unknown"
+          ? snapshot.volatility_state
+          : null,
+      ].filter(Boolean);
+      return `${snapshot.timeframe} ${snapshot.trend}${
+        flags.length > 0 ? ` (${flags.join("/")})` : ""
+      }`;
+    })
+    .join(" · ");
+  const asOf = confirmation.as_of
+    ? ` · as of ${formatCandleTime(confirmation.as_of)}`
+    : "";
+  const proofTimeframes =
+    confirmation.timeframes.length > 0
+      ? `proof ${confirmation.timeframes.join(", ")}`
+      : "no directional proof yet";
+  return `${proofTimeframes}${asOf} · ${timeframeSummary}`;
+}
+
+function buildDecisionVisibility(
+  row: MlPredictionRow,
+  intraday: ResearchIntradayDecisionResponse | null,
+): DecisionVisibility {
+  const macroBias = row.sentiment_gate?.sentiment_bias ?? "unknown";
+  const macroRisk = row.sentiment_gate?.risk_flag ?? "missing_sentiment";
+  const symbolForecast = getSymbolForecast(row);
+  const sizeMultiplier = row.sentiment_gate?.position_multiplier ?? null;
+  const confidenceMultiplier = row.sentiment_gate?.confidence_multiplier ?? null;
+
+  return {
+    mlBias: row.direction === "flat" ? "neutral" : row.direction,
+    mlBiasDetail: `${getPredictionStateLabel(row)} · confidence ${formatConfidence(
+      row.confidence,
+    )} · candle ${formatCandleTime(row.candle_time)}`,
+    macroWeather: macroBias,
+    macroWeatherDetail: `${formatDecisionText(
+      macroRisk,
+    )} · size ${formatMultiplier(sizeMultiplier)} · confidence ${formatMultiplier(
+      confidenceMultiplier,
+    )}`,
+    symbolForecast,
+    symbolForecastDetail: getSentimentText(row),
+    intradayProof: intraday?.confirmation.trend ?? "pending",
+    intradayProofDetail: formatIntradayDetail(intraday),
+    finalDecision: getDecisionAction(row, intraday),
+    riskMode: getRiskMode(row, intraday),
+    reason: getDecisionReason(row, intraday),
+  };
+}
+
+function DecisionTile({
+  detail,
+  label,
+  value,
+}: {
+  detail: string;
+  label: string;
+  value: string;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        background: "var(--bg2)",
+        border: "0.5px solid var(--border)",
+        borderRadius: "var(--radius-md)",
+        padding: "10px 12px",
+      }}
+    >
+      <div
+        style={{
+          color: "var(--text4)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 9,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          color: "var(--text)",
+          fontSize: 13,
+          fontWeight: 600,
+          marginTop: 4,
+          textTransform: "capitalize",
+        }}
+      >
+        {formatDecisionText(value)}
+      </div>
+      <div
+        style={{
+          color: "var(--text3)",
+          fontSize: 10,
+          lineHeight: 1.5,
+          marginTop: 5,
+        }}
+      >
+        {detail}
+      </div>
+    </div>
+  );
+}
+
+function DecisionVisibilityPanel({
+  intradayDecision,
+  prediction,
+}: {
+  intradayDecision: ResearchIntradayDecisionResponse | null;
+  prediction: MlPredictionRow | null;
+}): React.ReactElement {
+  if (!prediction) {
+    return (
+      <div style={{ padding: "14px 0", fontSize: 11, color: "var(--text3)" }}>
+        Decision visibility needs a persisted ML prediction first. No hidden
+        trade/readiness state is being inferred for this symbol.
+      </div>
+    );
+  }
+
+  const visibility = buildDecisionVisibility(prediction, intradayDecision);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        style={{
+          background: "var(--bg2)",
+          border: "0.5px solid var(--border)",
+          borderRadius: "var(--radius-md)",
+          padding: "10px 12px",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div>
+            <div style={{ color: "var(--text)", fontSize: 12, fontWeight: 600 }}>
+              Final decision · {formatDecisionText(visibility.finalDecision)}
+            </div>
+            <div style={{ color: "var(--text3)", fontSize: 10, marginTop: 3 }}>
+              Risk mode {formatDecisionText(visibility.riskMode)} · daily brain,
+              sentiment weather, and live-eyes visibility
+            </div>
+          </div>
+          <span className="card-badge cb-blue">
+            {formatDecisionText(visibility.finalDecision)}
+          </span>
+        </div>
+        <div
+          style={{
+            color: "var(--text3)",
+            fontSize: 10,
+            lineHeight: 1.6,
+            marginTop: 8,
+          }}
+        >
+          {visibility.reason}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 8,
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        }}
+      >
+        <DecisionTile
+          detail={visibility.mlBiasDetail}
+          label="ML bias"
+          value={visibility.mlBias}
+        />
+        <DecisionTile
+          detail={visibility.macroWeatherDetail}
+          label="Macro weather"
+          value={visibility.macroWeather}
+        />
+        <DecisionTile
+          detail={visibility.symbolForecastDetail}
+          label="Symbol forecast"
+          value={visibility.symbolForecast}
+        />
+        <DecisionTile
+          detail={visibility.intradayProofDetail}
+          label="Intraday proof"
+          value={visibility.intradayProof}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PredictionFeed({
   prediction,
 }: {
@@ -472,6 +837,11 @@ const Research: React.FC = () => {
   );
   const [predictionsError, setPredictionsError] = useState<string | null>(null);
   const [predictionsLoading, setPredictionsLoading] = useState(true);
+  const [intradayDecision, setIntradayDecision] =
+    useState<ResearchIntradayDecisionResponse | null>(null);
+  const [intradayDecisionError, setIntradayDecisionError] = useState<
+    string | null
+  >(null);
 
   const loadScope = useCallback(async (): Promise<void> => {
     try {
@@ -539,6 +909,42 @@ const Research: React.FC = () => {
   useEffect(() => {
     storeValue(STORAGE_KEYS.tab, tab);
   }, [tab]);
+
+  useEffect(() => {
+    if (!selected) {
+      setIntradayDecision(null);
+      setIntradayDecisionError(null);
+      return;
+    }
+
+    let active = true;
+
+    const loadIntradayDecision = async (): Promise<void> => {
+      try {
+        const payload = await getResearchIntradayDecision(selected);
+        if (active) {
+          setIntradayDecision(payload);
+          setIntradayDecisionError(null);
+        }
+      } catch {
+        if (active) {
+          setIntradayDecision(null);
+          setIntradayDecisionError("Stored intraday proof unavailable");
+        }
+      }
+    };
+
+    void loadIntradayDecision();
+    const intervalId = window.setInterval(() => {
+      void loadIntradayDecision();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [selected]);
+
 
   const stockItems = useMemo(
     () => buildStockScopeItems(watchlist),
@@ -953,6 +1359,18 @@ const Research: React.FC = () => {
                 </div>
               )}
 
+              {intradayDecisionError && selectedIsCrypto && (
+                <div
+                  style={{
+                    padding: "16px",
+                    fontSize: 11,
+                    color: "var(--amber)",
+                  }}
+                >
+                  {intradayDecisionError}
+                </div>
+              )}
+
               {rError && !selectedPrediction && (
                 <div
                   style={{
@@ -969,6 +1387,10 @@ const Research: React.FC = () => {
                 <div style={{ padding: "12px 16px" }}>
                   {tab === "signals" ? (
                     <>
+                      <DecisionVisibilityPanel
+                        intradayDecision={intradayDecision}
+                        prediction={selectedPrediction}
+                      />
                       <PredictionFeed prediction={selectedPrediction} />
                       <SignalFeed signals={signals} />
                     </>

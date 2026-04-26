@@ -175,6 +175,41 @@ export const clearResearchCryptoWatchlist = () =>
     method: 'DELETE',
   });
 
+
+export type ResearchIntradayConfirmation = {
+  trend: 'bullish' | 'bearish' | 'mixed' | 'neutral' | 'unknown';
+  breakout: boolean;
+  volume_expansion: boolean;
+  volatility_state: 'compressed' | 'normal' | 'expanded' | 'unknown';
+  timeframes: string[];
+  as_of: string | null;
+};
+
+export type ResearchIntradayTimeframeSnapshot = {
+  timeframe: string;
+  trend: 'bullish' | 'bearish' | 'mixed' | 'neutral' | 'unknown';
+  breakout: boolean;
+  volume_expansion: boolean;
+  volatility_state: 'compressed' | 'normal' | 'expanded' | 'unknown';
+  candle_count: number;
+  latest_candle_time: string | null;
+};
+
+export type ResearchIntradayDecisionResponse = {
+  symbol: string;
+  asset_class: 'crypto';
+  source: 'stored_trading_candles';
+  usage: 'trading';
+  confirmation: ResearchIntradayConfirmation;
+  timeframe_snapshots: ResearchIntradayTimeframeSnapshot[];
+  generated_at: string;
+};
+
+export const getResearchIntradayDecision = (symbol: string) =>
+  requestJson<ResearchIntradayDecisionResponse>(
+    `/research/decision/intraday?symbol=${encodeURIComponent(symbol)}`,
+  );
+
 // ── Watchlist ─────────────────────────────────────────────────────────────
 export type WatchlistItem = {
   symbol: string;

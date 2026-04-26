@@ -350,7 +350,8 @@ Separate once-daily ML prediction bias from live trade/readiness context so Rese
 
 ### Frontend
 
-* [ ] Slice 5 — Research UI visibility for ML bias, macro weather, symbol forecast, intraday proof, final decision, risk mode, and reason
+* [x] Slice 5 — Research UI visibility for ML bias, macro weather, symbol forecast, intraday proof, final decision, risk mode, and reason
+* [x] Slice 5.1 — Wire Research intraday proof to stored trading candles instead of placeholder pending state
 
 ### Promotion
 
@@ -448,7 +449,7 @@ System fully works from market data through durable paper state.
 These are real incomplete items, but they should remain scoped instead of being allowed to blur into unrelated feature work.
 
 * [ ] Phase 5: explicit Redis `candle_closed` pub/sub validation remains a later end-to-end integration check.
-* [ ] Phase 9.1: expose sentiment-risk decision context so Research can show macro weather, symbol forecast, and final decision separately from raw ML prediction.
+* [x] Phase 9.1: expose sentiment-risk decision context so Research can show macro weather, symbol forecast, and final decision separately from raw ML prediction.
 * [ ] ML prediction/SHAP UI can still be improved, but should not block Phase 9.1 unless directly needed for decision visibility.
 * [ ] Auto-promoted Research candidates are approved as a future Phase 2B concept, but should not be mixed into Phase 2A manual promoted-list validation.
 

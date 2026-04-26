@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,6 +19,11 @@ from app.config.crypto_scope import (
     set_research_crypto_promoted_symbols,
 )
 from app.db.models import CongressTradeRow, InsiderTradeRow, ResearchSignalRow
+from app.decision.intraday import (
+    IntradayTechnicalSnapshot,
+    build_intraday_snapshot_from_repository,
+)
+from app.repositories.candles import CandleRepository
 from app.repositories.research import ResearchRepository
 from app.repositories.watchlist import WatchlistRepository
 
@@ -29,6 +35,80 @@ class ResearchCryptoWatchlistRequest(BaseModel):
 
     symbols: list[str] = Field(default_factory=list)
 
+
+async def build_research_intraday_decision(
+    repository: CandleRepository,
+    symbol: str,
+    *,
+    generated_at: datetime,
+) -> dict[str, object]:
+    """Build the Research-page intraday proof object from stored trading candles."""
+
+    snapshot = await build_intraday_snapshot_from_repository(repository, symbol)
+    return _serialize_intraday_decision(
+        symbol=symbol,
+        snapshot=snapshot,
+        generated_at=generated_at,
+    )
+
+
+@router.get("/decision/intraday")
+async def get_research_intraday_decision(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    symbol: str = Query(min_length=1),
+) -> dict[str, object]:
+    """Return closed-candle intraday proof for Research decision visibility."""
+
+    repository = CandleRepository(session)
+    return await build_research_intraday_decision(
+        repository,
+        symbol,
+        generated_at=datetime.now(tz=UTC),
+    )
+
+
+def _serialize_intraday_decision(
+    *,
+    symbol: str,
+    snapshot: IntradayTechnicalSnapshot,
+    generated_at: datetime,
+) -> dict[str, object]:
+    confirmation = snapshot.confirmation
+    return {
+        "symbol": symbol,
+        "asset_class": "crypto",
+        "source": "stored_trading_candles",
+        "usage": "trading",
+        "confirmation": {
+            "trend": confirmation.trend,
+            "breakout": confirmation.breakout,
+            "volume_expansion": confirmation.volume_expansion,
+            "volatility_state": confirmation.volatility_state,
+            "timeframes": confirmation.timeframes,
+            "as_of": (
+                confirmation.as_of.isoformat()
+                if confirmation.as_of is not None
+                else None
+            ),
+        },
+        "timeframe_snapshots": [
+            {
+                "timeframe": timeframe_snapshot.timeframe,
+                "trend": timeframe_snapshot.trend,
+                "breakout": timeframe_snapshot.breakout,
+                "volume_expansion": timeframe_snapshot.volume_expansion,
+                "volatility_state": timeframe_snapshot.volatility_state,
+                "candle_count": timeframe_snapshot.candle_count,
+                "latest_candle_time": (
+                    timeframe_snapshot.latest_candle_time.isoformat()
+                    if timeframe_snapshot.latest_candle_time is not None
+                    else None
+                ),
+            }
+            for timeframe_snapshot in snapshot.timeframe_snapshots
+        ],
+        "generated_at": generated_at.isoformat(),
+    }
 
 
 @router.get("/scope")
