@@ -335,48 +335,37 @@ Paper trading survives restart.
 
 ---
 
-# Phase 9.1 — Decision Layer Visibility
+# Phase 9.1 — Dynamic Decision Visibility Layer
 
 ## Goal
 
-Make Phase 9 sentiment-risk decisions visible in the same operator-facing decision object as ML predictions.
-
-### Why this exists
-
-Phase 9 sentiment-risk logic was implemented and manually verified, but Research currently surfaces mostly the ML prediction, confidence gate, and no-trade action. The operator needs to see the distinction between:
-
-* ML prediction direction
-* macro sentiment bias from BTC/ETH market weather
-* symbol sentiment bias / local forecast
-* final sentiment decision
-* risk-reduced vs blocked vs boosted outcome
+Separate once-daily ML prediction bias from live trade/readiness context so Research can show why a symbol is watchable, reduced, allowed, boosted, blocked, or no-trade.
 
 ### Backend
 
-* [ ] Add visible `macro_sentiment_bias` to prediction/decision payloads
-* [ ] Add visible `symbol_sentiment_bias` to prediction/decision payloads
-* [ ] Add visible `final_sentiment_decision` to prediction/decision payloads
-* [ ] Add visible confidence adjustment / size multiplier where available
-* [ ] Preserve Phase 9 rule: BTC/ETH macro sentiment is a headwind/tailwind, not a universal iron gate
-* [ ] Preserve allowed-but-risk-reduced behavior when macro is bearish but symbol setup is strong
-* [ ] Do not change execution behavior until the visible decision object is validated
+* [x] Slice 1 — Decision schema only: add typed backend decision models/helpers with no trading changes
+* [ ] Slice 2 — Intraday technical snapshot using closed 15m / 1h / 4h candles
+* [ ] Slice 3 — Sentiment decision merge with BTC/ETH as macro weather, not an iron gate
+* [ ] Slice 4 — Final decision composer combining ML bias, sentiment, and intraday confirmation
 
 ### Frontend
 
-* [ ] Show ML prediction separately from final decision context
-* [ ] Show macro weather vs symbol forecast clearly
-* [ ] Show blocked / risk-reduced / boosted reason labels
-* [ ] Keep Research as signal visibility, not auto-execution
+* [ ] Slice 5 — Research UI visibility for ML bias, macro weather, symbol forecast, intraday proof, final decision, risk mode, and reason
 
-### Validation scenarios
+### Promotion
 
-* [ ] BTC/ETH bearish + SOL strongly bullish = allowed but risk-reduced
-* [ ] BTC/ETH bearish + SOL neutral/weak = blocked or downgraded
-* [ ] BTC/ETH bullish + SOL bullish = allowed normal or boosted
-* [ ] Stocks remain unscoped by crypto macro sentiment
+* [ ] Slice 6 — Auto-promoted candidates after decision visibility works
 
----
+### Guardrails
 
+* [x] No trade execution
+* [x] No paper ledger changes
+* [x] No intraday ML reruns
+* [x] No open-candle usage
+* [x] BTC/ETH sentiment remains macro weather, not a universal hard block
+* [x] ML conflicts remain visible rather than hidden
+
+# Phase 11 — Crypto End-to-End Validation
 # Phase 11 — Crypto End-to-End Validation
 
 ## Goal
