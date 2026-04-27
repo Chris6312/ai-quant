@@ -556,12 +556,11 @@ def _build_feature_parity_report() -> Mapping[str, object]:
     if stock_features is None or crypto_features is None:
         raise ValueError("unable to build representative feature vectors")
 
-    stock_validation = validate_feature_vector(stock_features)
-    crypto_validation = validate_feature_vector(crypto_features)
+    stock_validation = validate_feature_vector(stock_features, "stock")
+    crypto_validation = validate_feature_vector(crypto_features, "crypto")
     parity_keys_match = tuple(stock_features) == tuple(crypto_features)
     contract = build_feature_contract_summary()
     research_features = cast(list[str], contract["research_features"])
-    all_features = cast(list[str], contract["all_features"])
 
     stock_non_default_research = sorted(
         name
@@ -577,7 +576,7 @@ def _build_feature_parity_report() -> Mapping[str, object]:
     return {
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "feature_count": contract["feature_count"],
-        "parity_ok": parity_keys_match and stock_validation.is_valid and crypto_validation.is_valid,
+        "parity_ok": stock_validation.is_valid and crypto_validation.is_valid,
         "same_feature_order": parity_keys_match,
         "stock_contract_valid": stock_validation.is_valid,
         "crypto_contract_valid": crypto_validation.is_valid,
@@ -589,8 +588,8 @@ def _build_feature_parity_report() -> Mapping[str, object]:
         "crypto_nonfinite": list(crypto_validation.nonfinite),
         "stock_research_features_with_signal": stock_non_default_research,
         "crypto_research_features_with_signal": crypto_non_default_research,
-        "stock_preview": {name: stock_features[name] for name in all_features[:5]},
-        "crypto_preview": {name: crypto_features[name] for name in all_features[:5]},
+        "stock_preview": {name: stock_features[name] for name in list(stock_features)[:5]},
+        "crypto_preview": {name: crypto_features[name] for name in list(crypto_features)[:5]},
     }
 
 def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryRecord]:

@@ -14,10 +14,10 @@ from lightgbm.basic import Booster
 from numpy.typing import NDArray
 
 from app.ml.features import (
-    ALL_FEATURES,
     FeatureEngineer,
     FeatureVector,
     ResearchInputs,
+    feature_names_for_asset_class,
     ordered_feature_row,
 )
 from app.models.domain import Candle
@@ -52,6 +52,8 @@ class TrainerConfig:
     crypto_volatile_max_age_days: int = 180
     crypto_min_validation_sharpe: float = 0.0
     crypto_min_validation_accuracy: float = 0.25
+    stock_label_threshold: float = 0.002
+    crypto_label_threshold: float = 0.0075
     crypto_min_test_samples: int = 300
     crypto_volatility_ratio_threshold: float = 1.35
     crypto_max_drawdown_threshold: float = -0.20
@@ -228,7 +230,7 @@ class WalkForwardTrainer:
         samples: list[_TrainingSample] = []
         for symbol_candles in grouped.values():
             ordered = sorted(symbol_candles, key=lambda candle: candle.time)
-            labels = self._label_candles(ordered)
+            labels = self._label_candles(ordered, ordered[0].asset_class)
             for index in range(199, len(ordered) - 1):
                 research_inputs = self._research_inputs_for_sample(
                     research_lookup,
@@ -348,9 +350,10 @@ class WalkForwardTrainer:
         """Train one fold and return its validation metrics."""
 
         train_samples, test_samples = fold
-        x_train, y_train = self._matrix(train_samples)
-        x_test, y_test = self._matrix(test_samples)
-        booster = self._fit_booster(x_train, y_train, x_test, y_test)
+        feature_names = feature_names_for_asset_class(asset_class)
+        x_train, y_train = self._matrix(train_samples, asset_class)
+        x_test, y_test = self._matrix(test_samples, asset_class)
+        booster = self._fit_booster(x_train, y_train, x_test, y_test, feature_names)
 
         probabilities = np.asarray(booster.predict(x_test), dtype=float)
         if probabilities.ndim == 1:
@@ -366,7 +369,7 @@ class WalkForwardTrainer:
         )
         validation_sharpe = self._compute_sharpe(validation_returns)
         model_path = self._save_model(booster, asset_class, fold_index)
-        feature_importances = self._feature_importances(booster)
+        feature_importances = self._feature_importances(booster, feature_names)
 
         fold_result = FoldResult(
             fold_index=fold_index,
@@ -626,6 +629,7 @@ class WalkForwardTrainer:
         y_train: IntArray,
         x_test: FloatArray,
         y_test: IntArray,
+        feature_names: list[str],
     ) -> Booster:
         """Fit a LightGBM booster using the configured parameters."""
 
@@ -637,12 +641,12 @@ class WalkForwardTrainer:
             else 300
         )
 
-        train_set = lgb.Dataset(x_train, label=y_train, feature_name=ALL_FEATURES)
+        train_set = lgb.Dataset(x_train, label=y_train, feature_name=feature_names)
         valid_set = lgb.Dataset(
             x_test,
             label=y_test,
             reference=train_set,
-            feature_name=ALL_FEATURES,
+            feature_name=feature_names,
         )
 
         callbacks: list[Callable[..., object]] = [lgb.log_evaluation(period=0)]
@@ -658,10 +662,14 @@ class WalkForwardTrainer:
             callbacks=callbacks,
         )
 
-    def _matrix(self, samples: Sequence[_TrainingSample]) -> tuple[FloatArray, IntArray]:
+    def _matrix(
+        self,
+        samples: Sequence[_TrainingSample],
+        asset_class: str,
+    ) -> tuple[FloatArray, IntArray]:
         """Convert sample objects into model matrices."""
 
-        x_values = [ordered_feature_row(sample.features) for sample in samples]
+        x_values = [ordered_feature_row(sample.features, asset_class) for sample in samples]
         y_values = [sample.label for sample in samples]
         x_matrix = np.asarray(x_values, dtype=float)
         y_vector = np.asarray(y_values, dtype=int)
@@ -730,24 +738,28 @@ class WalkForwardTrainer:
         booster.save_model(str(model_path))
         return model_path
 
-    def _feature_importances(self, booster: Booster) -> dict[str, float]:
+    def _feature_importances(
+        self,
+        booster: Booster,
+        feature_names: list[str],
+    ) -> dict[str, float]:
         """Return normalized gain-based feature importances."""
 
         gains = np.asarray(booster.feature_importance(importance_type="gain"), dtype=float)
         total = float(np.sum(gains))
         if total == 0.0:
-            return dict.fromkeys(ALL_FEATURES, 0.0)
+            return dict.fromkeys(feature_names, 0.0)
 
         return {
             name: float(gain / total)
-            for name, gain in zip(ALL_FEATURES, gains, strict=True)
+            for name, gain in zip(feature_names, gains, strict=True)
         }
 
-    def _label_candles(self, candles: Sequence[Candle]) -> list[int]:
+    def _label_candles(self, candles: Sequence[Candle], asset_class: str) -> list[int]:
         """Label each candle: 0=down, 1=flat, 2=up based on next-candle return."""
 
         labels: list[int] = []
-        threshold = 0.002
+        threshold = self._label_threshold(asset_class)
 
         for index, candle in enumerate(candles):
             if index == len(candles) - 1:
@@ -764,6 +776,13 @@ class WalkForwardTrainer:
                 labels.append(1)
 
         return labels
+
+    def _label_threshold(self, asset_class: str) -> float:
+        """Return the class boundary threshold for the requested asset class."""
+
+        if asset_class.lower().strip() == "crypto":
+            return self.config.crypto_label_threshold
+        return self.config.stock_label_threshold
 
     def _next_return(self, current: Candle, next_candle: Candle) -> float:
         """Return the next-candle percentage change."""

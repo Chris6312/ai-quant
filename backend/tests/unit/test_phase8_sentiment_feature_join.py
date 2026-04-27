@@ -55,9 +55,9 @@ def test_crypto_feature_engineer_uses_source_backed_sentiment_only() -> None:
     assert features["news_sentiment_1d"] == 0.45
     assert features["news_sentiment_7d"] == 0.20
     assert features["news_article_count_7d"] == 9.0
-    assert features["congress_buy_score"] == 0.0
-    assert features["insider_buy_score"] == 0.0
-    assert features["analyst_upgrade_score"] == 0.0
+    assert "congress_buy_score" not in features
+    assert "insider_buy_score" not in features
+    assert "analyst_upgrade_score" not in features
 
 
 def test_crypto_sentiment_rows_map_to_existing_research_contract() -> None:

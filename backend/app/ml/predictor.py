@@ -8,7 +8,7 @@ import lightgbm as lgbm
 import numpy as np
 from numpy.typing import NDArray
 
-from app.ml.features import ALL_FEATURES, FeatureVector, ordered_feature_row
+from app.ml.features import FeatureVector
 
 FloatArray = NDArray[np.float64]
 
@@ -30,6 +30,7 @@ class ModelPredictor:
         self.model_path = model_path
         self.min_confidence = min_confidence
         self._booster = lgbm.Booster(model_file=model_path)
+        self._feature_names = list(self._booster.feature_name())
 
     def predict(self, features: FeatureVector) -> PredictionResult | None:
         """Return a prediction or None when confidence is below threshold."""
@@ -68,13 +69,13 @@ class ModelPredictor:
             return {}
         return {
             feature_name: float(contrib)
-            for feature_name, contrib in zip(ALL_FEATURES, contribs, strict=True)
+            for feature_name, contrib in zip(self._feature_names, contribs, strict=True)
         }
 
     def _vectorize(self, features: FeatureVector) -> list[float]:
         """Convert a feature dictionary into an ordered numeric row."""
 
-        return ordered_feature_row(features)
+        return [float(features.get(name, 0.0)) for name in self._feature_names]
 
     def _extract_class_probs(
         self,
@@ -101,7 +102,7 @@ class ModelPredictor:
     ) -> FloatArray | None:
         """Normalize LightGBM contribution output into one feature vector."""
 
-        feature_count_with_bias = len(ALL_FEATURES) + 1
+        feature_count_with_bias = len(self._feature_names) + 1
         if contributions.ndim == 3 and contributions.shape[0] >= 1:
             if class_index >= contributions.shape[1]:
                 return None
@@ -122,7 +123,7 @@ class ModelPredictor:
         expected_multiclass_width = 3 * feature_count_with_bias
         if row.shape[0] == expected_multiclass_width:
             start = class_index * feature_count_with_bias
-            end = start + len(ALL_FEATURES)
+            end = start + len(self._feature_names)
             multiclass_contributions = np.asarray(row[start:end], dtype=np.float64)
             return multiclass_contributions
 

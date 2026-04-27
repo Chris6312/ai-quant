@@ -445,7 +445,7 @@ def test_model_registry_ignores_active_models_with_missing_artifacts(
 
 
 def test_feature_parity_endpoint_reports_valid_contract() -> None:
-    """Parity endpoint should confirm stock and crypto align to the feature contract."""
+    """Parity endpoint should confirm asset-specific contracts are valid."""
 
     client = TestClient(app)
     response = client.get("/ml/features/parity")
@@ -453,7 +453,7 @@ def test_feature_parity_endpoint_reports_valid_contract() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["parity_ok"] is True
-    assert payload["same_feature_order"] is True
+    assert payload["same_feature_order"] is False
     assert payload["stock_contract_valid"] is True
     assert payload["crypto_contract_valid"] is True
     assert payload["feature_count"] > 0

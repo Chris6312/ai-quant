@@ -52,6 +52,18 @@ TECHNICAL_FEATURES: list[str] = [
     "days_to_month_end",
 ]
 
+CRYPTO_EXCLUDED_CALENDAR_FEATURES: tuple[str, ...] = (
+    "day_of_week",
+    "day_of_month",
+    "days_to_month_end",
+)
+
+CRYPTO_TECHNICAL_FEATURES: list[str] = [
+    feature_name
+    for feature_name in TECHNICAL_FEATURES
+    if feature_name not in CRYPTO_EXCLUDED_CALENDAR_FEATURES
+]
+
 RESEARCH_FEATURES: list[str] = [
     "news_sentiment_1d",
     "news_sentiment_7d",
@@ -94,6 +106,17 @@ CRYPTO_REPLACE_LATER_RESEARCH_FEATURES: tuple[str, ...] = (
     "analyst_upgrade_score",
     "consensus_rating",
 )
+
+CRYPTO_RESEARCH_FEATURES: list[str] = list(CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES)
+CRYPTO_FEATURES: list[str] = CRYPTO_TECHNICAL_FEATURES + CRYPTO_RESEARCH_FEATURES
+
+
+def feature_names_for_asset_class(asset_class: str) -> list[str]:
+    """Return the ordered model feature contract for the requested asset class."""
+
+    if asset_class.lower().strip() == "crypto":
+        return list(CRYPTO_FEATURES)
+    return list(ALL_FEATURES)
 
 
 @dataclass(slots=True, frozen=True)
@@ -153,11 +176,14 @@ class FeatureValidationResult:
         return not self.missing and not self.extra and not self.nonfinite
 
 
-def validate_feature_vector(features: Mapping[str, float]) -> FeatureValidationResult:
-    """Validate a feature vector against the canonical ML contract."""
+def validate_feature_vector(
+    features: Mapping[str, float],
+    asset_class: str = "stock",
+) -> FeatureValidationResult:
+    """Validate a feature vector against the requested asset-class contract."""
 
     feature_names = set(features)
-    expected_names = set(ALL_FEATURES)
+    expected_names = set(feature_names_for_asset_class(asset_class))
     missing = tuple(sorted(expected_names - feature_names))
     extra = tuple(sorted(feature_names - expected_names))
     nonfinite = tuple(
@@ -170,10 +196,14 @@ def validate_feature_vector(features: Mapping[str, float]) -> FeatureValidationR
     return FeatureValidationResult(missing=missing, extra=extra, nonfinite=nonfinite)
 
 
-def ordered_feature_row(features: Mapping[str, float]) -> list[float]:
+def ordered_feature_row(
+    features: Mapping[str, float],
+    asset_class: str = "stock",
+) -> list[float]:
     """Return a strictly ordered numeric feature row for downstream ML code."""
 
-    validation = validate_feature_vector(features)
+    feature_names = feature_names_for_asset_class(asset_class)
+    validation = validate_feature_vector(features, asset_class)
     if not validation.is_valid:
         details: list[str] = []
         if validation.missing:
@@ -184,7 +214,7 @@ def ordered_feature_row(features: Mapping[str, float]) -> list[float]:
             details.append(f"nonfinite={list(validation.nonfinite)}")
         detail_text = ", ".join(details)
         raise ValueError(f"Feature vector does not match ML contract: {detail_text}")
-    return [float(features[name]) for name in ALL_FEATURES]
+    return [float(features[name]) for name in feature_names]
 
 
 def build_feature_truth_metadata(asset_class: str) -> list[FeatureTruthMetadata]:
@@ -213,14 +243,17 @@ def build_feature_contract_summary() -> dict[str, object]:
         "all_features": list(ALL_FEATURES),
         "technical_features": list(TECHNICAL_FEATURES),
         "research_features": list(RESEARCH_FEATURES),
+        "crypto_feature_count": len(CRYPTO_FEATURES),
+        "crypto_features": list(CRYPTO_FEATURES),
+        "crypto_technical_features": list(CRYPTO_TECHNICAL_FEATURES),
+        "crypto_research_features": list(CRYPTO_RESEARCH_FEATURES),
+        "crypto_excluded_calendar_features": list(CRYPTO_EXCLUDED_CALENDAR_FEATURES),
         "stock_research_policy": (
             "stock feature vectors may include source-backed research features"
         ),
         "crypto_research_policy": (
-            "crypto feature vectors preserve the current numeric ML contract, but "
-            "research fields are explicitly classified as missing or "
-            "not_applicable_for_crypto until source-backed crypto research features "
-            "are implemented"
+            "crypto feature vectors use a separate crypto-specific ML contract that "
+            "excludes stock-only research fields and calendar artifacts"
         ),
         "crypto_source_backed_research_features": list(CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES),
         "crypto_not_applicable_research_features": list(
@@ -245,7 +278,16 @@ def build_feature_contract_summary() -> dict[str, object]:
 
 
 def _classify_feature_for_asset(feature_name: str, asset_class: str) -> FeatureTruthMetadata:
-    """Classify one feature for one asset class without changing numeric model input shape."""
+    """Classify one feature for one asset class."""
+
+    if asset_class == "crypto" and feature_name in CRYPTO_EXCLUDED_CALENDAR_FEATURES:
+        return FeatureTruthMetadata(
+            name=feature_name,
+            category="technical",
+            availability="not_applicable_for_crypto",
+            coverage_score=0.0,
+            reason="calendar artifact excluded from crypto model training",
+        )
 
     if feature_name in TECHNICAL_FEATURES:
         return FeatureTruthMetadata(
@@ -353,11 +395,13 @@ class FeatureEngineer:
             adx_14=adx_14,
         ):
             features[name] = value
-
+            
         research = self._research_inputs_for_asset(asset_class, research_signals)
         for name, value in self._research_feature_items(research):
             features[name] = value
-        return features
+
+        feature_names = feature_names_for_asset_class(asset_class)
+        return {name: features[name] for name in feature_names}
 
     def _research_inputs_for_asset(
         self,

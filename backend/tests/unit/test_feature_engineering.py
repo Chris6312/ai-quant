@@ -9,6 +9,9 @@ import pytest
 
 from app.ml.features import (
     ALL_FEATURES,
+    CRYPTO_EXCLUDED_CALENDAR_FEATURES,
+    CRYPTO_FEATURES,
+    CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES,
     RESEARCH_FEATURES,
     FeatureEngineer,
     ResearchInputs,
@@ -48,8 +51,8 @@ def _build_history(symbol: str, asset_class: str, count: int = 220) -> list[Cand
     return candles
 
 
-def test_feature_engineer_returns_full_contract_for_stock_and_crypto() -> None:
-    """Stock and crypto should emit the same feature keys in the same contract."""
+def test_feature_engineer_returns_asset_specific_contracts_for_stock_and_crypto() -> None:
+    """Crypto excludes calendar artifacts and stock-only research fields."""
 
     engineer = FeatureEngineer()
     stock_history = _build_history("AAPL", "stock")
@@ -72,19 +75,16 @@ def test_feature_engineer_returns_full_contract_for_stock_and_crypto() -> None:
     assert crypto_features is not None
     assert crypto_default_features is not None
     assert list(stock_features) == ALL_FEATURES
-    assert list(crypto_features) == ALL_FEATURES
-    assert tuple(stock_features) == tuple(crypto_features)
+    assert list(crypto_features) == CRYPTO_FEATURES
+    assert tuple(stock_features) != tuple(crypto_features)
     assert crypto_features["news_sentiment_1d"] == pytest.approx(0.8)
     assert crypto_features["news_sentiment_7d"] == pytest.approx(0.6)
     assert crypto_features["news_article_count_7d"] == pytest.approx(12.0)
-    assert crypto_features["congress_buy_score"] == crypto_default_features["congress_buy_score"]
-    assert crypto_features["insider_buy_score"] == crypto_default_features["insider_buy_score"]
-    assert crypto_features["analyst_upgrade_score"] == crypto_default_features[
-        "analyst_upgrade_score"
-    ]
-    assert crypto_features["watchlist_research_score"] == crypto_default_features[
-        "watchlist_research_score"
-    ]
+    for feature_name in CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES:
+        assert feature_name not in crypto_features
+    for feature_name in CRYPTO_EXCLUDED_CALENDAR_FEATURES:
+        assert feature_name not in crypto_features
+    assert "watchlist_research_score" not in crypto_features
     assert stock_features["news_sentiment_1d"] == pytest.approx(0.8)
     assert stock_features["watchlist_research_score"] == pytest.approx(88.0)
 
@@ -102,7 +102,7 @@ def test_feature_engineer_is_reproducible_for_identical_inputs() -> None:
     assert first is not None
     assert second is not None
     assert first == second
-    assert ordered_feature_row(first) == ordered_feature_row(second)
+    assert ordered_feature_row(first, "stock") == ordered_feature_row(second, "stock")
 
 
 def test_validate_feature_vector_flags_contract_problems() -> None:
@@ -122,6 +122,19 @@ def test_validate_feature_vector_flags_contract_problems() -> None:
     with pytest.raises(ValueError, match="Feature vector does not match ML contract"):
         ordered_feature_row(features)
 
+def test_validate_crypto_feature_vector_uses_crypto_contract() -> None:
+    """Crypto validation should reject stock-only or calendar ghost fields."""
+
+    crypto_features = dict.fromkeys(CRYPTO_FEATURES, 1.0)
+    validation = validate_feature_vector(crypto_features, "crypto")
+
+    assert validation.is_valid
+
+    crypto_features["day_of_month"] = 1.0
+    crypto_features["congress_buy_score"] = 1.0
+    validation = validate_feature_vector(crypto_features, "crypto")
+
+    assert validation.extra == ("congress_buy_score", "day_of_month")
 
 def test_feature_contract_summary_matches_feature_lists() -> None:
     """The summary endpoint payload should match the canonical contract."""
@@ -134,6 +147,8 @@ def test_feature_contract_summary_matches_feature_lists() -> None:
     )
     assert summary["all_features"] == ALL_FEATURES
     assert summary["research_features"] == RESEARCH_FEATURES
+    assert summary["crypto_features"] == CRYPTO_FEATURES
+    assert summary["crypto_feature_count"] == len(CRYPTO_FEATURES)
 
 
 def test_crypto_feature_truth_audit_marks_ghost_research_features() -> None:
