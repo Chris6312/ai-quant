@@ -139,6 +139,23 @@ class FoldSelectionResult:
     policy: dict[str, object]
 
 
+class NoEligibleProductionFoldError(ValueError):
+    """Raised when training completes but no fold is safe for production."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        folds: Sequence[FoldResult],
+        regime: str,
+        policy: Mapping[str, object],
+    ) -> None:
+        super().__init__(message)
+        self.folds = list(folds)
+        self.regime = regime
+        self.policy = dict(policy)
+
+
 class WalkForwardTrainer:
     """Train and validate LightGBM models using a sliding walk-forward window."""
 
@@ -457,23 +474,6 @@ class WalkForwardTrainer:
             if status == "eligible":
                 eligible.append(updated)
 
-        if not eligible:
-            raise ValueError(
-                "No production-eligible recent crypto fold passed model selection policy"
-            )
-
-        best = max(eligible, key=lambda fold: fold.validation_sharpe)
-        labeled = [
-            replace(
-                fold,
-                eligibility_status="active",
-                eligibility_reason="selected_highest_recent_sharpe",
-            )
-            if fold.fold_index == best.fold_index
-            else fold
-            for fold in labeled
-        ]
-        active = next(fold for fold in labeled if fold.fold_index == best.fold_index)
         policy: dict[str, object] = {
             "selector": "highest_recent_eligible_validation_sharpe",
             "regime": regime.regime,
@@ -491,6 +491,27 @@ class WalkForwardTrainer:
             "atr_percentile_rank": regime.atr_percentile_rank,
             "regime_reasons": list(regime.reasons),
         }
+
+        if not eligible:
+            raise NoEligibleProductionFoldError(
+                "No production-eligible recent crypto fold passed model selection policy",
+                folds=labeled,
+                regime=regime.regime,
+                policy=policy,
+            )
+
+        best = max(eligible, key=lambda fold: fold.validation_sharpe)
+        labeled = [
+            replace(
+                fold,
+                eligibility_status="active",
+                eligibility_reason="selected_highest_recent_sharpe",
+            )
+            if fold.fold_index == best.fold_index
+            else fold
+            for fold in labeled
+        ]
+        active = next(fold for fold in labeled if fold.fold_index == best.fold_index)
         return FoldSelectionResult(
             best_fold=active,
             folds=labeled,

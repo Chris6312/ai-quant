@@ -44,7 +44,7 @@ from app.ml.sentiment_refresh import (
     run_crypto_sentiment_refresh_training,
 )
 from app.ml.stock_universe import StockUniverseLoader, StockUniverseSnapshot
-from app.ml.trainer import TrainerConfig, TrainResult
+from app.ml.trainer import NoEligibleProductionFoldError, TrainerConfig, TrainResult
 from app.ml.training_inputs import (
     CryptoTrainingInputAssembler,
 )
@@ -592,11 +592,9 @@ def _build_feature_parity_report() -> Mapping[str, object]:
         "crypto_preview": {name: crypto_features[name] for name in list(crypto_features)[:5]},
     }
 
-def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryRecord]:
-    raw_folds = getattr(result, "folds", [])
-    if not isinstance(raw_folds, list):
-        return []
-
+def _serialize_fold_results(
+    raw_folds: Sequence[object],
+) -> list[model_registry.FoldSummaryRecord]:
     serialized: list[model_registry.FoldSummaryRecord] = []
     for raw_fold in raw_folds:
         fold = cast(FoldLike, raw_fold)
@@ -617,6 +615,27 @@ def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryReco
             }
         )
     return serialized
+
+
+def _serialize_folds(result: TrainResult) -> list[model_registry.FoldSummaryRecord]:
+    raw_folds = getattr(result, "folds", [])
+    if not isinstance(raw_folds, list):
+        return []
+    return _serialize_fold_results(raw_folds)
+
+def _no_eligible_crypto_fold_payload(
+    exc: NoEligibleProductionFoldError,
+) -> dict[str, object]:
+    folds = _serialize_fold_results(exc.folds)
+    return {
+        "outcome": "no_model_selected",
+        "reason": str(exc),
+        "fold_count": len(folds),
+        "folds": folds,
+        "selection_regime": exc.regime,
+        "selection_policy": exc.policy,
+    }
+
 
 def _register_training_result(
     *,
@@ -733,6 +752,18 @@ async def _run_registered_training_job(
             result=result,
             latest_job_id=latest_job_id,
         )
+    except NoEligibleProductionFoldError as exc:
+        if latest_job_id is not None:
+            payload = _no_eligible_crypto_fold_payload(exc)
+            job_store.update_job(
+                latest_job_id,
+                status="done",
+                progress_pct=100,
+                status_message="No production model selected; all folds failed guardrails",
+                error=None,
+                result=payload,
+            )
+        raise
     except Exception as exc:
         if latest_job_id is not None:
             job_store.update_job(
@@ -2070,10 +2101,18 @@ async def train_crypto_after_sentiment_backfill(
 async def train_crypto() -> Mapping[str, object]:
     _ensure_no_running_job()
     job = _new_job("crypto_train", [ALL_CRYPTO_TRAINING_SYMBOL])
-    record, _ = await _run_registered_training_job(
-        asset_class="crypto",
-        latest_job_id=str(job["job_id"]),
-    )
+    try:
+        record, _ = await _run_registered_training_job(
+            asset_class="crypto",
+            latest_job_id=str(job["job_id"]),
+        )
+    except NoEligibleProductionFoldError as exc:
+        return {
+            "job_id": job["job_id"],
+            "asset_class": "crypto",
+            "status": "no_model_selected",
+            **_no_eligible_crypto_fold_payload(exc),
+        }
 
     return {
         "job_id": job["job_id"],

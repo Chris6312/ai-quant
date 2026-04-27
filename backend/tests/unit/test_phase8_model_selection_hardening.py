@@ -7,7 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
-from app.ml.trainer import FoldResult, TrainerConfig, WalkForwardTrainer
+from app.ml.trainer import (
+    FoldResult,
+    NoEligibleProductionFoldError,
+    TrainerConfig,
+    WalkForwardTrainer,
+)
 from app.models.domain import Candle
 
 
@@ -217,3 +222,38 @@ def test_crypto_training_uses_balanced_sample_weights(tmp_path: Path) -> None:
         np.asarray(labels, dtype=int),
         "stock",
     ) is None
+
+
+
+def test_crypto_selector_raises_structured_no_eligible_error(
+    tmp_path: Path,
+) -> None:
+    """No eligible crypto fold should be a structured outcome, not an opaque crash."""
+
+    trainer = WalkForwardTrainer(TrainerConfig(model_dir=str(tmp_path)))
+    low_accuracy = _fold(
+        index=139,
+        test_end=datetime(2026, 4, 24, tzinfo=UTC),
+        sharpe=2.64,
+        accuracy=0.175,
+        samples=465,
+        model_path=tmp_path / "model_crypto_fold139.lgbm",
+    )
+
+    try:
+        trainer._select_production_fold(
+            asset_class="crypto",
+            candles=_stable_crypto_candles(),
+            folds=[low_accuracy],
+        )
+    except NoEligibleProductionFoldError as exc:
+        assert str(exc) == (
+            "No production-eligible recent crypto fold passed model selection policy"
+        )
+        assert exc.regime in {"normal", "normal_stable", "very_volatile"}
+        assert exc.policy["min_validation_accuracy"] == 0.35
+        assert len(exc.folds) == 1
+        assert exc.folds[0].eligibility_status == "research_only"
+        assert exc.folds[0].eligibility_reason == "accuracy_below_threshold"
+    else:
+        raise AssertionError("Expected NoEligibleProductionFoldError")

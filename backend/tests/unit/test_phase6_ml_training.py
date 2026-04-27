@@ -13,7 +13,12 @@ from app.api.routers import ml as ml_router
 from app.main import app
 from app.ml import job_store, model_registry
 from app.ml.features import FeatureEngineer
-from app.ml.trainer import FoldResult, TrainerConfig, TrainResult
+from app.ml.trainer import (
+    FoldResult,
+    NoEligibleProductionFoldError,
+    TrainerConfig,
+    TrainResult,
+)
 from app.models.domain import Candle
 
 
@@ -239,6 +244,67 @@ async def test_train_crypto_endpoint_uses_all_crypto_metadata_and_no_symbol_filt
     jobs = job_store.list_jobs()
     assert len(jobs) == 1
     assert jobs[0]["symbols"] == [ml_router.ALL_CRYPTO_TRAINING_SYMBOL]
+
+
+@pytest.mark.asyncio
+async def test_train_crypto_endpoint_returns_no_model_selected_when_guardrails_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Training guardrail rejection should be a 200 outcome, not a 500 error."""
+
+    runtime_dir = tmp_path / ".runtime"
+    monkeypatch.setattr(job_store, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(job_store, "_JOB_STORE_PATH", runtime_dir / "ml_jobs.json")
+    monkeypatch.setattr(model_registry, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(
+        model_registry,
+        "_REGISTRY_PATH",
+        runtime_dir / "ml_model_registry.json",
+    )
+    monkeypatch.setattr(ml_router, "load_jobs", lambda: job_store.list_jobs())
+
+    fold = FoldResult(
+        fold_index=139,
+        train_start=datetime(2025, 9, 30, tzinfo=UTC),
+        train_end=datetime(2026, 3, 30, tzinfo=UTC),
+        test_start=datetime(2026, 4, 1, tzinfo=UTC),
+        test_end=datetime(2026, 4, 23, tzinfo=UTC),
+        n_train_samples=2_700,
+        n_test_samples=465,
+        validation_accuracy=0.175,
+        validation_sharpe=2.64,
+        passed=False,
+        model_path="models/model_crypto_fold139.lgbm",
+        eligibility_status="research_only",
+        eligibility_reason="accuracy_below_threshold",
+    )
+
+    async def _fake_train_crypto_result() -> TrainResult:
+        raise NoEligibleProductionFoldError(
+            "No production-eligible recent crypto fold passed model selection policy",
+            folds=[fold],
+            regime="normal",
+            policy={"min_validation_accuracy": 0.35},
+        )
+
+    monkeypatch.setattr(ml_router, "_train_crypto_result", _fake_train_crypto_result)
+
+    client = TestClient(app)
+    response = client.post("/ml/train/crypto")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "no_model_selected"
+    assert payload["outcome"] == "no_model_selected"
+    assert payload["fold_count"] == 1
+    assert payload["folds"][0]["eligibility_reason"] == "accuracy_below_threshold"
+
+    jobs = job_store.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "done"
+    assert jobs[0]["result"] is not None
+    assert jobs[0]["result"]["outcome"] == "no_model_selected"
 
 def test_train_endpoint_blocks_when_job_running(
     monkeypatch: pytest.MonkeyPatch,

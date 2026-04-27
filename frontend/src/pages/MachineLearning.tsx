@@ -937,6 +937,14 @@ const MachineLearning: React.FC = () => {
     try {
       setter(true);
       const response = await trainMlModel(assetClass);
+      if (response.outcome === 'no_model_selected' || response.status === 'no_model_selected') {
+        setBanner({
+          tone: 'info',
+          message: `${assetClass.toUpperCase()} training completed, but no production model was selected because all folds failed guardrails.`,
+        });
+        await loadPageData();
+        return;
+      }
       const runLabel = response.job?.job_id ?? response.model_id ?? 'completed';
       setBanner({ tone: 'success', message: `${assetClass.toUpperCase()} training response: ${runLabel}` });
       await loadPageData();

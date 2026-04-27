@@ -716,6 +716,10 @@ export type TrainModelResponse = {
   model_id?: string;
   best_fold?: number;
   asset_class?: 'crypto' | 'stock';
+  status?: 'active' | 'no_model_selected' | string;
+  outcome?: 'no_model_selected' | string;
+  reason?: string;
+  fold_count?: number;
 };
 
 export const getMlJobs = () => requestJson<MlJob[]>('/ml/jobs');
