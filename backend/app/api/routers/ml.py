@@ -753,8 +753,19 @@ async def _run_registered_training_job(
             latest_job_id=latest_job_id,
         )
     except NoEligibleProductionFoldError as exc:
+        retired_models = model_registry.retire_active_models(
+            asset_class,
+            reason="no_production_eligible_fold",
+        )
         if latest_job_id is not None:
-            payload = _no_eligible_crypto_fold_payload(exc)
+            payload = {
+                **_no_eligible_crypto_fold_payload(exc),
+                "retired_model_ids": [
+                    model.get("model_id")
+                    for model in retired_models
+                    if isinstance(model.get("model_id"), str)
+                ],
+            }
             job_store.update_job(
                 latest_job_id,
                 status="done",

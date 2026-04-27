@@ -50,6 +50,8 @@ class ModelRecord(TypedDict, total=False):
     selection_policy: dict[str, object]
     created_at: str
     updated_at: str
+    retired_reason: str
+    retired_at: str
 
 
 def _candidate_artifact_paths(raw_path: str) -> list[Path]:
@@ -152,6 +154,29 @@ def register_model(model: ModelRecord) -> ModelRecord:
         _save_registry_unlocked(models)
     return record
 
+
+
+
+def retire_active_models(asset_class: str, *, reason: str) -> list[ModelRecord]:
+    """Retire active models for an asset class and persist the registry update."""
+
+    now = datetime.now(UTC).isoformat()
+    retired: list[ModelRecord] = []
+    with _LOCK:
+        models = _load_registry_unlocked()
+        for model in models:
+            if (
+                model.get("asset_class") == asset_class
+                and model.get("status") == "active"
+            ):
+                model["status"] = "retired"
+                model["updated_at"] = now
+                model["retired_at"] = now
+                model["retired_reason"] = reason
+                retired.append(model)
+        if retired:
+            _save_registry_unlocked(models)
+    return retired
 
 def list_models(asset_class: str | None = None) -> list[ModelRecord]:
     with _LOCK:

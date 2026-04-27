@@ -289,6 +289,32 @@ async def test_train_crypto_endpoint_returns_no_model_selected_when_guardrails_f
         )
 
     monkeypatch.setattr(ml_router, "_train_crypto_result", _fake_train_crypto_result)
+    models_dir = tmp_path / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "old_crypto.lgbm").write_text("old model", encoding="utf-8")
+    monkeypatch.setattr(model_registry, "_BACKEND_DIR", tmp_path)
+    monkeypatch.setattr(model_registry, "_PROJECT_DIR", tmp_path)
+    model_registry.register_model(
+        {
+            "model_id": "old-crypto-model",
+            "asset_class": "crypto",
+            "status": "active",
+            "artifact_path": "models/old_crypto.lgbm",
+            "trained_at": "2026-04-26T10:00:00+00:00",
+            "fold_count": 1,
+            "best_fold": 138,
+            "validation_accuracy": 0.297,
+            "validation_sharpe": 1.79,
+            "train_samples": 2715,
+            "test_samples": 465,
+            "feature_count": 50,
+            "confidence_threshold": 0.6,
+            "latest_job_id": "old-job",
+            "feature_importances": {},
+            "folds": [],
+            "created_at": "2026-04-26T10:00:00+00:00",
+        }
+    )
 
     client = TestClient(app)
     response = client.post("/ml/train/crypto")
@@ -305,6 +331,12 @@ async def test_train_crypto_endpoint_returns_no_model_selected_when_guardrails_f
     assert jobs[0]["status"] == "done"
     assert jobs[0]["result"] is not None
     assert jobs[0]["result"]["outcome"] == "no_model_selected"
+    assert jobs[0]["result"]["retired_model_ids"] == ["old-crypto-model"]
+    assert model_registry.get_active_model("crypto") is None
+    models = model_registry.list_models("crypto")
+    assert len(models) == 1
+    assert models[0]["status"] == "retired"
+    assert models[0]["retired_reason"] == "no_production_eligible_fold"
 
 def test_train_endpoint_blocks_when_job_running(
     monkeypatch: pytest.MonkeyPatch,
