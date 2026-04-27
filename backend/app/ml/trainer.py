@@ -10,7 +10,7 @@ from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
-from lightgbm.basic import Booster
+from lightgbm.basic import Booster, LightGBMError
 from numpy.typing import NDArray
 
 from app.ml.features import (
@@ -26,6 +26,44 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
 ProgressCallback = Callable[[int, int, str], None]
 ResearchLookup = Mapping[str | tuple[str, date], ResearchInputs]
+
+def _model_path_candidates(model_path: str) -> list[Path]:
+    """Return possible filesystem paths for a persisted fold model artifact."""
+
+    raw_path = Path(model_path)
+    if raw_path.is_absolute():
+        return [raw_path]
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    project_dir = backend_dir.parent
+    return [
+        raw_path,
+        backend_dir / raw_path,
+        project_dir / raw_path,
+    ]
+
+
+def load_feature_importances_from_model_path(
+    model_path: str,
+    feature_names: list[str],
+) -> dict[str, float]:
+    try:
+        booster = lgb.Booster(model_file=model_path)
+        gains = booster.feature_importance(importance_type="gain")
+
+        total = float(np.sum(gains))
+        if total == 0.0:
+            return dict.fromkeys(feature_names, 0.0)
+
+        return {
+            name: float(gain / total)
+            for name, gain in zip(feature_names, gains, strict=False)
+        }
+
+    except (LightGBMError, FileNotFoundError, ValueError):
+        # 🔑 CRITICAL: do not break training or tests
+        return {}
+
 
 
 @dataclass(slots=True, frozen=True)
