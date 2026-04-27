@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
+
 from app.db.models import CryptoDailySentimentRow
 from app.ml.features import FeatureEngineer, ResearchInputs
 from app.ml.trainer import WalkForwardTrainer
@@ -156,3 +158,83 @@ def test_trainer_prefers_date_specific_research_lookup() -> None:
     )
 
     assert selected == dated
+
+
+def _sentiment_row(
+    *,
+    symbol: str,
+    sentiment_date: date,
+    compound_score: float,
+    article_count: int,
+) -> CryptoDailySentimentRow:
+    """Build a source-backed sentiment row for sentiment lookup tests."""
+
+    return CryptoDailySentimentRow(
+        id=f"{symbol}:{sentiment_date.isoformat()}",
+        symbol=symbol,
+        asset_class="crypto",
+        sentiment_date=sentiment_date,
+        source_count=1,
+        article_count=article_count,
+        positive_score=0.60,
+        neutral_score=0.30,
+        negative_score=0.10,
+        compound_score=compound_score,
+        coverage_score=0.50,
+        created_at=datetime(2026, 4, 24, tzinfo=UTC),
+        updated_at=datetime(2026, 4, 24, tzinfo=UTC),
+    )
+
+
+def test_crypto_symbol_sentiment_overrides_macro_prior() -> None:
+    """Source-backed alt sentiment should not be overwritten by BTC/ETH macro weather."""
+
+    assembler = CryptoTrainingInputAssembler()
+    target_date = date(2026, 4, 24)
+    macro_research = ResearchInputs(
+        news_sentiment_1d=-0.80,
+        news_sentiment_7d=-0.60,
+        news_article_count_7d=20,
+    )
+    sushi_rows = [
+        _sentiment_row(
+            symbol="SUSHI/USD",
+            sentiment_date=target_date,
+            compound_score=0.40,
+            article_count=3,
+        )
+    ]
+
+    research = assembler._crypto_symbol_research_inputs(
+        symbol="SUSHI/USD",
+        sentiment_date=target_date,
+        symbol_rows=sushi_rows,
+        macro_research=macro_research,
+    )
+
+    assert research.news_sentiment_1d == 0.40
+    assert research.news_sentiment_7d == pytest.approx(0.40)
+    assert research.news_article_count_7d == 3
+
+
+def test_crypto_macro_sentiment_is_soft_prior_for_uncovered_alt() -> None:
+    """Alts without symbol coverage should receive reduced macro sentiment, not a clone."""
+
+    assembler = CryptoTrainingInputAssembler()
+    target_date = date(2026, 4, 24)
+    macro_research = ResearchInputs(
+        news_sentiment_1d=-0.80,
+        news_sentiment_7d=-0.60,
+        news_article_count_7d=20,
+    )
+
+    research = assembler._crypto_symbol_research_inputs(
+        symbol="SUSHI/USD",
+        sentiment_date=target_date,
+        symbol_rows=[],
+        macro_research=macro_research,
+    )
+
+    assert research.news_sentiment_1d == pytest.approx(-0.28)
+    assert research.news_sentiment_7d == -0.21
+    assert research.news_article_count_7d == 7

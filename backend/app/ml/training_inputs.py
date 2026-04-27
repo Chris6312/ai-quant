@@ -29,6 +29,8 @@ from app.ml.macro_sentiment import (
 from app.ml.trainer import TrainResult, WalkForwardTrainer
 from app.models.domain import Candle
 
+CRYPTO_MACRO_PRIOR_WEIGHT = 0.35
+
 
 @dataclass(slots=True, frozen=True)
 class StockTrainingDataset:
@@ -515,7 +517,7 @@ class CryptoTrainingDataset:
 
 
 class CryptoTrainingInputAssembler:
-    """Load crypto ML candles and map BTC/ETH macro sentiment into all crypto inputs."""
+    """Load crypto ML candles and map source-backed sentiment into crypto inputs."""
 
     async def assemble(
         self,
@@ -576,7 +578,11 @@ class CryptoTrainingInputAssembler:
         symbols: Sequence[str],
         sentiment_dates: Sequence[date],
     ) -> dict[tuple[str, date], ResearchInputs]:
-        """Build shared BTC/ETH macro sentiment and apply it to every crypto symbol/date."""
+        """Build date-specific crypto sentiment inputs.
+
+        Per-symbol rows are used when available. BTC/ETH sentiment is only a
+        reduced macro prior for symbols without source-backed symbol coverage.
+        """
 
         if not symbols or not sentiment_dates:
             return {}
@@ -588,9 +594,12 @@ class CryptoTrainingInputAssembler:
 
         start_date = unique_dates[0] - timedelta(days=6)
         end_date = unique_dates[-1]
+        sentiment_symbols = tuple(
+            self._ordered_unique_symbols((*normalized_symbols, "BTC/USD", "ETH/USD"))
+        )
         result = await session.execute(
             select(CryptoDailySentimentRow)
-            .where(CryptoDailySentimentRow.symbol.in_(("BTC/USD", "ETH/USD")))
+            .where(CryptoDailySentimentRow.symbol.in_(sentiment_symbols))
             .where(CryptoDailySentimentRow.asset_class == "crypto")
             .where(CryptoDailySentimentRow.sentiment_date >= start_date)
             .where(CryptoDailySentimentRow.sentiment_date <= end_date)
@@ -600,20 +609,27 @@ class CryptoTrainingInputAssembler:
             )
         )
         rows = list(result.scalars().all())
-        rows_by_symbol = self._macro_rows_by_symbol(rows)
+        rows_by_symbol = self._sentiment_rows_by_symbol(rows)
 
         macro_by_date: dict[date, ResearchInputs] = {}
         for sentiment_date in unique_dates:
             macro_by_date[sentiment_date] = self._macro_rows_to_research_inputs(
                 sentiment_date=sentiment_date,
-                btc_rows=rows_by_symbol["BTC/USD"],
-                eth_rows=rows_by_symbol["ETH/USD"],
+                btc_rows=rows_by_symbol.get("BTC/USD", []),
+                eth_rows=rows_by_symbol.get("ETH/USD", []),
             )
 
         lookup: dict[tuple[str, date], ResearchInputs] = {}
         for symbol in normalized_symbols:
+            symbol_rows = rows_by_symbol.get(symbol, [])
             for sentiment_date in unique_dates:
-                lookup[(symbol, sentiment_date)] = macro_by_date[sentiment_date]
+                macro_research = macro_by_date[sentiment_date]
+                lookup[(symbol, sentiment_date)] = self._crypto_symbol_research_inputs(
+                    symbol=symbol,
+                    sentiment_date=sentiment_date,
+                    symbol_rows=symbol_rows,
+                    macro_research=macro_research,
+                )
         return lookup
 
     def _macro_rows_by_symbol(
@@ -622,15 +638,100 @@ class CryptoTrainingInputAssembler:
     ) -> dict[str, list[CryptoDailySentimentRow]]:
         """Group source-backed macro sentiment rows by BTC/ETH symbol."""
 
-        grouped: dict[str, list[CryptoDailySentimentRow]] = {
-            "BTC/USD": [],
-            "ETH/USD": [],
+        grouped = self._sentiment_rows_by_symbol(rows)
+        return {
+            "BTC/USD": grouped.get("BTC/USD", []),
+            "ETH/USD": grouped.get("ETH/USD", []),
         }
+
+    def _sentiment_rows_by_symbol(
+        self,
+        rows: Sequence[CryptoDailySentimentRow],
+    ) -> dict[str, list[CryptoDailySentimentRow]]:
+        """Group source-backed sentiment rows by normalized symbol."""
+
+        grouped: dict[str, list[CryptoDailySentimentRow]] = defaultdict(list)
         for row in rows:
-            symbol = row.symbol.upper()
-            if symbol in grouped:
-                grouped[symbol].append(row)
-        return grouped
+            grouped[row.symbol.upper()].append(row)
+        return {symbol: list(symbol_rows) for symbol, symbol_rows in grouped.items()}
+
+    def _crypto_symbol_research_inputs(
+        self,
+        *,
+        symbol: str,
+        sentiment_date: date,
+        symbol_rows: Sequence[CryptoDailySentimentRow],
+        macro_research: ResearchInputs,
+    ) -> ResearchInputs:
+        """Return per-symbol sentiment or a reduced BTC/ETH macro prior."""
+
+        symbol_research = self._symbol_rows_to_research_inputs(
+            sentiment_date=sentiment_date,
+            rows=symbol_rows,
+        )
+        if symbol_research.news_article_count_7d > 0:
+            return symbol_research
+
+        if symbol in {"BTC/USD", "ETH/USD"}:
+            return symbol_research
+
+        return self._soften_macro_research_inputs(macro_research)
+
+    def _symbol_rows_to_research_inputs(
+        self,
+        *,
+        sentiment_date: date,
+        rows: Sequence[CryptoDailySentimentRow],
+    ) -> ResearchInputs:
+        """Convert source-backed rows for one symbol into research inputs."""
+
+        trailing_start = sentiment_date - timedelta(days=6)
+        trailing_rows = [
+            row
+            for row in rows
+            if trailing_start <= row.sentiment_date <= sentiment_date
+            and row.article_count > 0
+            and row.coverage_score > 0.0
+        ]
+        one_day = next(
+            (row for row in trailing_rows if row.sentiment_date == sentiment_date),
+            None,
+        )
+        if not trailing_rows:
+            return ResearchInputs()
+
+        weighted_total = 0.0
+        article_count = 0
+        for row in trailing_rows:
+            observed = self._observed_compound_score(row)
+            if observed is None:
+                continue
+            row_articles = max(0, int(row.article_count))
+            weighted_total += observed * row_articles
+            article_count += row_articles
+
+        one_day_score = self._observed_compound_score(one_day)
+        trailing_score = weighted_total / article_count if article_count > 0 else 0.0
+        return ResearchInputs(
+            news_sentiment_1d=self._feature_float(one_day_score),
+            news_sentiment_7d=self._feature_float(trailing_score),
+            news_article_count_7d=article_count,
+        )
+
+    def _soften_macro_research_inputs(self, macro_research: ResearchInputs) -> ResearchInputs:
+        """Return BTC/ETH macro sentiment as a low-weight prior for uncovered alts."""
+
+        return ResearchInputs(
+            news_sentiment_1d=(
+                macro_research.news_sentiment_1d * CRYPTO_MACRO_PRIOR_WEIGHT
+            ),
+            news_sentiment_7d=(
+                macro_research.news_sentiment_7d * CRYPTO_MACRO_PRIOR_WEIGHT
+            ),
+            news_article_count_7d=round(
+                macro_research.news_article_count_7d * CRYPTO_MACRO_PRIOR_WEIGHT
+            ),
+        )
 
     def _macro_rows_to_research_inputs(
         self,
