@@ -33,6 +33,7 @@ ZERO_SIZE_MULTIPLIER: Final[float] = 0.0
 def compose_dynamic_decision(
     *,
     symbol: str,
+    asset_class: str = "crypto",
     ml_bias: MlBiasDecision,
     macro_sentiment: MacroSentimentDecision,
     symbol_sentiment: SymbolSentimentDecision,
@@ -48,12 +49,14 @@ def compose_dynamic_decision(
     """
 
     final_decision = compose_final_decision(
+        asset_class=asset_class,
         ml_bias=ml_bias,
         sentiment_merge=sentiment_merge,
         intraday_confirmation=intraday_confirmation,
     )
     return DynamicDecision(
         symbol=symbol,
+        asset_class="stock" if asset_class == "stock" else "crypto",
         ml_bias=ml_bias,
         macro_sentiment=macro_sentiment,
         symbol_sentiment=symbol_sentiment,
@@ -65,6 +68,7 @@ def compose_dynamic_decision(
 
 def compose_final_decision(
     *,
+    asset_class: str = "crypto",
     ml_bias: MlBiasDecision,
     sentiment_merge: SentimentDecisionMerge,
     intraday_confirmation: IntradayConfirmation,
@@ -86,6 +90,17 @@ def compose_final_decision(
             size_multiplier=ZERO_SIZE_MULTIPLIER,
             reason="No closed-candle intraday setup is available yet.",
             conflicts=conflicts,
+        )
+
+    if asset_class == "crypto" and setup_direction == "short":
+        return _decision(
+            action="no_trade",
+            direction="short",
+            reason=(
+                "Crypto short trades are disabled; bearish crypto alignment "
+                "is treated as a no-trade risk signal."
+            ),
+            conflicts=[*conflicts, "crypto_short_disabled"],
         )
 
     technical_strength = _technical_strength(intraday_confirmation)

@@ -582,12 +582,29 @@ function mlDirectionToDecisionDirection(
   return "unknown";
 }
 
+function isCryptoShortTradeDisabled(
+  row: MlPredictionRow,
+  intraday: ResearchIntradayDecisionResponse | null,
+): boolean {
+  if (row.asset_class !== "crypto") {
+    return false;
+  }
+  const intradayDirection = getIntradayDirection(intraday);
+  if (intradayDirection === "short") {
+    return true;
+  }
+  return !intraday && mlDirectionToDecisionDirection(row) === "short";
+}
+
 function getDecisionAction(
   row: MlPredictionRow,
   intraday: ResearchIntradayDecisionResponse | null,
 ): string {
   if (row.sentiment_gate?.state === "blocked" && !intradayHasProof(intraday)) {
     return "block";
+  }
+  if (isCryptoShortTradeDisabled(row, intraday)) {
+    return "no_trade";
   }
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
@@ -630,6 +647,9 @@ function getRiskMode(
   if (row.sentiment_gate?.state === "blocked" && !intradayHasProof(intraday)) {
     return "blocked";
   }
+  if (isCryptoShortTradeDisabled(row, intraday)) {
+    return "blocked";
+  }
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
   if (intraday && intradayDirection === "unknown") {
@@ -658,6 +678,9 @@ function getDecisionReason(
 ): string {
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
+  if (isCryptoShortTradeDisabled(row, intraday)) {
+    return "Crypto short trades are disabled. Bearish crypto alignment is treated as a no-trade risk signal, not an executable trade.";
+  }
   if (intraday && intradayDirection === "unknown") {
     return "Intraday structure is mixed or neutral. The 15m chart is timing only and cannot promote an unconfirmed 1h/4h setup.";
   }
@@ -1237,10 +1260,6 @@ const Research: React.FC = () => {
   const signalCount = latestPredictionRows.filter(
     (row) => row.action === "signal",
   ).length;
-  const skipCount = latestPredictionRows.filter(
-    (row) => row.action === "skip",
-  ).length;
-  const allPredictionsSkipped = predictionCount > 0 && signalCount === 0;
   const hiddenHistoricalRows = Math.max(
     rawPredictionCount - predictionCount,
     0,
@@ -1353,12 +1372,6 @@ const Research: React.FC = () => {
               Crypto scope source: {cryptoScopeSource}. Promoted symbols: {" "}
               {promotedSymbols.length > 0 ? promotedSymbols.join(", ") : "none"}.
             </div>
-            {allPredictionsSkipped ? (
-              <div style={{ marginTop: 6, color: "var(--amber)" }}>
-                No high-confidence crypto signals right now. {skipCount} latest
-                predictions are currently marked no trade.
-              </div>
-            ) : null}
             {hiddenHistoricalRows > 0 ? (
               <div style={{ marginTop: 6, color: "var(--text4)" }}>
                 Showing the newest prediction per symbol. {hiddenHistoricalRows}{" "}

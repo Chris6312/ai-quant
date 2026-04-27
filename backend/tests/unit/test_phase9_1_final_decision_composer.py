@@ -109,10 +109,35 @@ def test_macro_bearish_symbol_bullish_technical_bullish_reduces_risk() -> None:
     assert decision.conflicts == ["sentiment_headwind"]
 
 
-def test_macro_bearish_symbol_weak_technical_weak_blocks() -> None:
-    """No local proof against bad market weather is a visible block."""
+def test_crypto_bearish_setup_is_no_trade_even_with_ml_alignment() -> None:
+    """Crypto bearish alignment is never executable as a short trade."""
 
     decision = compose_final_decision(
+        ml_bias=_ml(direction="short"),
+        sentiment_merge=_sentiment(
+            macro_bias="bearish",
+            symbol_bias="neutral",
+            decision="macro_headwind",
+            effect="headwind",
+        ),
+        intraday_confirmation=_intraday(
+            trend="bearish",
+            breakout=False,
+            volume_expansion=False,
+        ),
+    )
+
+    assert decision.action == "no_trade"
+    assert decision.direction == "short"
+    assert decision.size_multiplier == 0.0
+    assert "crypto_short_disabled" in decision.conflicts
+
+
+def test_stock_bearish_setup_can_still_block_when_weak() -> None:
+    """Stock shorts remain eligible for normal risk evaluation outside crypto."""
+
+    decision = compose_final_decision(
+        asset_class="stock",
         ml_bias=_ml(direction="short"),
         sentiment_merge=_sentiment(
             macro_bias="bearish",
@@ -131,7 +156,6 @@ def test_macro_bearish_symbol_weak_technical_weak_blocks() -> None:
     assert decision.direction == "short"
     assert decision.size_multiplier == 0.0
     assert "weak_local_proof" in decision.conflicts
-
 
 def test_aligned_bullish_layers_boost() -> None:
     """Macro bullish plus symbol bullish plus technical bullish can boost."""
