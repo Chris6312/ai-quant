@@ -610,6 +610,7 @@ def _serialize_fold_results(
                 "n_train_samples": fold.n_train_samples,
                 "n_test_samples": fold.n_test_samples,
                 "model_path": fold.model_path,
+                "feature_importances": dict(getattr(fold, "feature_importances", {})),
                 "eligibility_status": getattr(fold, "eligibility_status", "research_only"),
                 "eligibility_reason": getattr(fold, "eligibility_reason", "not_evaluated"),
             }

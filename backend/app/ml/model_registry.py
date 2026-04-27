@@ -4,7 +4,7 @@ import json
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 
 _LOCK = threading.Lock()
 _RUNTIME_DIR = Path("backend/.runtime")
@@ -25,6 +25,7 @@ class FoldSummaryRecord(TypedDict):
     n_train_samples: int
     n_test_samples: int
     model_path: str
+    feature_importances: dict[str, float]
     eligibility_status: str
     eligibility_reason: str
 
@@ -48,10 +49,9 @@ class ModelRecord(TypedDict, total=False):
     folds: list[FoldSummaryRecord]
     selection_regime: str
     selection_policy: dict[str, object]
+    retired_reason: NotRequired[str]
     created_at: str
     updated_at: str
-    retired_reason: str
-    retired_at: str
 
 
 def _candidate_artifact_paths(raw_path: str) -> list[Path]:
@@ -155,29 +155,6 @@ def register_model(model: ModelRecord) -> ModelRecord:
     return record
 
 
-
-
-def retire_active_models(asset_class: str, *, reason: str) -> list[ModelRecord]:
-    """Retire active models for an asset class and persist the registry update."""
-
-    now = datetime.now(UTC).isoformat()
-    retired: list[ModelRecord] = []
-    with _LOCK:
-        models = _load_registry_unlocked()
-        for model in models:
-            if (
-                model.get("asset_class") == asset_class
-                and model.get("status") == "active"
-            ):
-                model["status"] = "retired"
-                model["updated_at"] = now
-                model["retired_at"] = now
-                model["retired_reason"] = reason
-                retired.append(model)
-        if retired:
-            _save_registry_unlocked(models)
-    return retired
-
 def list_models(asset_class: str | None = None) -> list[ModelRecord]:
     with _LOCK:
         models = _load_registry_unlocked()
@@ -203,3 +180,23 @@ def get_active_model(asset_class: str) -> ModelRecord | None:
         ),
         None,
     )
+
+def retire_active_models(asset_class: str, reason: str) -> list[ModelRecord]:
+    """Mark all active models for an asset class as retired."""
+    now = datetime.now(UTC).isoformat()
+    retired: list[ModelRecord] = []
+
+    with _LOCK:
+        models = _load_registry_unlocked()
+        for model in models:
+            if (
+                model.get("asset_class") == asset_class
+                and model.get("status") == "active"
+            ):
+                model["status"] = "retired"
+                model["retired_reason"] = reason
+                model["updated_at"] = now
+                retired.append(model)
+        _save_registry_unlocked(models)
+
+    return retired

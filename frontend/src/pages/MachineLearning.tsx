@@ -21,6 +21,7 @@ import {
   type GainersResponse,
   type MlModelImportancesResponse,
   type MlModelRecord,
+  type ModelFold,
   type MlModelsResponse,
   type MlPredictionRow,
   type MlPredictionShapResponse,
@@ -95,6 +96,7 @@ type BannerState = {
 };
 
 type Fold = {
+  foldIndex: number;
   label: string;
   window: string;
   trainL: number;
@@ -464,12 +466,37 @@ function PipeConnector({ done }: { done: boolean }): React.ReactElement {
   return <div style={{ flex: 1, height: 1, background: done ? S.green3 : S.border, marginTop: -22 }} />;
 }
 
-function FoldRow({ fold }: { fold: Fold }): React.ReactElement {
+function FoldRow({ fold, selected, onSelect }: { fold: Fold; selected?: boolean; onSelect?: () => void }): React.ReactElement {
   const statusLabel = fold.best ? 'Active' : fold.eligibilityStatus === 'eligible' ? 'Eligible' : 'Research-only';
   const statusTone: BadgeVariant = fold.best ? 'green' : fold.eligibilityStatus === 'eligible' ? 'blue' : 'muted';
   const statusColors = BADGE_TONES[statusTone];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 84px', gap: 10, alignItems: 'center', padding: fold.best ? '7px 6px' : '7px 0', borderBottom: `0.5px solid ${S.border}`, background: fold.best ? 'rgba(0,229,160,0.03)' : 'transparent', borderRadius: fold.best ? S.rSm : 0 }}>
+    <div
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (!onSelect) {
+          return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '70px 1fr 80px 72px 84px',
+        gap: 10,
+        alignItems: 'center',
+        padding: fold.best || selected ? '7px 6px' : '7px 0',
+        borderBottom: `0.5px solid ${S.border}`,
+        background: fold.best ? 'rgba(0,229,160,0.03)' : selected ? 'rgba(77,159,255,0.08)' : 'transparent',
+        borderRadius: fold.best || selected ? S.rSm : 0,
+        cursor: onSelect ? 'pointer' : 'default',
+        outline: 'none',
+      }}
+    >
       <span style={{ fontSize: 10, color: fold.best ? S.green : S.text3 }}>{fold.label}{fold.best ? ' ★' : ''}</span>
       <div>
         <div style={{ fontSize: 9, color: S.text3, marginBottom: 3 }}>{fold.window}</div>
@@ -483,6 +510,94 @@ function FoldRow({ fold }: { fold: Fold }): React.ReactElement {
       <span title={fold.eligibilityReason.replaceAll('_', ' ')} style={{ textAlign: 'center', fontSize: 8, padding: '1px 5px', borderRadius: S.rSm, textTransform: 'uppercase', letterSpacing: '0.08em', background: statusColors.bg, color: statusColors.color, border: `0.5px solid ${statusColors.border}` }}>{statusLabel}</span>
     </div>
   );
+}
+
+function isModelFold(value: unknown): value is ModelFold {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as Partial<ModelFold>;
+  return (
+    typeof candidate.fold_index === 'number' &&
+    typeof candidate.train_start === 'string' &&
+    typeof candidate.train_end === 'string' &&
+    typeof candidate.test_end === 'string' &&
+    typeof candidate.validation_sharpe === 'number' &&
+    typeof candidate.validation_accuracy === 'number' &&
+    typeof candidate.n_train_samples === 'number' &&
+    typeof candidate.n_test_samples === 'number'
+  );
+}
+
+function getNoModelSelectedFolds(persistence: MlPersistenceResponse | null): ModelFold[] {
+  const job = persistence?.jobs.find((item) => {
+    const result = item.result;
+    return item.asset_class === 'crypto' && result?.outcome === 'no_model_selected';
+  });
+  const rawFolds = job?.result?.folds;
+  if (!Array.isArray(rawFolds)) {
+    return [];
+  }
+  return rawFolds.filter(isModelFold);
+}
+
+function getDiagnosticImportanceFold(
+  folds: ModelFold[],
+  selectedFoldIndex: number | null,
+): ModelFold | null {
+  const foldsWithImportances = folds.filter((fold) => {
+    const importances = fold.feature_importances ?? {};
+    return Object.keys(importances).length > 0;
+  });
+  if (foldsWithImportances.length === 0) {
+    return null;
+  }
+
+  const selectedFold = selectedFoldIndex === null
+    ? null
+    : foldsWithImportances.find((fold) => fold.fold_index === selectedFoldIndex) ?? null;
+  if (selectedFold) {
+    return selectedFold;
+  }
+
+  return [...foldsWithImportances].sort((a, b) => {
+    if (b.validation_accuracy !== a.validation_accuracy) {
+      return b.validation_accuracy - a.validation_accuracy;
+    }
+    return b.validation_sharpe - a.validation_sharpe;
+  })[0] ?? null;
+}
+
+function toDiagnosticImportances(fold: ModelFold): MlModelImportancesResponse {
+  const entries = Object.entries(fold.feature_importances ?? {});
+  const importances = entries
+    .map(([feature, importance]) => ({ feature, importance }))
+    .sort((a, b) => b.importance - a.importance);
+
+  return {
+    model_id: 'rejected-crypto-fold-' + fold.fold_index,
+    asset_class: 'crypto',
+    feature_count: importances.length,
+    importances,
+    generated_at: new Date().toISOString(),
+  };
+}
+
+function toFoldRow(fold: ModelFold, activeFold: number | null): Fold {
+  return {
+    foldIndex: fold.fold_index,
+    label: `Fold ${fold.fold_index}`,
+    window: `${new Date(fold.train_start).toLocaleDateString()} → ${new Date(fold.train_end).toLocaleDateString()} | ${new Date(fold.test_end).toLocaleDateString()}`,
+    trainL: 0,
+    trainW: 78,
+    testL: 78,
+    testW: 22,
+    sharpe: fold.validation_sharpe,
+    acc: fold.validation_accuracy * 100,
+    best: activeFold !== null && fold.fold_index === activeFold,
+    eligibilityStatus: fold.eligibility_status ?? (activeFold !== null && fold.fold_index === activeFold ? 'active' : 'research_only'),
+    eligibilityReason: fold.eligibility_reason ?? 'not_evaluated',
+  };
 }
 
 function ModelCard({ d }: { d: ModelCardData }): React.ReactElement {
@@ -537,6 +652,7 @@ const MachineLearning: React.FC = () => {
   const [featureParity, setFeatureParity] = useState<FeatureParityResponse | null>(null);
   const [selectedImportanceAsset, setSelectedImportanceAsset] = useState<AssetClass>('crypto');
   const [selectedImportanceLimit, setSelectedImportanceLimit] = useState<ImportanceDisplayLimit>(10);
+  const [selectedDiagnosticFoldIndex, setSelectedDiagnosticFoldIndex] = useState<number | null>(null);
   const [selectedImportances, setSelectedImportances] = useState<MlModelImportancesResponse | null>(null);
   const [isLoadingImportances, setIsLoadingImportances] = useState(false);
   const [importanceError, setImportanceError] = useState<string | null>(null);
@@ -684,17 +800,48 @@ const MachineLearning: React.FC = () => {
     () => modelsResponse?.models.filter((model) => model.asset_class === 'crypto') ?? [],
     [modelsResponse],
   );
+  const noModelSelectedFolds = useMemo(
+    () => getNoModelSelectedFolds(persistence),
+    [persistence],
+  );
   const cryptoPredictionFreshness = predictionsResponse?.freshness_by_asset.crypto ?? null;
   const stockPredictionFreshness = predictionsResponse?.freshness_by_asset.stock ?? null;
   const selectedImportanceModel = useMemo(() => {
     return selectedImportanceAsset === 'crypto' ? activeCryptoModel : activeStockModel;
   }, [activeCryptoModel, activeStockModel, selectedImportanceAsset]);
+  const diagnosticImportanceFold = useMemo(() => {
+    if (selectedImportanceAsset !== 'crypto' || activeCryptoModel) {
+      return null;
+    }
+    return getDiagnosticImportanceFold(noModelSelectedFolds, selectedDiagnosticFoldIndex);
+  }, [activeCryptoModel, noModelSelectedFolds, selectedDiagnosticFoldIndex, selectedImportanceAsset]);
+
+  useEffect(() => {
+    if (activeCryptoModel || selectedImportanceAsset !== 'crypto') {
+      return;
+    }
+    if (selectedDiagnosticFoldIndex === null) {
+      return;
+    }
+    const selectedStillExists = noModelSelectedFolds.some(
+      (fold) => fold.fold_index === selectedDiagnosticFoldIndex,
+    );
+    if (!selectedStillExists) {
+      setSelectedDiagnosticFoldIndex(null);
+    }
+  }, [activeCryptoModel, noModelSelectedFolds, selectedDiagnosticFoldIndex, selectedImportanceAsset]);
 
   useEffect(() => {
     let alive = true;
 
     const run = async (): Promise<void> => {
       if (!selectedImportanceModel) {
+        if (diagnosticImportanceFold) {
+          setSelectedImportances(toDiagnosticImportances(diagnosticImportanceFold));
+          setImportanceError(null);
+          setIsLoadingImportances(false);
+          return;
+        }
         setSelectedImportances(null);
         setImportanceError(null);
         setIsLoadingImportances(false);
@@ -729,7 +876,7 @@ const MachineLearning: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [selectedImportanceAsset, selectedImportanceModel]);
+  }, [diagnosticImportanceFold, selectedImportanceAsset, selectedImportanceModel]);
 
   const visibleImportanceCount = useMemo(() => {
     const totalImportances = selectedImportances?.importances.length ?? 0;
@@ -754,33 +901,41 @@ const MachineLearning: React.FC = () => {
     }));
   }, [featureContract, selectedImportances, selectedImportanceAsset, visibleImportanceCount]);
 
-  const visiblePredictions = useMemo(() => {
+  const activePredictionRows = useMemo(() => {
     const rows = predictionsResponse?.predictions ?? [];
+    const activeByAsset = predictionsResponse?.active_model_ids ?? { crypto: null, stock: null };
+    return rows.filter((row) => {
+      const activeModelId = row.asset_class === 'crypto' ? activeByAsset.crypto : activeByAsset.stock;
+      return activeModelId !== null && row.model_id === activeModelId;
+    });
+  }, [predictionsResponse]);
+
+  const visiblePredictions = useMemo(() => {
     if (predictionDisplayMode === 'all') {
-      return rows;
+      return activePredictionRows;
     }
-    return rows.slice(0, 5);
-  }, [predictionDisplayMode, predictionsResponse]);
+    return activePredictionRows.slice(0, 5);
+  }, [activePredictionRows, predictionDisplayMode]);
 
   const selectedPrediction = useMemo<MlPredictionRow | null>(() => {
-    const rows = predictionsResponse?.predictions ?? [];
+    const rows = activePredictionRows;
     if (!selectedPredictionId || rows.length === 0) {
       return null;
     }
 
     return rows.find((prediction) => prediction.prediction_id === selectedPredictionId) ?? null;
-  }, [predictionsResponse, selectedPredictionId]);
+  }, [activePredictionRows, selectedPredictionId]);
 
   useEffect(() => {
     shapCacheRef.current.clear();
     setSelectedShapResponse(null);
     setShapError(null);
 
-    const rows = predictionsResponse?.predictions ?? [];
+    const rows = activePredictionRows;
     if (selectedPredictionId && !rows.some((prediction) => prediction.prediction_id === selectedPredictionId)) {
       setSelectedPredictionId(null);
     }
-  }, [predictionsResponse]);
+  }, [activePredictionRows, selectedPredictionId]);
 
   useEffect(() => {
     let alive = true;
@@ -909,24 +1064,15 @@ const MachineLearning: React.FC = () => {
   );
 
   const liveCryptoFolds = useMemo(() => {
-    if (!activeCryptoModel || activeCryptoModel.folds.length === 0) {
-      return [];
+    if (activeCryptoModel && activeCryptoModel.folds.length > 0) {
+      return activeCryptoModel.folds.map((fold) =>
+        toFoldRow(fold, activeCryptoModel.best_fold),
+      );
     }
+    return noModelSelectedFolds.map((fold) => toFoldRow(fold, null));
+  }, [activeCryptoModel, noModelSelectedFolds]);
 
-    return activeCryptoModel.folds.map((fold) => ({
-      label: `Fold ${fold.fold_index}`,
-      window: `${new Date(fold.train_start).toLocaleDateString()} → ${new Date(fold.train_end).toLocaleDateString()} | ${new Date(fold.test_end).toLocaleDateString()}`,
-      trainL: 0,
-      trainW: 78,
-      testL: 78,
-      testW: 22,
-      sharpe: fold.validation_sharpe,
-      acc: fold.validation_accuracy * 100,
-      best: fold.fold_index === activeCryptoModel.best_fold,
-      eligibilityStatus: fold.eligibility_status ?? (fold.fold_index === activeCryptoModel.best_fold ? "active" : "research_only"),
-      eligibilityReason: fold.eligibility_reason ?? "not_evaluated",
-    }));
-  }, [activeCryptoModel]);
+  const hasCryptoFoldDiagnostics = liveCryptoFolds.length > 0;
 
   const handlePendingAction = (message: string): void => {
     setBanner({ tone: 'info', message });
@@ -1184,34 +1330,48 @@ const MachineLearning: React.FC = () => {
           title={
             activeCryptoModel
               ? `Walk-forward validation · crypto model · ${activeCryptoModel.fold_count} folds`
-              : 'Walk-forward validation · no trained crypto model'
+              : hasCryptoFoldDiagnostics
+                ? `Walk-forward validation · rejected crypto folds · ${liveCryptoFolds.length} folds`
+                : 'Walk-forward validation · no trained crypto model'
           }
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 4, background: 'rgba(77,159,255,0.5)', borderRadius: 1 }} /><span style={{ fontSize: 9, color: S.text3 }}>Train</span></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 4, background: 'rgba(0,229,160,0.5)', borderRadius: 1 }} /><span style={{ fontSize: 9, color: S.text3 }}>Test</span></div>
-            <Badge v={activeCryptoModel ? 'green' : 'muted'}>{activeCryptoModel ? 'Live model folds' : 'Train crypto model to populate folds'}</Badge>
+            <Badge v={activeCryptoModel ? 'green' : hasCryptoFoldDiagnostics ? 'amber' : 'muted'}>{activeCryptoModel ? 'Live model folds' : hasCryptoFoldDiagnostics ? 'Rejected folds' : 'Train crypto model to populate folds'}</Badge>
           </div>
         </CardHeader>
         <div style={{ padding: '10px 16px' }}>
-          {activeCryptoModel ? (
+          {hasCryptoFoldDiagnostics ? (
             <>
+              {!activeCryptoModel ? (
+                <div style={{ padding: '0 0 10px', fontSize: 10, color: S.amber, lineHeight: 1.5 }}>
+                  No production model is active because the latest crypto training run failed guardrails. These folds are shown for diagnostics only. Global feature importance is available when the rejected fold returned training weights; live inference and local prediction SHAP stay disabled.
+                </div>
+              ) : null}
               <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 80px 72px 84px', gap: 10, padding: '0 0 6px', borderBottom: `0.5px solid ${S.border}` }}>
                 {['Fold', 'Time window', 'Sharpe', 'Accuracy', 'Eligibility'].map((h) => <span key={h} style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: S.text3 }}>{h}</span>)}
               </div>
               <div style={{ marginTop: 6 }}>
                 {liveCryptoFolds.length > 0 ? (
-                  liveCryptoFolds.map((fold) => <FoldRow key={fold.label} fold={fold} />)
+                  liveCryptoFolds.map((fold) => (
+                    <FoldRow
+                      key={fold.label}
+                      fold={fold}
+                      selected={!activeCryptoModel && diagnosticImportanceFold?.fold_index === fold.foldIndex}
+                      onSelect={!activeCryptoModel ? () => setSelectedDiagnosticFoldIndex(fold.foldIndex) : undefined}
+                    />
+                  ))
                 ) : (
                   <div style={{ padding: '18px 0', fontSize: 10, color: S.text3 }}>
-                    This registered crypto model has no walk-forward fold payload. Retrain crypto to regenerate model metadata.
+                    No fold diagnostics were returned by the latest training run.
                   </div>
                 )}
               </div>
             </>
           ) : (
             <div style={{ padding: '18px 0', fontSize: 10, color: S.text3 }}>
-              No walk-forward validation is available because there is no usable crypto model artifact registered.
+              No walk-forward validation is available yet. Run crypto training to populate fold diagnostics.
             </div>
           )}
         </div>
@@ -1228,7 +1388,7 @@ const MachineLearning: React.FC = () => {
               </ActionButton>
               <Badge v={selectedImportanceAsset === 'crypto' ? 'blue' : 'amber'}>Active asset</Badge>
               <Badge v="purple">Research</Badge>
-              <Badge v="muted">{isLoadingImportances ? 'Loading' : selectedImportances ? 'Live weights' : 'No model available'}</Badge>
+              <Badge v="muted">{isLoadingImportances ? 'Loading' : selectedImportances ? diagnosticImportanceFold ? 'Research-only weights' : 'Live weights' : 'No weights available'}</Badge>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                 <ActionButton tone={selectedImportanceLimit === 10 ? (selectedImportanceAsset === 'crypto' ? 'blue' : 'amber') : 'muted'} onClick={() => setSelectedImportanceLimit(10)}>
                   Top 10
@@ -1243,26 +1403,28 @@ const MachineLearning: React.FC = () => {
             </div>
           </CardHeader>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedImportanceModel && (
+            {(selectedImportanceModel || diagnosticImportanceFold) && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd }}>
-                <div style={{ fontSize: 10, color: S.text3 }}>Artifact<span style={{ display: 'block', fontSize: 11, color: S.text2, fontFamily: S.mono, marginTop: 4 }}>{selectedImportanceModel.artifact_path.split(/[\\/]/).pop() ?? selectedImportanceModel.artifact_path}</span></div>
-                <div style={{ fontSize: 10, color: S.text3 }}>Best fold / accuracy<span style={{ display: 'block', fontSize: 11, color: S.text2, marginTop: 4 }}>Fold {selectedImportanceModel.best_fold} · {(selectedImportanceModel.validation_accuracy * 100).toFixed(1)}%</span></div>
+                <div style={{ fontSize: 10, color: S.text3 }}>Source<span style={{ display: 'block', fontSize: 11, color: S.text2, fontFamily: S.mono, marginTop: 4 }}>{selectedImportanceModel ? selectedImportanceModel.artifact_path.split(/[\\/]/).pop() ?? selectedImportanceModel.artifact_path : 'Rejected fold diagnostics'}</span></div>
+                <div style={{ fontSize: 10, color: S.text3 }}>{selectedImportanceModel ? 'Best fold / accuracy' : 'Rejected fold / accuracy'}<span style={{ display: 'block', fontSize: 11, color: S.text2, marginTop: 4 }}>{selectedImportanceModel ? `Fold ${selectedImportanceModel.best_fold} · ${(selectedImportanceModel.validation_accuracy * 100).toFixed(1)}%` : `Fold ${diagnosticImportanceFold?.fold_index ?? '—'} · ${((diagnosticImportanceFold?.validation_accuracy ?? 0) * 100).toFixed(1)}%`}</span></div>
               </div>
             )}
             {isLoadingImportances ? (
-              <div style={{ padding: '10px 0', fontSize: 10, color: S.text3 }}>Loading live feature weights for the active {selectedImportanceAsset} champion model…</div>
+              <div style={{ padding: '10px 0', fontSize: 10, color: S.text3 }}>Loading feature weights for {selectedImportanceAsset}…</div>
             ) : importanceFeatures.length > 0 ? (
               importanceFeatures.map((feature) => (
                 <FeatBar key={feature.name} name={feature.name} pct={feature.pct} color={feature.color} tag={feature.tag} />
               ))
             ) : (
               <div style={{ padding: '10px 12px', background: S.bg2, border: `0.5px solid ${S.border}`, borderRadius: S.rMd, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
-                {importanceError ?? `No active ${selectedImportanceAsset} model is registered yet. Train a ${selectedImportanceAsset} model to populate live feature weights.`}
+                {importanceError ?? (selectedImportanceAsset === 'crypto' ? 'No active crypto model is registered and the selected rejected fold has no feature weights. Click another rejected fold or rerun crypto training after this patch to populate research-only weights.' : `No active ${selectedImportanceAsset} model is registered yet. Train a ${selectedImportanceAsset} model to populate live feature weights.`)}
               </div>
             )}
             <div style={{ marginTop: 6, paddingTop: 10, borderTop: `0.5px solid ${S.border}`, fontSize: 10, color: S.text3, lineHeight: 1.6 }}>
               {selectedImportances
-                ? `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} live feature weights from the active ${selectedImportances.asset_class} champion model.`
+                ? diagnosticImportanceFold
+                  ? `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} research-only feature weights from rejected fold ${diagnosticImportanceFold.fold_index}. This explains what the failed model saw during training; it is not eligible for live inference.`
+                  : `Showing ${visibleImportanceCount} of ${selectedImportances.importances.length} live feature weights from the active ${selectedImportances.asset_class} champion model.`
                 : `This panel only shows backend-sourced weights. Preview data has been removed for ${selectedImportanceAsset}.`}
               {featureParity && (
                 <span style={{ display: 'block', marginTop: 6, color: featureParity.parity_ok ? S.green : S.amber }}>
@@ -1375,7 +1537,7 @@ const MachineLearning: React.FC = () => {
                 </tr>
               ) : visiblePredictions.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>No live predictions are available yet. Train active models and ensure persisted candle history exists for the selected assets.</td>
+                  <td colSpan={11} style={{ padding: '14px 12px', color: S.text3, borderBottom: `0.5px solid ${S.border}` }}>No live predictions are available from active champion models. Stale predictions from retired/rejected crypto models are hidden.</td>
                 </tr>
               ) : visiblePredictions.map((prediction) => {
                 const dirColor = prediction.direction === 'long' ? S.green : prediction.direction === 'short' ? S.red : S.text3;
@@ -1456,7 +1618,9 @@ const MachineLearning: React.FC = () => {
             <div style={{ fontSize: 10, color: S.text3, marginBottom: 12, lineHeight: 1.6 }}>
               {selectedPrediction
                 ? `${selectedShapLimit === 'all' ? 'All' : `Top ${Math.min(SHAP_DISPLAY_LIMIT, shapRows.length)}`} cached local SHAP drivers for prediction ${selectedPrediction.prediction_id}. Data is fetched only after explicit row selection and read from persisted prediction_shap rows only.`
-                : 'Select a prediction row to view cached local SHAP explainability. The page does not compute or fetch SHAP on table load.'}
+                : activePredictionRows.length === 0
+                  ? 'Local prediction SHAP is disabled until an active champion model produces live predictions. Rejected folds can still show global training feature importance above.'
+                  : 'Select a prediction row to view cached local SHAP explainability. The page does not compute or fetch SHAP on table load.'}
               {selectedPrediction ? (
                 <span style={{ display: 'block', marginTop: 6, color: getBadgeTone(shapReadout.tone).color }}>
                   {shapReadout.regime}: {shapReadout.summary}
@@ -1480,7 +1644,7 @@ const MachineLearning: React.FC = () => {
               ))}
             </div>
             {!selectedPrediction ? (
-              <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>Select a prediction to view cached local SHAP explanation.</div>
+              <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>{activePredictionRows.length === 0 ? 'No active champion predictions are available. Local SHAP stays disabled while ML is research-only.' : 'Select a prediction to view cached local SHAP explanation.'}</div>
             ) : isLoadingShap ? (
               <div style={{ padding: '12px 0', fontSize: 10, color: S.text3 }}>Loading persisted SHAP rows…</div>
             ) : shapError ? (

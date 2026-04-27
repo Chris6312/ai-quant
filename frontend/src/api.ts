@@ -557,6 +557,7 @@ export type ModelFold = {
   n_train_samples: number;
   n_test_samples: number;
   model_path: string;
+  feature_importances?: Record<string, number>;
   eligibility_status?: string;
   eligibility_reason?: string;
 };
@@ -720,6 +721,9 @@ export type TrainModelResponse = {
   outcome?: 'no_model_selected' | string;
   reason?: string;
   fold_count?: number;
+  folds?: ModelFold[];
+  selection_regime?: string;
+  selection_policy?: Record<string, unknown>;
 };
 
 export const getMlJobs = () => requestJson<MlJob[]>('/ml/jobs');

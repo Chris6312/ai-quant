@@ -818,17 +818,21 @@ function DecisionVisibilityPanel({
   macroDecision,
   macroError,
   prediction,
+  mlModelAvailable,
 }: {
   intradayDecision: ResearchIntradayDecisionResponse | null;
   macroDecision: ResearchMacroSentimentDecisionResponse | null;
   macroError: string | null;
   prediction: MlPredictionRow | null;
+  mlModelAvailable: boolean;
 }): React.ReactElement {
   if (!prediction) {
+    const message = mlModelAvailable
+      ? "Decision visibility needs a persisted ML prediction first. No hidden trade/readiness state is being inferred for this symbol."
+      : "No active crypto ML champion is registered. Stale persisted ML predictions are hidden, and this symbol should be judged from intraday proof plus sentiment context only.";
     return (
       <div style={{ padding: "14px 0", fontSize: 11, color: "var(--text3)" }}>
-        Decision visibility needs a persisted ML prediction first. No hidden
-        trade/readiness state is being inferred for this symbol.
+        {message}
       </div>
     );
   }
@@ -910,14 +914,18 @@ function DecisionVisibilityPanel({
 
 function PredictionFeed({
   prediction,
+  mlModelAvailable,
 }: {
   prediction: MlPredictionRow | null;
+  mlModelAvailable: boolean;
 }): React.ReactElement {
   if (!prediction) {
+    const message = mlModelAvailable
+      ? "No persisted ML prediction for this symbol yet. Run prediction generation before treating this symbol as signal-ready."
+      : "ML predictions are disabled because no crypto champion model passed guardrails. Old prediction rows remain in storage but are intentionally hidden here.";
     return (
       <div style={{ padding: "14px 0", fontSize: 11, color: "var(--text3)" }}>
-        No persisted ML prediction for this symbol yet. Run prediction
-        generation before treating this symbol as signal-ready.
+        {message}
       </div>
     );
   }
@@ -1224,9 +1232,18 @@ const Research: React.FC = () => {
     };
   }, [displayList]);
 
+  const activeCryptoModelId = predictions?.active_model_ids.crypto ?? null;
+  const activeStockModelId = predictions?.active_model_ids.stock ?? null;
   const predictionRows = useMemo(
-    () => predictions?.predictions ?? [],
-    [predictions],
+    () => {
+      const rows = predictions?.predictions ?? [];
+      return rows.filter((row) => {
+        const activeModelId =
+          row.asset_class === "crypto" ? activeCryptoModelId : activeStockModelId;
+        return activeModelId !== null && row.model_id === activeModelId;
+      });
+    },
+    [predictions, activeCryptoModelId, activeStockModelId],
   );
   const predictionBySymbol = useMemo(
     () => buildLatestPredictionMap(predictionRows),
@@ -1274,6 +1291,9 @@ const Research: React.FC = () => {
       (scope?.crypto_universe_symbols.includes(selected) ?? false)
     : false;
   const selectedIsPromoted = selected ? promotedSymbolSet.has(selected) : false;
+  const selectedMlModelAvailable = selectedIsCrypto
+    ? activeCryptoModelId !== null
+    : activeStockModelId !== null;
   const cryptoScopeSource = scope?.crypto_watchlist_source ?? "crypto scope";
 
   const updatePromotedSymbols = async (symbols: string[]): Promise<void> => {
@@ -1372,6 +1392,11 @@ const Research: React.FC = () => {
               Crypto scope source: {cryptoScopeSource}. Promoted symbols: {" "}
               {promotedSymbols.length > 0 ? promotedSymbols.join(", ") : "none"}.
             </div>
+            {activeCryptoModelId === null ? (
+              <div style={{ marginTop: 6, color: "var(--amber)" }}>
+                Crypto ML has no active champion model. Stored prediction rows are hidden so stale SHORT/LONG bias cannot bleed into research decisions.
+              </div>
+            ) : null}
             {hiddenHistoricalRows > 0 ? (
               <div style={{ marginTop: 6, color: "var(--text4)" }}>
                 Showing the newest prediction per symbol. {hiddenHistoricalRows}{" "}
@@ -1535,14 +1560,17 @@ const Research: React.FC = () => {
             {selected && predictionsLoading && (
               <span className="card-badge cb-amber">Loading signals</span>
             )}
-            {selected && !predictionsLoading && selectedPrediction && (
+            {selected && !predictionsLoading && !selectedMlModelAvailable && (
+              <span className="card-badge cb-amber">ML disabled</span>
+            )}
+            {selected && !predictionsLoading && selectedMlModelAvailable && selectedPrediction && (
               <span
                 className={`card-badge ${predictionBadgeClass(selectedPrediction)}`}
               >
                 ML {getPredictionBadgeLabel(selectedPrediction)}
               </span>
             )}
-            {selected && !predictionsLoading && !selectedPrediction && (
+            {selected && !predictionsLoading && selectedMlModelAvailable && !selectedPrediction && (
               <span className="card-badge cb-amber">No prediction</span>
             )}
             {selectedIsCrypto ? (
@@ -1663,8 +1691,12 @@ const Research: React.FC = () => {
                         macroDecision={macroDecision}
                         macroError={macroDecisionError}
                         prediction={selectedPrediction}
+                        mlModelAvailable={selectedMlModelAvailable}
                       />
-                      <PredictionFeed prediction={selectedPrediction} />
+                      <PredictionFeed
+                        prediction={selectedPrediction}
+                        mlModelAvailable={selectedMlModelAvailable}
+                      />
                       <SignalFeed signals={signals} />
                     </>
                   ) : null}

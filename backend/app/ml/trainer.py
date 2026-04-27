@@ -80,6 +80,7 @@ class FoldResult:
     majority_class: int = 1
     majority_class_baseline_accuracy: float = 0.0
     baseline_margin: float = 0.0
+    feature_importances: dict[str, float] = field(default_factory=dict)
     eligibility_status: str = "research_only"
     eligibility_reason: str = "not_evaluated"
 
@@ -420,6 +421,7 @@ class WalkForwardTrainer:
             majority_class=majority_class,
             majority_class_baseline_accuracy=baseline_accuracy,
             baseline_margin=baseline_margin,
+            feature_importances=feature_importances,
         )
 
         return fold_result, feature_importances
