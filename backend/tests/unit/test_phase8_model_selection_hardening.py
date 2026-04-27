@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
+
 from app.ml.trainer import FoldResult, TrainerConfig, WalkForwardTrainer
 from app.models.domain import Candle
 
@@ -17,8 +19,12 @@ def _fold(
     accuracy: float,
     samples: int,
     model_path: Path,
+    class_counts: dict[int, int] | None = None,
 ) -> FoldResult:
     model_path.write_text("fake model", encoding="utf-8")
+    counts = class_counts or {0: 120, 1: 180, 2: 120}
+    majority_class = max(counts, key=lambda label: counts[label])
+    baseline_accuracy = counts[majority_class] / sum(counts.values())
     return FoldResult(
         fold_index=index,
         train_start=test_end - timedelta(days=180),
@@ -31,6 +37,10 @@ def _fold(
         validation_sharpe=sharpe,
         passed=sharpe >= 0.5,
         model_path=str(model_path),
+        class_counts=counts,
+        majority_class=majority_class,
+        majority_class_baseline_accuracy=baseline_accuracy,
+        baseline_margin=accuracy - baseline_accuracy,
     )
 
 
@@ -101,7 +111,7 @@ def test_crypto_selector_promotes_recent_eligible_fold_over_ancient_high_sharpe(
         index=138,
         test_end=datetime(2026, 3, 31, tzinfo=UTC),
         sharpe=1.79,
-        accuracy=0.296,
+        accuracy=0.56,
         samples=465,
         model_path=tmp_path / "model_crypto_fold138.lgbm",
     )
@@ -138,3 +148,72 @@ def test_crypto_regime_uses_shorter_window_when_very_volatile(tmp_path: Path) ->
     assert regime.regime == "very_volatile"
     assert regime.max_fold_age_days == 180
     assert regime.reasons
+
+
+def test_crypto_selector_rejects_fold_below_majority_class_baseline(
+    tmp_path: Path,
+) -> None:
+    """Crypto production folds must beat the naive majority-class baseline."""
+
+    trainer = WalkForwardTrainer(TrainerConfig(model_dir=str(tmp_path)))
+    baseline_failure = _fold(
+        index=140,
+        test_end=datetime(2026, 4, 24, tzinfo=UTC),
+        sharpe=2.1,
+        accuracy=0.50,
+        samples=465,
+        model_path=tmp_path / "model_crypto_fold140.lgbm",
+        class_counts={0: 50, 1: 260, 2: 155},
+    )
+
+    status, reason = trainer._crypto_fold_eligibility(
+        baseline_failure,
+        min_test_end=datetime(2026, 1, 1, tzinfo=UTC).date(),
+    )
+
+    assert status == "research_only"
+    assert reason == "accuracy_not_above_majority_baseline"
+
+
+def test_crypto_selector_rejects_fold_without_baseline_buffer(
+    tmp_path: Path,
+) -> None:
+    """Crypto folds need enough accuracy margin above the naive baseline."""
+
+    trainer = WalkForwardTrainer(TrainerConfig(model_dir=str(tmp_path)))
+    thin_margin = _fold(
+        index=141,
+        test_end=datetime(2026, 4, 24, tzinfo=UTC),
+        sharpe=2.1,
+        accuracy=0.58,
+        samples=465,
+        model_path=tmp_path / "model_crypto_fold141.lgbm",
+        class_counts={0: 50, 1: 260, 2: 155},
+    )
+
+    status, reason = trainer._crypto_fold_eligibility(
+        thin_margin,
+        min_test_end=datetime(2026, 1, 1, tzinfo=UTC).date(),
+    )
+
+    assert status == "research_only"
+    assert reason == "accuracy_margin_below_baseline_buffer"
+
+
+def test_crypto_training_uses_balanced_sample_weights(tmp_path: Path) -> None:
+    """Crypto training should not let the majority class dominate unchecked."""
+
+    trainer = WalkForwardTrainer(TrainerConfig(model_dir=str(tmp_path)))
+    labels = [0, 1, 1, 1, 2]
+    weights = trainer._sample_weights(
+        np.asarray(labels, dtype=int),
+        "crypto",
+    )
+
+    assert weights is not None
+    assert weights[0] > weights[1]
+    assert weights[4] > weights[1]
+    assert trainer._sample_weights(
+        np.asarray(labels, dtype=int),
+        "stock",
+    ) is None

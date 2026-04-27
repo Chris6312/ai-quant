@@ -51,7 +51,8 @@ class TrainerConfig:
     crypto_normal_max_age_days: int = 365
     crypto_volatile_max_age_days: int = 180
     crypto_min_validation_sharpe: float = 0.0
-    crypto_min_validation_accuracy: float = 0.25
+    crypto_min_validation_accuracy: float = 0.35
+    crypto_min_baseline_margin: float = 0.03
     stock_label_threshold: float = 0.002
     crypto_label_threshold: float = 0.0075
     crypto_min_test_samples: int = 300
@@ -75,6 +76,10 @@ class FoldResult:
     validation_sharpe: float
     passed: bool
     model_path: str
+    class_counts: dict[int, int] = field(default_factory=dict)
+    majority_class: int = 1
+    majority_class_baseline_accuracy: float = 0.0
+    baseline_margin: float = 0.0
     eligibility_status: str = "research_only"
     eligibility_reason: str = "not_evaluated"
 
@@ -122,7 +127,6 @@ class CryptoRegimeSnapshot:
     average_atr_pct_14: float
     atr_percentile_rank: float
     reasons: tuple[str, ...]
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -353,7 +357,14 @@ class WalkForwardTrainer:
         feature_names = feature_names_for_asset_class(asset_class)
         x_train, y_train = self._matrix(train_samples, asset_class)
         x_test, y_test = self._matrix(test_samples, asset_class)
-        booster = self._fit_booster(x_train, y_train, x_test, y_test, feature_names)
+        booster = self._fit_booster(
+            x_train,
+            y_train,
+            x_test,
+            y_test,
+            feature_names,
+            asset_class,
+        )
 
         probabilities = np.asarray(booster.predict(x_test), dtype=float)
         if probabilities.ndim == 1:
@@ -361,6 +372,11 @@ class WalkForwardTrainer:
 
         predictions, confidences = self._decode_predictions(probabilities)
         validation_accuracy = self._compute_accuracy(predictions, y_test.tolist())
+        class_counts = self._class_counts(y_test.tolist())
+        majority_class, baseline_accuracy = self._majority_class_baseline(
+            y_test.tolist()
+        )
+        baseline_margin = validation_accuracy - baseline_accuracy
         validation_returns = self._compute_validation_returns(
             predictions,
             confidences,
@@ -383,6 +399,10 @@ class WalkForwardTrainer:
             validation_sharpe=validation_sharpe,
             passed=validation_sharpe >= 0.5,
             model_path=str(model_path),
+            class_counts=class_counts,
+            majority_class=majority_class,
+            majority_class_baseline_accuracy=baseline_accuracy,
+            baseline_margin=baseline_margin,
         )
 
         return fold_result, feature_importances
@@ -461,6 +481,7 @@ class WalkForwardTrainer:
             "min_test_end": min_test_end.isoformat(),
             "min_validation_sharpe": self.config.crypto_min_validation_sharpe,
             "min_validation_accuracy": self.config.crypto_min_validation_accuracy,
+            "min_baseline_margin": self.config.crypto_min_baseline_margin,
             "min_test_samples": self.config.crypto_min_test_samples,
             "btc_realized_vol_30d": regime.btc_realized_vol_30d,
             "btc_realized_vol_90d": regime.btc_realized_vol_90d,
@@ -491,6 +512,10 @@ class WalkForwardTrainer:
             return "research_only", "sharpe_not_positive"
         if fold.validation_accuracy < self.config.crypto_min_validation_accuracy:
             return "research_only", "accuracy_below_threshold"
+        if fold.validation_accuracy <= fold.majority_class_baseline_accuracy:
+            return "research_only", "accuracy_not_above_majority_baseline"
+        if fold.baseline_margin < self.config.crypto_min_baseline_margin:
+            return "research_only", "accuracy_margin_below_baseline_buffer"
         if fold.n_test_samples < self.config.crypto_min_test_samples:
             return "research_only", "insufficient_test_samples"
         if not Path(fold.model_path).exists():
@@ -630,6 +655,7 @@ class WalkForwardTrainer:
         x_test: FloatArray,
         y_test: IntArray,
         feature_names: list[str],
+        asset_class: str,
     ) -> Booster:
         """Fit a LightGBM booster using the configured parameters."""
 
@@ -641,7 +667,13 @@ class WalkForwardTrainer:
             else 300
         )
 
-        train_set = lgb.Dataset(x_train, label=y_train, feature_name=feature_names)
+        sample_weights = self._sample_weights(y_train, asset_class)
+        train_set = lgb.Dataset(
+            x_train,
+            label=y_train,
+            weight=sample_weights,
+            feature_name=feature_names,
+        )
         valid_set = lgb.Dataset(
             x_test,
             label=y_test,
@@ -661,6 +693,53 @@ class WalkForwardTrainer:
             valid_names=["validation"],
             callbacks=callbacks,
         )
+
+    def _sample_weights(
+        self,
+        labels: IntArray,
+        asset_class: str,
+    ) -> FloatArray | None:
+        """Return balanced sample weights for crypto multiclass training."""
+
+        if asset_class.lower().strip() != "crypto" or len(labels) == 0:
+            return None
+
+        counts = self._class_counts(labels.tolist())
+        class_count = 3
+        sample_count = len(labels)
+        weights_by_class: dict[int, float] = {}
+        for label in range(class_count):
+            count = counts.get(label, 0)
+            if count <= 0:
+                weights_by_class[label] = 0.0
+            else:
+                weights_by_class[label] = sample_count / (class_count * count)
+
+        return np.asarray(
+            [weights_by_class[int(label)] for label in labels],
+            dtype=float,
+        )
+
+    def _class_counts(self, labels: Sequence[int]) -> dict[int, int]:
+        """Return counts for each multiclass label."""
+
+        counts = {0: 0, 1: 0, 2: 0}
+        for label in labels:
+            counts[int(label)] = counts.get(int(label), 0) + 1
+        return counts
+
+    def _majority_class_baseline(self, labels: Sequence[int]) -> tuple[int, float]:
+        """Return naive majority-class label and accuracy baseline."""
+
+        if not labels:
+            return 1, 0.0
+
+        counts = self._class_counts(labels)
+        majority_class, majority_count = max(
+            counts.items(),
+            key=lambda item: (item[1], -item[0]),
+        )
+        return majority_class, majority_count / len(labels)
 
     def _matrix(
         self,
