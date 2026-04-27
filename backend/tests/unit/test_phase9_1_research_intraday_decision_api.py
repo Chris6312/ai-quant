@@ -82,7 +82,7 @@ async def test_research_intraday_decision_reads_stored_trading_candles() -> None
         {
             "15m": _bullish_rows(symbol, "15m"),
             "1h": _bullish_rows(symbol, "1h"),
-            "4h": [],
+            "4h": _bullish_rows(symbol, "4h"),
         }
     )
 
@@ -100,7 +100,7 @@ async def test_research_intraday_decision_reads_stored_trading_candles() -> None
         "breakout": True,
         "volume_expansion": True,
         "volatility_state": "expanded",
-        "timeframes": ["15m", "1h"],
+        "timeframes": ["15m", "1h", "4h"],
         "as_of": "2026-04-26T17:24:00+00:00",
     }
     assert payload["timeframe_snapshots"][0]["timeframe"] == "15m"

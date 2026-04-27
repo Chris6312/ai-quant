@@ -56,7 +56,7 @@ def test_intraday_snapshot_surfaces_bullish_breakout_volume_confirmation() -> No
         for index in range(21)
     ]
     four_hour = [
-        _make_candle(index=index, timeframe="4h", close=300.0, volume=100.0)
+        _make_candle(index=index, timeframe="4h", close=300.0 + index, volume=100.0)
         for index in range(21)
     ]
 
@@ -72,7 +72,7 @@ def test_intraday_snapshot_surfaces_bullish_breakout_volume_confirmation() -> No
     assert snapshot.confirmation.breakout is True
     assert snapshot.confirmation.volume_expansion is True
     assert snapshot.confirmation.volatility_state == "expanded"
-    assert snapshot.confirmation.timeframes == ["15m", "1h"]
+    assert snapshot.confirmation.timeframes == ["15m", "1h", "4h"]
     assert snapshot.confirmation.as_of == fifteen_minute[-1].time
 
 
@@ -111,7 +111,66 @@ def test_intraday_snapshot_can_show_mixed_trend_conflict() -> None:
         {
             "15m": bullish_rows,
             "1h": bearish_rows,
-            "4h": [],
+            "4h": [
+                _make_candle(index=index, timeframe="4h", close=300.0 + index)
+                for index in range(21)
+            ],
+        }
+    )
+
+    assert snapshot.confirmation.trend == "mixed"
+    assert snapshot.confirmation.timeframes == ["15m", "1h", "4h"]
+
+
+def test_intraday_snapshot_treats_15m_conflict_as_timing_note() -> None:
+    """Aligned 1h/4h structure wins over a conflicting 15m timing pullback."""
+
+    fifteen_minute = [
+        _make_candle(index=index, timeframe="15m", close=130.0 - index)
+        for index in range(21)
+    ]
+    one_hour = [
+        _make_candle(index=index, timeframe="1h", close=200.0 + index)
+        for index in range(21)
+    ]
+    four_hour = [
+        _make_candle(index=index, timeframe="4h", close=300.0 + index)
+        for index in range(21)
+    ]
+
+    snapshot = build_intraday_snapshot(
+        {
+            "15m": fifteen_minute,
+            "1h": one_hour,
+            "4h": four_hour,
+        }
+    )
+
+    assert snapshot.confirmation.trend == "bullish"
+    assert snapshot.confirmation.timeframes == ["15m", "1h", "4h"]
+
+
+def test_neutral_4h_with_bullish_1h_and_15m_stays_mixed() -> None:
+    """15m timing cannot promote an unconfirmed 4h regime."""
+
+    fifteen_minute = [
+        _make_candle(index=index, timeframe="15m", close=100.0 + index)
+        for index in range(21)
+    ]
+    one_hour = [
+        _make_candle(index=index, timeframe="1h", close=200.0 + index)
+        for index in range(21)
+    ]
+    four_hour = [
+        _make_candle(index=index, timeframe="4h", close=300.0)
+        for index in range(21)
+    ]
+
+    snapshot = build_intraday_snapshot(
+        {
+            "15m": fifteen_minute,
+            "1h": one_hour,
+            "4h": four_hour,
         }
     )
 

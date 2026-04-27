@@ -116,26 +116,12 @@ def compose_final_decision(
         )
 
     if _ml_conflicts_with_setup(ml_bias, setup_direction):
-        if sentiment_merge.final_sentiment_decision in {
-            "aligned",
-            "symbol_tailwind",
-            "mixed",
-        }:
-            return _decision(
-                action="reduce",
-                direction=setup_direction,
-                reason=(
-                    "Intraday confirmation is improving against daily ML bias, "
-                    "so keep the candidate visible with reduced risk."
-                ),
-                conflicts=[*conflicts, "ml_direction_conflict"],
-            )
         return _decision(
-            action="watch",
+            action="reduce",
             direction=setup_direction,
             reason=(
-                "Intraday confirmation conflicts with daily ML bias; "
-                "watch for follow-through."
+                "Intraday confirmation conflicts with daily ML bias, "
+                "so keep the candidate visible with reduced risk."
             ),
             conflicts=[*conflicts, "ml_direction_conflict"],
         )
@@ -217,11 +203,11 @@ def _technical_strength(intraday_confirmation: IntradayConfirmation) -> int:
     strength = 0
     if intraday_confirmation.trend in {"bullish", "bearish"}:
         strength += 1
+    if len(intraday_confirmation.timeframes) >= 2:
+        strength += 1
     if intraday_confirmation.breakout:
         strength += 1
     if intraday_confirmation.volume_expansion:
-        strength += 1
-    if intraday_confirmation.volatility_state == "expanded":
         strength += 1
     return strength
 
@@ -236,9 +222,7 @@ def _should_block_weak_setup(
     intraday_confirmation: IntradayConfirmation,
     technical_strength: int,
 ) -> bool:
-    weak_or_bearish_technical = (
-        technical_strength < 2 or intraday_confirmation.trend in {"bearish", "unknown"}
-    )
+    weak_or_bearish_technical = technical_strength < 2
     sentiment_is_weak = sentiment_merge.final_sentiment_decision in {
         "macro_headwind",
         "symbol_headwind",

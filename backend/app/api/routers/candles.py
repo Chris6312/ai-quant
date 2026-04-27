@@ -43,7 +43,7 @@ KRAKEN_TICKER_PAIR_MAP: dict[str, str] = {
     "LINK/USD": "LINKUSD",
     "UNI/USD": "UNIUSD",
     "AVAX/USD": "AVAXUSD",
-    "DOGE/USD": "DOGEUSD",
+    "DOGE/USD": "XDGUSD",
     "DOT/USD": "DOTUSD",
     "AAVE/USD": "AAVEUSD",
     "CRV/USD": "CRVUSD",
@@ -93,7 +93,10 @@ def _parse_requested_symbols(symbols: str | None) -> list[str]:
     requested_symbols = [item.strip().upper() for item in symbols.split(",") if item.strip()]
     normalized_symbols: list[str] = []
     for raw_symbol in requested_symbols:
-        normalized_symbol = raw_symbol.replace("XBT/USD", "BTC/USD")
+        normalized_symbol = (
+            raw_symbol.replace("XBT/USD", "BTC/USD")
+            .replace("XDG/USD", "DOGE/USD")
+        )
         if normalized_symbol not in KRAKEN_TICKER_PAIR_MAP:
             raise HTTPException(
                 status_code=400,

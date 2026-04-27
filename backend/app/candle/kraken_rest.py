@@ -21,7 +21,7 @@ KRAKEN_PAIR_MAP: dict[str, str] = {
     "LINK/USD": "LINKUSD",
     "UNI/USD": "UNIUSD",
     "AVAX/USD": "AVAXUSD",
-    "DOGE/USD": "DOGEUSD",
+    "DOGE/USD": "XDGUSD",
     "DOT/USD": "DOTUSD",
     "AAVE/USD": "AAVEUSD",
     "CRV/USD": "CRVUSD",
@@ -190,7 +190,11 @@ class KrakenRestCandleClient:
         return candles
 
     def _normalize_symbol(self, symbol: str) -> str:
-        normalized_symbol = symbol.upper().replace("XBT/USD", "BTC/USD")
+        normalized_symbol = (
+            symbol.upper()
+            .replace("XBT/USD", "BTC/USD")
+            .replace("XDG/USD", "DOGE/USD")
+        )
         if normalized_symbol not in KRAKEN_PAIR_MAP:
             raise ValueError(f"Unsupported Kraken symbol: {symbol}")
         return normalized_symbol

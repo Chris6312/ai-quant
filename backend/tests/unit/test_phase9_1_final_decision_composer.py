@@ -207,3 +207,28 @@ def test_composer_returns_full_dynamic_decision_envelope() -> None:
     assert decision.symbol == "SOL/USD"
     assert decision.final_decision.action == "boost"
     assert decision.generated_at == generated_at
+
+
+def test_strong_intraday_conflict_with_ml_and_macro_reduces_not_watches() -> None:
+    """A real 1h/4h setup stays visible even when ML and macro disagree."""
+
+    decision = compose_final_decision(
+        ml_bias=_ml(direction="short"),
+        sentiment_merge=_sentiment(
+            macro_bias="bearish",
+            symbol_bias="bearish",
+            decision="macro_headwind",
+            effect="headwind",
+        ),
+        intraday_confirmation=IntradayConfirmation(
+            trend="bullish",
+            breakout=False,
+            volume_expansion=False,
+            volatility_state="normal",
+            timeframes=["1h", "4h"],
+        ),
+    )
+
+    assert decision.action == "reduce"
+    assert decision.direction == "long"
+    assert decision.risk_mode == "reduced"

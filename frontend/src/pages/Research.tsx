@@ -433,18 +433,6 @@ function getTableFinalDecision(
   );
 }
 
-function getTableDecisionColumnValue(
-  action: string | null,
-  column: "watch" | "reduce",
-): string | null {
-  if (column === "watch") {
-    return action === "watch" || action === "allow" || action === "boost"
-      ? action
-      : null;
-  }
-  return action === "reduce" || action === "block" ? action : null;
-}
-
 type DecisionVisibility = {
   mlBias: string;
   mlBiasDetail: string;
@@ -552,9 +540,21 @@ function intradayHasProof(
     confirmation.trend === "bullish" ||
     confirmation.trend === "bearish" ||
     confirmation.breakout ||
-    confirmation.volume_expansion ||
-    confirmation.volatility_state === "expanded" ||
-    confirmation.volatility_state === "compressed"
+    confirmation.volume_expansion
+  );
+}
+
+function intradayHasStrongSetup(
+  intraday: ResearchIntradayDecisionResponse | null,
+): boolean {
+  if (!intradayHasProof(intraday) || !intraday) {
+    return false;
+  }
+  const timeframes = new Set(intraday.confirmation.timeframes);
+  return (
+    (timeframes.has("1h") && timeframes.has("4h")) ||
+    intraday.confirmation.breakout ||
+    intraday.confirmation.volume_expansion
   );
 }
 
@@ -591,6 +591,14 @@ function getDecisionAction(
   }
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intraday && intradayDirection === "unknown") {
+    if (intraday.confirmation.trend === "mixed") {
+      return "watch";
+    }
+    if (intraday.confirmation.trend === "neutral") {
+      return "no_trade";
+    }
+  }
   if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
     if (intradayDirection !== mlDirection) {
       return "reduce";
@@ -598,7 +606,10 @@ function getDecisionAction(
     if (row.sentiment_gate?.state === "downgraded") {
       return "reduce";
     }
-    return row.action === "signal" ? "allow" : "watch";
+    if (intradayHasStrongSetup(intraday)) {
+      return row.sentiment_gate?.risk_flag === "aligned" ? "boost" : "allow";
+    }
+    return "watch";
   }
   if (row.sentiment_gate?.state === "downgraded") {
     return "reduce";
@@ -621,6 +632,9 @@ function getRiskMode(
   }
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intraday && intradayDirection === "unknown") {
+    return "watch_only";
+  }
   if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
     if (intradayDirection !== mlDirection) {
       return "reduced";
@@ -632,7 +646,7 @@ function getRiskMode(
   if (row.sentiment_gate?.state === "downgraded") {
     return "reduced";
   }
-  if (row.action === "signal") {
+  if (intradayHasStrongSetup(intraday) || row.action === "signal") {
     return "normal";
   }
   return "watch_only";
@@ -644,6 +658,9 @@ function getDecisionReason(
 ): string {
   const intradayDirection = getIntradayDirection(intraday);
   const mlDirection = mlDirectionToDecisionDirection(row);
+  if (intraday && intradayDirection === "unknown") {
+    return "Intraday structure is mixed or neutral. The 15m chart is timing only and cannot promote an unconfirmed 1h/4h setup.";
+  }
   if (intradayDirection !== "unknown" && mlDirection !== "unknown") {
     if (intradayDirection !== mlDirection) {
       return "Closed-candle intraday proof conflicts with daily ML bias, so the candidate stays visible with reduced risk.";
@@ -1434,8 +1451,7 @@ const Research: React.FC = () => {
                   <tr>
                     <th>Symbol</th>
                     <th>Class</th>
-                    <th>Watch</th>
-                    <th>Reduce</th>
+                    <th>Final</th>
                     <th>ML</th>
                     <th>Intraday</th>
                   </tr>
@@ -1453,7 +1469,16 @@ const Research: React.FC = () => {
                         className={selected === item.symbol ? "selected" : ""}
                         onClick={() => setSelected(item.symbol)}
                       >
-                        <td style={{ fontWeight: 500 }}>{item.symbol}</td>
+                        <td
+                          className={
+                            promotedSymbolSet.has(item.symbol)
+                              ? "promoted-symbol"
+                              : undefined
+                          }
+                          style={{ fontWeight: 500 }}
+                        >
+                          {item.symbol}
+                        </td>
                         <td>
                           <span className={`badge badge-${item.asset_class}`}>
                             {item.asset_class}
@@ -1461,20 +1486,8 @@ const Research: React.FC = () => {
                         </td>
                         <td>
                           <MiniDecisionBadge
-                            label="watch decision"
-                            value={getTableDecisionColumnValue(
-                              rowDecision,
-                              "watch",
-                            )}
-                          />
-                        </td>
-                        <td>
-                          <MiniDecisionBadge
-                            label="reduced-risk decision"
-                            value={getTableDecisionColumnValue(
-                              rowDecision,
-                              "reduce",
-                            )}
+                            label="final decision"
+                            value={rowDecision}
                           />
                         </td>
                         <td>

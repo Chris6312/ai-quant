@@ -26,6 +26,9 @@ VOLUME_LOOKBACK: Final[int] = 20
 VOLUME_EXPANSION_MULTIPLIER: Final[float] = 1.5
 VOLATILITY_EXPANDED_MULTIPLIER: Final[float] = 1.5
 VOLATILITY_COMPRESSED_MULTIPLIER: Final[float] = 0.7
+REGIME_TIMEFRAME: Final[str] = "4h"
+CONFIRMATION_TIMEFRAME: Final[str] = "1h"
+TIMING_TIMEFRAME: Final[str] = "15m"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +97,9 @@ def build_intraday_snapshot(
     confirmation = IntradayConfirmation(
         trend=_aggregate_trend(timeframe_snapshots),
         breakout=any(snapshot.breakout for snapshot in timeframe_snapshots),
-        volume_expansion=any(snapshot.volume_expansion for snapshot in timeframe_snapshots),
+        volume_expansion=any(
+            snapshot.volume_expansion for snapshot in timeframe_snapshots
+        ),
         volatility_state=_aggregate_volatility(timeframe_snapshots),
         timeframes=proof_timeframes,
         as_of=_latest_snapshot_time(timeframe_snapshots),
@@ -197,19 +202,47 @@ def _classify_volatility(rows: list[CandleRow]) -> VolatilityState:
     return "normal"
 
 
-def _aggregate_trend(snapshots: tuple[TimeframeTechnicalSnapshot, ...]) -> IntradayTrend:
-    bullish_count = sum(1 for snapshot in snapshots if snapshot.trend == "bullish")
-    bearish_count = sum(1 for snapshot in snapshots if snapshot.trend == "bearish")
-    if bullish_count >= 2 and bearish_count == 0:
-        return "bullish"
-    if bearish_count >= 2 and bullish_count == 0:
-        return "bearish"
-    if bullish_count > 0 and bearish_count > 0:
+def _aggregate_trend(
+    snapshots: tuple[TimeframeTechnicalSnapshot, ...],
+) -> IntradayTrend:
+    snapshot_by_timeframe = {snapshot.timeframe: snapshot for snapshot in snapshots}
+    one_hour = snapshot_by_timeframe.get(CONFIRMATION_TIMEFRAME)
+    four_hour = snapshot_by_timeframe.get(REGIME_TIMEFRAME)
+    timing_snapshot = snapshot_by_timeframe.get(TIMING_TIMEFRAME)
+
+    if one_hour is not None and four_hour is not None:
+        if (
+            one_hour.trend == four_hour.trend
+            and one_hour.trend in {"bullish", "bearish"}
+        ):
+            return one_hour.trend
+        if one_hour.trend in {"bullish", "bearish", "neutral"} or four_hour.trend in {
+            "bullish",
+            "bearish",
+            "neutral",
+        }:
+            return "mixed"
+
+    directional_trends = [
+        snapshot.trend
+        for snapshot in snapshots
+        if snapshot.timeframe != TIMING_TIMEFRAME
+        and snapshot.trend in {"bullish", "bearish"}
+    ]
+    if directional_trends:
+        non_timing_trend = directional_trends[0]
+        if not all(trend == non_timing_trend for trend in directional_trends):
+            return "mixed"
+        if (
+            timing_snapshot is not None
+            and timing_snapshot.trend in {"bullish", "bearish"}
+            and timing_snapshot.trend != non_timing_trend
+        ):
+            return "mixed"
+        return non_timing_trend
+
+    if timing_snapshot is not None and timing_snapshot.trend in {"bullish", "bearish"}:
         return "mixed"
-    if bullish_count == 1:
-        return "bullish"
-    if bearish_count == 1:
-        return "bearish"
     if any(snapshot.trend == "neutral" for snapshot in snapshots):
         return "neutral"
     return "unknown"
@@ -228,7 +261,9 @@ def _aggregate_volatility(
     return "unknown"
 
 
-def _latest_snapshot_time(snapshots: tuple[TimeframeTechnicalSnapshot, ...]) -> datetime | None:
+def _latest_snapshot_time(
+    snapshots: tuple[TimeframeTechnicalSnapshot, ...],
+) -> datetime | None:
     latest_times = [
         snapshot.latest_candle_time
         for snapshot in snapshots
@@ -244,7 +279,6 @@ def _has_technical_proof(snapshot: TimeframeTechnicalSnapshot) -> bool:
         snapshot.trend in {"bullish", "bearish"}
         or snapshot.breakout
         or snapshot.volume_expansion
-        or snapshot.volatility_state in {"expanded", "compressed"}
     )
 
 

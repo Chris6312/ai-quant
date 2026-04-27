@@ -223,3 +223,4 @@ body{font-family:var(--font-mono);color:var(--text);-webkit-font-smoothing:antia
 
 .sig-screener{background:var(--teal-bg);color:var(--teal);border:0.5px solid var(--teal)}
 .purple-bg{background:var(--purple-bg)}
+.wl-table td.promoted-symbol{color:var(--green);text-shadow:0 0 10px color-mix(in srgb,var(--green) 45%,transparent)}
