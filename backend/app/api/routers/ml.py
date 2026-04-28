@@ -123,6 +123,7 @@ class FoldLike(Protocol):
     n_test_samples: int
     model_path: str
     feature_names: list[str]
+    class_balance: dict[str, object]
 
 
 def get_settings() -> Settings:
@@ -625,6 +626,7 @@ def _serialize_fold_results(
                 "model_path": fold.model_path,
                 "feature_names": feature_names,
                 "feature_importances": feature_importances,
+                "class_balance": dict(getattr(fold, "class_balance", {})),
                 "eligibility_status": getattr(fold, "eligibility_status", "research_only"),
                 "eligibility_reason": getattr(fold, "eligibility_reason", "not_evaluated"),
             }
@@ -691,6 +693,7 @@ def _register_training_result(
         "folds": serialized_folds,
         "selection_regime": getattr(result, "selection_regime", "not_evaluated"),
         "selection_policy": getattr(result, "selection_policy", {}),
+        "class_balance": getattr(result, "class_balance", {}),
         "created_at": trained_at,
     }
 

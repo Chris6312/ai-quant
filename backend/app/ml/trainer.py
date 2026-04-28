@@ -20,6 +20,11 @@ from app.ml.features import (
     feature_names_for_asset_class,
     ordered_feature_row,
 )
+from app.ml.labels import (
+    TradeLabelConfig,
+    build_long_trade_labels,
+    label_balance_report,
+)
 from app.models.domain import Candle
 
 FloatArray = NDArray[np.float64]
@@ -109,6 +114,9 @@ class TrainerConfig:
     crypto_min_baseline_margin: float = 0.03
     stock_label_threshold: float = 0.002
     crypto_label_threshold: float = 0.0075
+    trade_label_lookahead_candles: int = 5
+    recent_sample_weight_days: int = 365
+    recent_sample_weight_multiplier: float = 1.75
     crypto_min_test_samples: int = 300
     crypto_volatility_ratio_threshold: float = 1.35
     crypto_max_drawdown_threshold: float = -0.20
@@ -136,6 +144,7 @@ class FoldResult:
     baseline_margin: float = 0.0
     feature_names: list[str] = field(default_factory=list)
     feature_importances: dict[str, float] = field(default_factory=dict)
+    class_balance: dict[str, object] = field(default_factory=dict)
     eligibility_status: str = "research_only"
     eligibility_reason: str = "not_evaluated"
 
@@ -156,6 +165,7 @@ class TrainResult:
     best_fold_index: int
     selection_regime: str = "not_evaluated"
     selection_policy: dict[str, object] = field(default_factory=dict)
+    class_balance: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
@@ -287,6 +297,7 @@ class WalkForwardTrainer:
             best_fold_index=best_fold.fold_index,
             selection_regime=selection.regime,
             selection_policy=selection.policy,
+            class_balance=label_balance_report([sample.label for sample in samples]),
         )
 
     def _build_samples(
@@ -437,6 +448,7 @@ class WalkForwardTrainer:
             y_test,
             feature_names,
             asset_class,
+            train_samples,
         )
 
         probabilities = np.asarray(booster.predict(x_test), dtype=float)
@@ -482,6 +494,7 @@ class WalkForwardTrainer:
             baseline_margin=baseline_margin,
             feature_names=list(persisted_feature_names),
             feature_importances=feature_importances,
+            class_balance=label_balance_report(y_test.tolist()),
         )
 
         return fold_result, feature_importances
@@ -739,6 +752,7 @@ class WalkForwardTrainer:
         y_test: IntArray,
         feature_names: list[str],
         asset_class: str,
+        train_samples: Sequence[_TrainingSample],
     ) -> Booster:
         """Fit a LightGBM booster using the configured parameters."""
 
@@ -750,7 +764,7 @@ class WalkForwardTrainer:
             else 300
         )
 
-        sample_weights = self._sample_weights(y_train, asset_class)
+        sample_weights = self._sample_weights(y_train, asset_class, train_samples)
         train_set = lgb.Dataset(
             x_train,
             label=y_train,
@@ -781,8 +795,9 @@ class WalkForwardTrainer:
         self,
         labels: IntArray,
         asset_class: str,
+        samples: Sequence[_TrainingSample] | None = None,
     ) -> FloatArray | None:
-        """Return balanced sample weights for crypto multiclass training."""
+        """Return class-balanced and recency-aware sample weights."""
 
         if asset_class.lower().strip() != "crypto" or len(labels) == 0:
             return None
@@ -798,8 +813,30 @@ class WalkForwardTrainer:
             else:
                 weights_by_class[label] = sample_count / (class_count * count)
 
-        return np.asarray(
+        class_weights = np.asarray(
             [weights_by_class[int(label)] for label in labels],
+            dtype=float,
+        )
+        if samples is None:
+            return class_weights
+
+        recency_weights = self._recent_sample_weights(samples)
+        return class_weights * recency_weights
+
+    def _recent_sample_weights(
+        self,
+        samples: Sequence[_TrainingSample],
+    ) -> FloatArray:
+        """Boost recent rows so current regimes matter more than old market weather."""
+
+        if not samples:
+            return np.asarray([], dtype=float)
+
+        newest = max(sample.timestamp for sample in samples)
+        cutoff = newest - timedelta(days=self.config.recent_sample_weight_days)
+        multiplier = max(1.0, self.config.recent_sample_weight_multiplier)
+        return np.asarray(
+            [multiplier if sample.timestamp >= cutoff else 1.0 for sample in samples],
             dtype=float,
         )
 
@@ -910,26 +947,17 @@ class WalkForwardTrainer:
         return _normalized_gain_importances(booster, feature_names)
 
     def _label_candles(self, candles: Sequence[Candle], asset_class: str) -> list[int]:
-        """Label each candle: 0=down, 1=flat, 2=up based on next-candle return."""
+        """Label candles by triple-barrier long trade outcome."""
 
-        labels: list[int] = []
         threshold = self._label_threshold(asset_class)
-
-        for index, candle in enumerate(candles):
-            if index == len(candles) - 1:
-                labels.append(1)
-                continue
-
-            next_candle = candles[index + 1]
-            next_return = self._next_return(candle, next_candle)
-            if next_return > threshold:
-                labels.append(2)
-            elif next_return < -threshold:
-                labels.append(0)
-            else:
-                labels.append(1)
-
-        return labels
+        return build_long_trade_labels(
+            candles,
+            TradeLabelConfig(
+                profit_target_pct=threshold,
+                stop_loss_pct=threshold,
+                max_holding_candles=self.config.trade_label_lookahead_candles,
+            ),
+        )
 
     def _label_threshold(self, asset_class: str) -> float:
         """Return the class boundary threshold for the requested asset class."""

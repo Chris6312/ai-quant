@@ -63,18 +63,17 @@ def test_crypto_feature_engineer_emits_only_crypto_contract() -> None:
     assert list(features) == CRYPTO_FEATURES
 
 
-def test_crypto_label_threshold_uses_larger_daily_move_boundary() -> None:
-    """A 0.5% crypto daily move is flat, while the stock threshold still labels it up."""
+def test_crypto_label_threshold_uses_trade_outcome_barrier() -> None:
+    """Crypto labels should describe long trade outcomes, not next-day direction."""
 
     trainer = WalkForwardTrainer()
     crypto_labels = trainer._label_candles(
-        [_candle(0, 100.0, "crypto"), _candle(1, 100.5, "crypto")],
+        [
+            _candle(0, 100.0, "crypto"),
+            _candle(1, 101.0, "crypto"),
+            _candle(2, 100.0, "crypto"),
+        ],
         "crypto",
     )
-    stock_labels = trainer._label_candles(
-        [_candle(0, 100.0, "stock"), _candle(1, 100.5, "stock")],
-        "stock",
-    )
 
-    assert crypto_labels == [1, 1]
-    assert stock_labels == [2, 1]
+    assert crypto_labels == [2, 0, 1]

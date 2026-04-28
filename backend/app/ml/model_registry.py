@@ -27,6 +27,7 @@ class FoldSummaryRecord(TypedDict):
     model_path: str
     feature_names: list[str]
     feature_importances: dict[str, float]
+    class_balance: dict[str, object]
     eligibility_status: str
     eligibility_reason: str
 
@@ -50,6 +51,7 @@ class ModelRecord(TypedDict, total=False):
     folds: list[FoldSummaryRecord]
     selection_regime: str
     selection_policy: dict[str, object]
+    class_balance: dict[str, object]
     retired_reason: NotRequired[str]
     created_at: str
     updated_at: str
