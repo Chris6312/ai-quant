@@ -204,6 +204,17 @@ export type ResearchIntradayDecisionResponse = {
   timeframe_snapshots: ResearchIntradayTimeframeSnapshot[];
   generated_at: string;
 };
+export type ResearchBitcoinDominanceReading = {
+  value: number | null;
+  bias: 'bullish' | 'bearish' | 'neutral' | 'unknown';
+  effect: 'tailwind' | 'headwind' | 'neutral' | 'unknown';
+  severity: 'mild' | 'moderate' | 'severe' | 'unknown';
+  source: string;
+  as_of: string;
+  status: 'available' | 'unavailable';
+  reason: string;
+};
+
 export type ResearchMacroSentimentDecisionResponse = {
   bias: 'bullish' | 'bearish' | 'neutral' | 'unknown';
   score: number | null;
@@ -214,6 +225,7 @@ export type ResearchMacroSentimentDecisionResponse = {
   generated_at: string;
   status: 'available' | 'neutral_fallback';
   reason: string;
+  btc_dominance?: ResearchBitcoinDominanceReading;
 };
 
 export const getResearchMacroSentimentDecision = () =>

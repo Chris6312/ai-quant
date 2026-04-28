@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     research_insider_base_url: str = Field(default="https://api.secfilingdata.com")
     research_insider_api_key: str | None = Field(default=None)
     research_analyst_base_url: str = Field(default="https://api.benzinga.com/api/v2")
+    coingecko_base_url: str = Field(default="https://api.coingecko.com/api/v3")
+    coingecko_api_key: str | None = Field(default=None)
+    coingecko_api_key_header: str = Field(default="x-cg-demo-api-key")
 
 
 @lru_cache(maxsize=1)

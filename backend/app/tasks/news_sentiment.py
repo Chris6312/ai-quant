@@ -122,6 +122,7 @@ async def collect_daily_crypto_rss_snapshot(
         "symbol_count": len(symbols),
         "symbols": list(symbols),
         "raw_article_count": len(articles),
+        "rss_fetch_errors": _rss_fetch_errors(rss_client),
         "raw_match_summary": summarize_article_matches(raw_matches),
         "prepared_match_summary": summarize_article_matches(prepared_matches),
         "sentiment_summary": {
@@ -190,6 +191,7 @@ async def persist_daily_crypto_rss_sentiment(
         "symbol_count": len(symbols),
         "symbols": list(symbols),
         "raw_article_count": len(articles),
+        "rss_fetch_errors": _rss_fetch_errors(rss_client),
         "raw_match_summary": summarize_article_matches(raw_matches),
         "prepared_match_summary": summarize_article_matches(prepared_matches),
         "sentiment_summary": {
@@ -208,6 +210,20 @@ async def persist_daily_crypto_rss_sentiment(
         "message": "RSS articles were scored and persisted to crypto_daily_sentiment.",
         "finished_at": datetime.now(tz=UTC).isoformat(),
     }
+
+
+def _rss_fetch_errors(client: CryptoRssClient) -> list[dict[str, str]]:
+    """Return non-fatal RSS source failures for task diagnostics."""
+
+    fetch_errors = getattr(client, "fetch_errors", [])
+    return [
+        {
+            "source": error.source,
+            "url": error.url,
+            "message": error.message,
+        }
+        for error in fetch_errors
+    ]
 
 
 async def backfill_historical_crypto_sentiment(

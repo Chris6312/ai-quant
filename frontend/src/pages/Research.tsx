@@ -91,8 +91,10 @@ function buildStockScopeItems(
 }
 
 function SignalFeed({
+  emptyText = "No signals stored yet — run congress/insider/news sync tasks",
   signals,
 }: {
+  emptyText?: string;
   signals: ResearchSignal[];
 }): React.ReactElement {
   if (signals.length === 0) {
@@ -105,7 +107,7 @@ function SignalFeed({
           textAlign: "center",
         }}
       >
-        No signals stored yet — run congress/insider/news sync tasks
+        {emptyText}
       </div>
     );
   }
@@ -245,6 +247,7 @@ const FILTERS: { key: WatchlistFilter; label: string }[] = [
 ];
 
 const TABS = ["signals", "congress", "insider"] as const;
+const CRYPTO_TABS = ["signals"] as const;
 type ResearchTab = (typeof TABS)[number];
 
 const STORAGE_KEYS = {
@@ -422,15 +425,18 @@ function getTableFinalDecision(
   item: ResearchScopeItem,
   predictionBySymbol: Map<string, MlPredictionRow>,
   intradayBySymbol: Map<string, ResearchIntradayDecisionResponse>,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
 ): string | null {
   const prediction = getTablePrediction(item, predictionBySymbol);
-  if (!prediction) {
-    return null;
+  const intraday = getTableIntradayDecision(item, intradayBySymbol);
+  if (prediction) {
+    return getDecisionAction(prediction, intraday);
   }
-  return getDecisionAction(
-    prediction,
-    getTableIntradayDecision(item, intradayBySymbol),
-  );
+  if (item.asset_class === "crypto") {
+    return getResearchOnlyFinalDecision(intraday, macroDecision, macroError);
+  }
+  return null;
 }
 
 type DecisionVisibility = {
@@ -447,18 +453,40 @@ type DecisionVisibility = {
   reason: string;
 };
 
+type MacroSeverity = "unknown" | "mild" | "moderate" | "severe";
+
+type MacroPressure = {
+  bias: "bullish" | "bearish" | "neutral" | "unknown";
+  severity: MacroSeverity;
+  score: number | null;
+  source: "sentiment" | "btc_dominance" | "combined" | "unknown";
+};
+
+const MILD_MACRO_SCORE = 0.15;
+const SEVERE_MACRO_SCORE = 0.4;
+
 function formatDecisionText(value: string): string {
   return value.replace(/_/g, " ");
 }
 
 function badgeClassForValue(value: string): string {
-  if (["allow", "boost", "long", "bullish", "signal"].includes(value)) {
+  if (
+    ["allow", "boost", "long", "bullish", "signal"].includes(value) ||
+    value.endsWith(" bullish")
+  ) {
     return "cb-green";
   }
-  if (["reduce", "watch", "neutral", "mixed", "flat"].includes(value)) {
+  if (
+    ["reduce", "watch", "neutral", "mixed", "flat", "mild bearish"].includes(
+      value,
+    )
+  ) {
     return "cb-blue";
   }
-  if (["block", "no_trade", "short", "bearish"].includes(value)) {
+  if (
+    ["block", "no_trade", "short", "bearish"].includes(value) ||
+    value.endsWith(" bearish")
+  ) {
     return "cb-amber";
   }
   return "cb-amber";
@@ -485,14 +513,106 @@ function MiniDecisionBadge({
   );
 }
 
+function severityRank(severity: MacroSeverity): number {
+  if (severity === "severe") {
+    return 3;
+  }
+  if (severity === "moderate") {
+    return 2;
+  }
+  if (severity === "mild") {
+    return 1;
+  }
+  return 0;
+}
+
+function strongerPressure(
+  sentimentPressure: MacroPressure,
+  dominancePressure: MacroPressure,
+): MacroPressure {
+  if (dominancePressure.bias === "unknown") {
+    return sentimentPressure;
+  }
+  if (sentimentPressure.bias === "unknown" || sentimentPressure.bias === "neutral") {
+    return dominancePressure;
+  }
+  if (dominancePressure.bias === "neutral") {
+    return sentimentPressure;
+  }
+  if (dominancePressure.bias !== sentimentPressure.bias) {
+    return severityRank(dominancePressure.severity) >=
+      severityRank(sentimentPressure.severity)
+      ? dominancePressure
+      : sentimentPressure;
+  }
+
+  const stronger =
+    severityRank(dominancePressure.severity) >
+    severityRank(sentimentPressure.severity)
+      ? dominancePressure
+      : sentimentPressure;
+  return { ...stronger, source: "combined" };
+}
+
+function getBtcDominancePressure(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+): MacroPressure {
+  const dominance = macroDecision?.btc_dominance;
+  if (!dominance || dominance.status !== "available") {
+    return { bias: "unknown", score: null, severity: "unknown", source: "unknown" };
+  }
+  return {
+    bias: dominance.bias,
+    score: dominance.value,
+    severity: dominance.severity,
+    source: "btc_dominance",
+  };
+}
+
+function getMacroPressure(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): MacroPressure {
+  if (macroError || !macroDecision) {
+    return { bias: "unknown", score: null, severity: "unknown", source: "unknown" };
+  }
+  if (macroDecision.status === "neutral_fallback") {
+    return strongerPressure(
+      { bias: "neutral", score: macroDecision.score, severity: "mild", source: "sentiment" },
+      getBtcDominancePressure(macroDecision),
+    );
+  }
+
+  const score = macroDecision.score;
+  const absoluteScore = Math.abs(score ?? 0);
+  let severity: MacroSeverity = "mild";
+  if (absoluteScore >= SEVERE_MACRO_SCORE) {
+    severity = "severe";
+  } else if (absoluteScore >= MILD_MACRO_SCORE) {
+    severity = "moderate";
+  }
+
+  return strongerPressure(
+    { bias: macroDecision.bias, score, severity, source: "sentiment" },
+    getBtcDominancePressure(macroDecision),
+  );
+}
+
+function formatMacroWeatherLabel(pressure: MacroPressure): string {
+  if (pressure.bias === "unknown") {
+    return "unknown";
+  }
+  if (pressure.bias === "neutral") {
+    return "neutral";
+  }
+  return `${pressure.severity} ${pressure.bias}`;
+}
+
 function getMacroWeatherFromDecision(
   macroDecision: ResearchMacroSentimentDecisionResponse | null,
   macroError: string | null,
 ): string {
-  if (macroError) {
-    return "unknown";
-  }
-  return macroDecision?.bias ?? "neutral";
+  return formatMacroWeatherLabel(getMacroPressure(macroDecision, macroError));
 }
 
 function getMacroWeatherDetail(
@@ -503,18 +623,23 @@ function getMacroWeatherDetail(
     return "Macro weather request failed; unknown is reserved for this error state.";
   }
   if (!macroDecision) {
-    return "Loading BTC/ETH macro weather.";
+    return "Loading BTC.D macro vane plus BTC/ETH news weather.";
   }
+  const pressure = getMacroPressure(macroDecision, macroError);
   const score = formatSignedSentiment(macroDecision.score);
   const asOf = macroDecision.as_of
     ? ` · as of ${formatCandleTime(macroDecision.as_of)}`
     : "";
-  if (macroDecision.status === "neutral_fallback") {
+  const dominance = macroDecision.btc_dominance;
+  const dominanceText =
+    dominance && dominance.status === "available" && dominance.value !== null
+      ? ` · BTC.D ${dominance.value.toFixed(1)}% ${dominance.severity} ${dominance.effect}`
+      : "";
+  if (macroDecision.status === "neutral_fallback" && dominanceText === "") {
     return "No macro reading available · treated as neutral weather.";
   }
-  return `${macroDecision.effect} · score ${score} · ${macroDecision.article_count} articles · ${macroDecision.source_symbols.join(" + ")}${asOf}`;
+  return `${pressure.severity} ${pressure.bias} · news ${score} · ${macroDecision.article_count} articles · ${macroDecision.source_symbols.join(" + ")}${dominanceText}${asOf}`;
 }
-
 function getSymbolForecast(row: MlPredictionRow): string {
   const sentiment = row.sentiment.news_sentiment_1d;
   if (!row.sentiment.available || sentiment === null) {
@@ -702,6 +827,118 @@ function getDecisionReason(
   return "Daily ML bias is available, but no live decision layer has promoted it beyond observation.";
 }
 
+function getResearchOnlyFinalDecision(
+  intraday: ResearchIntradayDecisionResponse | null,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  const intradayTrend = intraday?.confirmation.trend ?? "unknown";
+  const macroPressure = getMacroPressure(macroDecision, macroError);
+
+  if (intradayTrend === "bearish") {
+    return "no_trade";
+  }
+  if (intradayTrend === "mixed") {
+    return "watch";
+  }
+  if (intradayTrend === "neutral") {
+    return macroPressure.bias === "bearish" &&
+      macroPressure.severity !== "mild"
+      ? "no_trade"
+      : "watch";
+  }
+  if (intradayTrend === "bullish") {
+    if (
+      macroPressure.bias === "bearish" &&
+      macroPressure.severity === "severe"
+    ) {
+      return "no_trade";
+    }
+    if (
+      macroPressure.bias === "bearish" &&
+      macroPressure.severity === "moderate"
+    ) {
+      return "watch";
+    }
+    if (intradayHasStrongSetup(intraday)) {
+      return macroPressure.bias === "bullish" ? "boost" : "allow";
+    }
+    return "watch";
+  }
+  return macroPressure.bias === "bearish" && macroPressure.severity !== "mild"
+    ? "no_trade"
+    : "watch";
+}
+function getResearchOnlyRiskMode(
+  intraday: ResearchIntradayDecisionResponse | null,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  const finalDecision = getResearchOnlyFinalDecision(
+    intraday,
+    macroDecision,
+    macroError,
+  );
+  if (finalDecision === "no_trade" || finalDecision === "block") {
+    return "blocked";
+  }
+  if (finalDecision === "watch") {
+    return "watch_only";
+  }
+  return "normal";
+}
+
+function getResearchOnlyReason(
+  intraday: ResearchIntradayDecisionResponse | null,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  const intradayTrend = intraday?.confirmation.trend ?? "unknown";
+  const macroPressure = getMacroPressure(macroDecision, macroError);
+  if (intradayTrend === "bearish") {
+    return "Crypto bearish alignment is risk suppression only. It becomes NO_TRADE, never an executable short.";
+  }
+  if (intradayTrend === "mixed") {
+    return "Intraday proof is mixed, so the symbol stays visible as watch-only research.";
+  }
+  if (intradayTrend === "bullish" && macroPressure.bias === "bearish") {
+    if (macroPressure.severity === "mild") {
+      return "Intraday proof is bullish and macro headwind is mild, so macro does not block promotion.";
+    }
+    if (macroPressure.severity === "moderate") {
+      return "Intraday proof is bullish, but macro weather is a moderate headwind, so this stays watch-only.";
+    }
+    return "Intraday proof is bullish, but macro weather is a severe headwind, so crypto remains no-trade.";
+  }
+  if (intradayTrend === "bullish") {
+    return "Closed-candle intraday proof is available. ML is disabled here, so sentiment and intraday proof drive the research decision.";
+  }
+  if (macroPressure.bias === "bearish" && macroPressure.severity !== "mild") {
+    return "No bullish intraday proof is available and macro weather is a meaningful headwind, so crypto remains no-trade.";
+  }
+  return "ML is disabled here. The research card is using intraday proof plus BTC.D macro vane and BTC/ETH sentiment until a champion model is active.";
+}
+function getResearchOnlySymbolForecast(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  const macroBias = getMacroWeatherFromDecision(macroDecision, macroError);
+  return macroBias === "unknown" ? "pending" : macroBias;
+}
+
+function getResearchOnlySymbolForecastDetail(
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): string {
+  if (macroError) {
+    return "Crypto news sentiment is unavailable right now.";
+  }
+  if (!macroDecision) {
+    return "Loading scheduled BTC/ETH news sentiment.";
+  }
+  return getMacroWeatherDetail(macroDecision, macroError);
+}
+
 function formatIntradayDetail(
   intraday: ResearchIntradayDecisionResponse | null,
 ): string {
@@ -756,6 +993,34 @@ function buildDecisionVisibility(
     finalDecision: getDecisionAction(row, intraday),
     riskMode: getRiskMode(row, intraday),
     reason: getDecisionReason(row, intraday),
+  };
+}
+
+function buildResearchOnlyDecisionVisibility(
+  intraday: ResearchIntradayDecisionResponse | null,
+  macroDecision: ResearchMacroSentimentDecisionResponse | null,
+  macroError: string | null,
+): DecisionVisibility {
+  return {
+    mlBias: "disabled",
+    mlBiasDetail:
+      "No active crypto champion model is registered. ML contributes 0.00 to this research decision.",
+    macroWeather: getMacroWeatherFromDecision(macroDecision, macroError),
+    macroWeatherDetail: getMacroWeatherDetail(macroDecision, macroError),
+    symbolForecast: getResearchOnlySymbolForecast(macroDecision, macroError),
+    symbolForecastDetail: getResearchOnlySymbolForecastDetail(
+      macroDecision,
+      macroError,
+    ),
+    intradayProof: intraday?.confirmation.trend ?? "pending",
+    intradayProofDetail: formatIntradayDetail(intraday),
+    finalDecision: getResearchOnlyFinalDecision(
+      intraday,
+      macroDecision,
+      macroError,
+    ),
+    riskMode: getResearchOnlyRiskMode(intraday, macroDecision, macroError),
+    reason: getResearchOnlyReason(intraday, macroDecision, macroError),
   };
 }
 
@@ -826,23 +1091,19 @@ function DecisionVisibilityPanel({
   prediction: MlPredictionRow | null;
   mlModelAvailable: boolean;
 }): React.ReactElement {
-  if (!prediction) {
-    const message = mlModelAvailable
-      ? "Decision visibility needs a persisted ML prediction first. No hidden trade/readiness state is being inferred for this symbol."
-      : "No active crypto ML champion is registered. Stale persisted ML predictions are hidden, and this symbol should be judged from intraday proof plus sentiment context only.";
-    return (
-      <div style={{ padding: "14px 0", fontSize: 11, color: "var(--text3)" }}>
-        {message}
-      </div>
-    );
-  }
-
-  const visibility = buildDecisionVisibility(
-    prediction,
-    intradayDecision,
-    macroDecision,
-    macroError,
-  );
+  void mlModelAvailable;
+  const visibility = prediction
+    ? buildDecisionVisibility(
+        prediction,
+        intradayDecision,
+        macroDecision,
+        macroError,
+      )
+    : buildResearchOnlyDecisionVisibility(
+        intradayDecision,
+        macroDecision,
+        macroError,
+      );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -922,7 +1183,7 @@ function PredictionFeed({
   if (!prediction) {
     const message = mlModelAvailable
       ? "No persisted ML prediction for this symbol yet. Run prediction generation before treating this symbol as signal-ready."
-      : "ML predictions are disabled because no crypto champion model passed guardrails. Old prediction rows remain in storage but are intentionally hidden here.";
+      : "ML predictions are disabled because no crypto champion model passed guardrails. Intraday proof and scheduled crypto news sentiment still drive the research decision above.";
     return (
       <div style={{ padding: "14px 0", fontSize: 11, color: "var(--text3)" }}>
         {message}
@@ -1296,6 +1557,16 @@ const Research: React.FC = () => {
     : activeStockModelId !== null;
   const cryptoScopeSource = scope?.crypto_watchlist_source ?? "crypto scope";
 
+  const visibleTabs: readonly ResearchTab[] = selectedIsCrypto
+    ? CRYPTO_TABS
+    : TABS;
+
+  useEffect(() => {
+    if (selectedIsCrypto && tab !== "signals") {
+      setTab("signals");
+    }
+  }, [selectedIsCrypto, tab]);
+
   const updatePromotedSymbols = async (symbols: string[]): Promise<void> => {
     setScopeUpdating(true);
     try {
@@ -1500,6 +1771,8 @@ const Research: React.FC = () => {
                       item,
                       predictionBySymbol,
                       intradayDecisionBySymbol,
+                      macroDecision,
+                      macroDecisionError,
                     );
                     return (
                       <tr
@@ -1615,7 +1888,7 @@ const Research: React.FC = () => {
                   borderBottom: "0.5px solid var(--border)",
                 }}
               >
-                {TABS.map((item) => (
+                {visibleTabs.map((item) => (
                   <button
                     key={item}
                     onClick={() => setTab(item)}
@@ -1670,7 +1943,7 @@ const Research: React.FC = () => {
                 </div>
               )}
 
-              {rError && !selectedPrediction && (
+              {rError && !selectedPrediction && !selectedIsCrypto && (
                 <div
                   style={{
                     padding: "16px",
@@ -1697,7 +1970,14 @@ const Research: React.FC = () => {
                         prediction={selectedPrediction}
                         mlModelAvailable={selectedMlModelAvailable}
                       />
-                      <SignalFeed signals={signals} />
+                      <SignalFeed
+                        emptyText={
+                          selectedIsCrypto
+                            ? "No stored crypto news signals yet. Scheduled sentiment still feeds the macro weather tile when available."
+                            : undefined
+                        }
+                        signals={signals}
+                      />
                     </>
                   ) : null}
                   {tab === "congress" ? (

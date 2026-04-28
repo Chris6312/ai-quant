@@ -55,6 +55,16 @@ RSS_NAMESPACES: dict[str, str] = {
     "dc": "http://purl.org/dc/elements/1.1/",
 }
 
+RSS_REQUEST_HEADERS: Mapping[str, str] = {
+    "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/142.0.0.0 Safari/537.36"
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RssSource:
@@ -73,6 +83,15 @@ class RssArticle:
     published_at: datetime
     source: str
     summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class RssFetchError:
+    """Non-fatal fetch error for one RSS source."""
+
+    source: str
+    url: str
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,16 +122,28 @@ class CryptoRssClient:
     ) -> None:
         self.sources = tuple(sources)
         self.timeout_s = timeout_s
+        self.fetch_errors: tuple[RssFetchError, ...] = ()
 
     async def fetch_articles(self) -> list[RssArticle]:
-        """Fetch all configured RSS sources and return normalized articles."""
+        """Fetch configured RSS sources and skip sources that fail transiently."""
 
         articles: list[RssArticle] = []
+        errors: list[RssFetchError] = []
         async with httpx.AsyncClient(timeout=self.timeout_s, follow_redirects=True) as client:
             for source in self.sources:
-                response = await client.get(source.url)
-                response.raise_for_status()
-                articles.extend(parse_rss_document(response.text, source.name))
+                try:
+                    response = await client.get(source.url, headers=RSS_REQUEST_HEADERS)
+                    response.raise_for_status()
+                    articles.extend(parse_rss_document(response.text, source.name))
+                except (httpx.HTTPError, ET.ParseError) as exc:
+                    errors.append(
+                        RssFetchError(
+                            source=source.name,
+                            url=source.url,
+                            message=str(exc),
+                        )
+                    )
+        self.fetch_errors = tuple(errors)
         return articles
 
 

@@ -45,7 +45,11 @@ export type ResearchData = {
   error: string | null;
 };
 
-export function useResearch(symbol: string, intervalMs = 60000): ResearchData {
+export function useResearch(
+  symbol: string,
+  intervalMs = 60000,
+  assetClass: 'crypto' | 'stock' | 'unknown' = 'unknown',
+): ResearchData {
   const [signals,  setSignals]  = useState<ResearchSignal[]>([]);
   const [congress, setCongress] = useState<CongressTrade[]>([]);
   const [insider,  setInsider]  = useState<InsiderTrade[]>([]);
@@ -73,9 +77,12 @@ export function useResearch(symbol: string, intervalMs = 60000): ResearchData {
 
     const anyData = sig.length > 0 || con.length > 0 || ins.length > 0;
     setHasData(anyData);
-    setError(anyData ? null : 'No research data yet — sync tasks have not run');
+    const emptyMessage = assetClass === 'crypto'
+      ? 'No crypto news sentiment rows are available yet. News sentiment runs from the scheduled crypto news sync; congress and insider feeds are stock-only.'
+      : 'No stock research rows are available yet. Congress, insider, and news sync rows will appear here after their stock research tasks run.';
+    setError(anyData ? null : emptyMessage);
     setLoading(false);
-  }, [symbol]);
+  }, [assetClass, symbol]);
 
   useEffect(() => {
     setLoading(true);

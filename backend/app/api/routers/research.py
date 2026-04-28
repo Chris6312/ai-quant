@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.config.crypto_scope import (
     list_research_crypto_scope_symbols,
     set_research_crypto_promoted_symbols,
 )
+from app.config.settings import get_settings
 from app.db.models import (
     CongressTradeRow,
     CryptoDailySentimentRow,
@@ -37,6 +39,11 @@ from app.decision.visibility import MacroSentimentDecision
 from app.repositories.candles import CandleRepository
 from app.repositories.research import ResearchRepository
 from app.repositories.watchlist import WatchlistRepository
+from app.research.coingecko_client import (
+    BitcoinDominanceReading,
+    CoinGeckoGlobalClient,
+    classify_bitcoin_dominance,
+)
 
 router = APIRouter(prefix="/research", tags=["research"])
 
@@ -128,7 +135,7 @@ async def build_research_macro_sentiment_decision(
     *,
     generated_at: datetime,
 ) -> dict[str, object]:
-    """Build BTC/ETH macro weather from persisted sentiment rows."""
+    """Build BTC/ETH news plus BTC dominance macro weather."""
 
     btc_row = await _latest_crypto_sentiment_row(repository, BTC_MACRO_SYMBOL)
     eth_row = await _latest_crypto_sentiment_row(repository, ETH_MACRO_SYMBOL)
@@ -141,10 +148,12 @@ async def build_research_macro_sentiment_decision(
             article_count=0,
         )
 
+    dominance = await _fetch_bitcoin_dominance_reading()
     return _serialize_macro_sentiment_decision(
         decision=decision,
         generated_at=generated_at,
         status=status,
+        dominance=dominance,
     )
 
 
@@ -168,11 +177,25 @@ async def _latest_crypto_sentiment_row(
     return rows[0] if rows else None
 
 
+async def _fetch_bitcoin_dominance_reading() -> BitcoinDominanceReading:
+    settings = get_settings()
+    client = CoinGeckoGlobalClient(
+        base_url=settings.coingecko_base_url,
+        api_key=settings.coingecko_api_key,
+        api_key_header=settings.coingecko_api_key_header,
+    )
+    try:
+        return await client.fetch_bitcoin_dominance()
+    except httpx.HTTPError:
+        return classify_bitcoin_dominance(value=None, as_of=datetime.now(tz=UTC))
+
+
 def _serialize_macro_sentiment_decision(
     *,
     decision: MacroSentimentDecision,
     generated_at: datetime,
     status: str,
+    dominance: BitcoinDominanceReading,
 ) -> dict[str, object]:
     if status == "available":
         reason = "BTC/ETH macro sentiment is wired from persisted daily sentiment."
@@ -192,6 +215,22 @@ def _serialize_macro_sentiment_decision(
         "generated_at": generated_at.isoformat(),
         "status": status,
         "reason": reason,
+        "btc_dominance": _serialize_bitcoin_dominance(dominance),
+    }
+
+
+def _serialize_bitcoin_dominance(
+    reading: BitcoinDominanceReading,
+) -> dict[str, object]:
+    return {
+        "value": reading.value,
+        "bias": reading.bias,
+        "effect": reading.effect,
+        "severity": reading.severity,
+        "source": reading.source,
+        "as_of": reading.as_of.isoformat(),
+        "status": reading.status,
+        "reason": reading.reason,
     }
 
 

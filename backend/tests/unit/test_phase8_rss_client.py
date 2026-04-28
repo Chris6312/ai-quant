@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
+import httpx
+from pytest import MonkeyPatch
+
+import app.research.rss_client as rss_module
 from app.research.rss_client import (
+    CryptoRssClient,
     RssArticle,
+    RssSource,
     deduplicate_articles,
     filter_relevant_articles,
     normalize_article_url,
@@ -173,3 +180,52 @@ def test_prepare_articles_for_scoring_filters_short_stale_and_duplicates() -> No
     prepared = prepare_articles_for_scoring(matches, now=now)
 
     assert [article.url for article in prepared[0].articles] == ["https://example.test/sol"]
+
+
+def test_crypto_rss_client_skips_failed_source(monkeypatch: MonkeyPatch) -> None:
+    """One blocked RSS source should not kill the whole sentiment refresh."""
+
+    class FakeResponse:
+        text = RSS_DOCUMENT
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def __aenter__(self) -> FakeAsyncClient:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> None:
+            return None
+
+        async def get(
+            self,
+            url: str,
+            *,
+            headers: object,
+        ) -> FakeResponse:
+            if "coinbase" in url:
+                raise httpx.ConnectError("blocked")
+            return FakeResponse()
+
+    monkeypatch.setattr(rss_module.httpx, "AsyncClient", FakeAsyncClient)
+    client = CryptoRssClient(
+        sources=(
+            RssSource(name="Coinbase", url="https://www.coinbase.com/blog/rss.xml"),
+            RssSource(name="CoinDesk", url="https://www.coindesk.com/rss"),
+        )
+    )
+
+    articles = asyncio.run(client.fetch_articles())
+
+    assert len(articles) == 2
+    assert len(client.fetch_errors) == 1
+    assert client.fetch_errors[0].source == "Coinbase"
