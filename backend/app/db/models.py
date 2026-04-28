@@ -81,6 +81,31 @@ class ResearchSignalRow(Base):
 
 
 
+
+
+class BitcoinDominanceDailyRow(Base):
+    """Daily Bitcoin dominance percentage used as a crypto macro feature."""
+
+    __tablename__ = "btc_dominance_daily"
+    __table_args__ = (
+        Index("ix_btc_dominance_daily_date", "dominance_date"),
+    )
+
+    dominance_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    dominance_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+
 class CryptoDailySentimentRow(Base):
     """Daily aggregated crypto news sentiment by canonical symbol."""
 

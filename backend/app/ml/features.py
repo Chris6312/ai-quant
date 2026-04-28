@@ -87,6 +87,10 @@ CRYPTO_SOURCE_BACKED_RESEARCH_FEATURES: tuple[str, ...] = (
     "news_sentiment_1d",
     "news_sentiment_7d",
     "news_article_count_7d",
+    "btc_dominance_level",
+    "btc_dominance_change_1d",
+    "btc_dominance_change_7d",
+    "btc_dominance_pressure",
 )
 
 CRYPTO_NOT_APPLICABLE_RESEARCH_FEATURES: tuple[str, ...] = (
@@ -148,6 +152,10 @@ class ResearchInputs:
     news_sentiment_1d: float = 0.0
     news_sentiment_7d: float = 0.0
     news_article_count_7d: int = 0
+    btc_dominance_level: float = 0.0
+    btc_dominance_change_1d: float = 0.0
+    btc_dominance_change_7d: float = 0.0
+    btc_dominance_pressure: float = 0.0
     earnings_proximity_days: int = 999
     congress_buy_score: float = 0.0
     congress_cluster_30d: int = 0
@@ -221,9 +229,10 @@ def build_feature_truth_metadata(asset_class: str) -> list[FeatureTruthMetadata]
     """Return feature availability metadata for SHAP and feature audit screens."""
 
     normalized_asset_class = asset_class.lower().strip()
+    feature_names = CRYPTO_FEATURES if normalized_asset_class == "crypto" else ALL_FEATURES
     return [
         _classify_feature_for_asset(feature_name, normalized_asset_class)
-        for feature_name in ALL_FEATURES
+        for feature_name in feature_names
     ]
 
 
@@ -418,6 +427,10 @@ class FeatureEngineer:
                 news_sentiment_1d=research.news_sentiment_1d,
                 news_sentiment_7d=research.news_sentiment_7d,
                 news_article_count_7d=research.news_article_count_7d,
+                btc_dominance_level=research.btc_dominance_level,
+                btc_dominance_change_1d=research.btc_dominance_change_1d,
+                btc_dominance_change_7d=research.btc_dominance_change_7d,
+                btc_dominance_pressure=research.btc_dominance_pressure,
             )
         return ResearchInputs()
 
@@ -504,6 +517,10 @@ class FeatureEngineer:
             ("news_sentiment_1d", self._finite(research.news_sentiment_1d)),
             ("news_sentiment_7d", self._finite(research.news_sentiment_7d)),
             ("news_article_count_7d", float(research.news_article_count_7d)),
+            ("btc_dominance_level", self._finite(research.btc_dominance_level)),
+            ("btc_dominance_change_1d", self._finite(research.btc_dominance_change_1d)),
+            ("btc_dominance_change_7d", self._finite(research.btc_dominance_change_7d)),
+            ("btc_dominance_pressure", self._finite(research.btc_dominance_pressure)),
             ("earnings_proximity_days", float(research.earnings_proximity_days)),
             ("congress_buy_score", self._finite(research.congress_buy_score)),
             ("congress_cluster_30d", float(research.congress_cluster_30d)),

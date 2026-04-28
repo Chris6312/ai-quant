@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.constants import ALPACA_DEFAULT_SOURCE, ML_CANDLE_USAGE
 from app.db.models import (
+    BitcoinDominanceDailyRow,
     CandleRow,
     CongressTradeRow,
     CryptoDailySentimentRow,
@@ -610,6 +611,11 @@ class CryptoTrainingInputAssembler:
         )
         rows = list(result.scalars().all())
         rows_by_symbol = self._sentiment_rows_by_symbol(rows)
+        dominance_rows = await self._load_btc_dominance_rows(
+            session,
+            start_date=start_date - timedelta(days=7),
+            end_date=end_date,
+        )
 
         macro_by_date: dict[date, ResearchInputs] = {}
         for sentiment_date in unique_dates:
@@ -624,13 +630,113 @@ class CryptoTrainingInputAssembler:
             symbol_rows = rows_by_symbol.get(symbol, [])
             for sentiment_date in unique_dates:
                 macro_research = macro_by_date[sentiment_date]
-                lookup[(symbol, sentiment_date)] = self._crypto_symbol_research_inputs(
+                sentiment_research = self._crypto_symbol_research_inputs(
                     symbol=symbol,
                     sentiment_date=sentiment_date,
                     symbol_rows=symbol_rows,
                     macro_research=macro_research,
                 )
+                lookup[(symbol, sentiment_date)] = self._with_btc_dominance_features(
+                    sentiment_research,
+                    sentiment_date=sentiment_date,
+                    dominance_rows=dominance_rows,
+                )
         return lookup
+
+    async def _load_btc_dominance_rows(
+        self,
+        session: AsyncSession,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[BitcoinDominanceDailyRow]:
+        """Load BTC dominance history for ML feature dates."""
+
+        result = await session.execute(
+            select(BitcoinDominanceDailyRow)
+            .where(BitcoinDominanceDailyRow.dominance_date >= start_date)
+            .where(BitcoinDominanceDailyRow.dominance_date <= end_date)
+            .order_by(BitcoinDominanceDailyRow.dominance_date.asc())
+        )
+        return list(result.scalars().all())
+
+    def _with_btc_dominance_features(
+        self,
+        research: ResearchInputs,
+        *,
+        sentiment_date: date,
+        dominance_rows: Sequence[BitcoinDominanceDailyRow],
+    ) -> ResearchInputs:
+        """Attach historical BTC.D features without dropping rows when coverage is missing."""
+
+        if not dominance_rows:
+            return research
+
+        rows_by_date = {row.dominance_date: row for row in dominance_rows}
+        current = self._latest_btc_dominance_row(rows_by_date, sentiment_date)
+        if current is None:
+            return research
+
+        previous = self._latest_btc_dominance_row(
+            rows_by_date,
+            sentiment_date - timedelta(days=1),
+        )
+        previous_week = self._latest_btc_dominance_row(
+            rows_by_date,
+            sentiment_date - timedelta(days=7),
+        )
+        return replace(
+            research,
+            btc_dominance_level=self._feature_float(current.dominance_pct),
+            btc_dominance_change_1d=self._dominance_delta(current, previous),
+            btc_dominance_change_7d=self._dominance_delta(current, previous_week),
+            btc_dominance_pressure=self._btc_dominance_pressure(current.dominance_pct),
+        )
+
+    def _latest_btc_dominance_row(
+        self,
+        rows_by_date: Mapping[date, BitcoinDominanceDailyRow],
+        target_date: date,
+    ) -> BitcoinDominanceDailyRow | None:
+        """Return the latest BTC.D row on or before target_date."""
+
+        latest_date = max(
+            (
+                dominance_date
+                for dominance_date in rows_by_date
+                if dominance_date <= target_date
+            ),
+            default=None,
+        )
+        if latest_date is None:
+            return None
+        return rows_by_date[latest_date]
+
+    def _dominance_delta(
+        self,
+        current: BitcoinDominanceDailyRow,
+        previous: BitcoinDominanceDailyRow | None,
+    ) -> float:
+        """Return percentage-point BTC.D change between two rows."""
+
+        if previous is None:
+            return 0.0
+        return self._feature_float(current.dominance_pct - previous.dominance_pct)
+
+    def _btc_dominance_pressure(self, dominance_pct: float) -> float:
+        """Map BTC.D level into altcoin pressure: positive=headwind, negative=tailwind."""
+
+        if dominance_pct >= 62.0:
+            return 1.0
+        if dominance_pct >= 60.0:
+            return 0.66
+        if dominance_pct >= 57.0:
+            return 0.33
+        if dominance_pct <= 50.0:
+            return -0.66
+        if dominance_pct <= 53.0:
+            return -0.33
+        return 0.0
 
     def _macro_rows_by_symbol(
         self,

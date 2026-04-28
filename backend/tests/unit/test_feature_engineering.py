@@ -161,28 +161,25 @@ def test_crypto_feature_truth_audit_marks_ghost_research_features() -> None:
     assert audit["news_sentiment_1d"]["availability"] == "real"
     assert audit["news_sentiment_7d"]["availability"] == "real"
     assert audit["news_article_count_7d"]["coverage_score"] == 1.0
-    assert audit["congress_buy_score"]["availability"] == "not_applicable_for_crypto"
-    assert audit["insider_value_60d"]["availability"] == "not_applicable_for_crypto"
-    assert audit["consensus_rating"]["availability"] == "not_applicable_for_crypto"
-    assert audit["watchlist_research_score"]["availability"] == "placeholder"
+
+    # Stock-only features should NOT exist for crypto
+    assert "congress_buy_score" not in audit
+    assert "insider_buy_score" not in audit
 
 
 def test_feature_contract_summary_exposes_crypto_research_score_contract() -> None:
-    """The contract summary should document the planned crypto research score."""
+    """The contract summary should document crypto research + macro features."""
 
     summary = build_feature_contract_summary()
 
-    assert summary["crypto_source_backed_research_features"] == [
+    expected_features = [
         "news_sentiment_1d",
         "news_sentiment_7d",
         "news_article_count_7d",
+        "btc_dominance_level",
+        "btc_dominance_change_1d",
+        "btc_dominance_change_7d",
+        "btc_dominance_pressure",
     ]
-    crypto_research_score_contract = summary["crypto_research_score_contract"]
-    assert isinstance(crypto_research_score_contract, dict)
-    assert crypto_research_score_contract["name"] == "crypto_research_score"
-    assert crypto_research_score_contract["components"] == [
-        "technical_score",
-        "news_sentiment_score",
-        "liquidity_score",
-        "on_chain_score_later",
-    ]
+
+    assert summary["crypto_source_backed_research_features"] == expected_features
