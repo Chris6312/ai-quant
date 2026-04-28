@@ -25,6 +25,7 @@ class FoldSummaryRecord(TypedDict):
     n_train_samples: int
     n_test_samples: int
     model_path: str
+    feature_names: list[str]
     feature_importances: dict[str, float]
     eligibility_status: str
     eligibility_reason: str
@@ -116,6 +117,157 @@ def _is_visible_model_record(model: ModelRecord) -> bool:
     return True
 
 
+def _parse_feature_names(line: str) -> list[str]:
+    prefix = "feature_names="
+    if not line.startswith(prefix):
+        return []
+    return [name for name in line.removeprefix(prefix).split(" ") if name]
+
+
+def _parse_int_values(line: str, prefix: str) -> list[int]:
+    if not line.startswith(prefix):
+        return []
+
+    values: list[int] = []
+    for raw_value in line.removeprefix(prefix).split(" "):
+        if not raw_value:
+            continue
+        try:
+            values.append(int(raw_value))
+        except ValueError:
+            continue
+    return values
+
+
+def _parse_float_values(line: str, prefix: str) -> list[float]:
+    if not line.startswith(prefix):
+        return []
+
+    values: list[float] = []
+    for raw_value in line.removeprefix(prefix).split(" "):
+        if not raw_value:
+            continue
+        try:
+            values.append(float(raw_value))
+        except ValueError:
+            continue
+    return values
+
+
+def _load_feature_importances_from_artifact_text(
+    text: str,
+    expected_feature_names: list[str] | None = None,
+) -> dict[str, float]:
+    """Parse normalized gain-based feature importances from a LightGBM text model."""
+
+    feature_names: list[str] = []
+    gains_by_index: dict[int, float] = {}
+    pending_split_features: list[int] = []
+
+    for line in text.splitlines():
+        if line.startswith("feature_names="):
+            feature_names = _parse_feature_names(line)
+            continue
+
+        if line.startswith("split_feature="):
+            pending_split_features = _parse_int_values(line, "split_feature=")
+            continue
+
+        if line.startswith("split_gain="):
+            split_gains = _parse_float_values(line, "split_gain=")
+            for feature_index, gain in zip(
+                pending_split_features,
+                split_gains,
+                strict=False,
+            ):
+                gains_by_index[feature_index] = gains_by_index.get(feature_index, 0.0) + gain
+            pending_split_features = []
+
+    if not feature_names and expected_feature_names:
+        feature_names = expected_feature_names
+
+    if not feature_names:
+        return {}
+
+    total_gain = sum(gains_by_index.values())
+    if total_gain <= 0.0:
+        return dict.fromkeys(feature_names, 0.0)
+
+    importances: dict[str, float] = {}
+    for index, name in enumerate(feature_names):
+        gain = gains_by_index.get(index, 0.0)
+        importances[name] = float(gain / total_gain)
+
+    return importances
+
+
+def load_feature_importances_from_artifact_path(
+    raw_path: str,
+    expected_feature_names: list[str] | None = None,
+) -> dict[str, float]:
+    """Load normalized gain-based feature importances from a model artifact."""
+
+    if not _is_supported_artifact_path(raw_path):
+        return {}
+
+    for candidate in _candidate_artifact_paths(raw_path):
+        if not candidate.exists():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        importances = _load_feature_importances_from_artifact_text(
+            text,
+            expected_feature_names,
+        )
+        if importances:
+            return importances
+
+    return {}
+
+
+def _fold_with_loaded_importances(fold: FoldSummaryRecord) -> FoldSummaryRecord:
+    existing_importances = fold.get("feature_importances", {})
+    if existing_importances:
+        return fold
+
+    model_path = fold.get("model_path", "")
+    if not model_path:
+        return fold
+
+    loaded_importances = load_feature_importances_from_artifact_path(model_path)
+    if not loaded_importances:
+        return fold
+
+    return {
+        **fold,
+        "feature_importances": loaded_importances,
+    }
+
+
+def _model_with_loaded_importances(model: ModelRecord) -> ModelRecord:
+    enriched_model: ModelRecord = {**model}
+
+    artifact_path = enriched_model.get("artifact_path", "")
+    existing_importances = enriched_model.get("feature_importances", {})
+    if isinstance(artifact_path, str) and not existing_importances:
+        loaded_importances = load_feature_importances_from_artifact_path(artifact_path)
+        if loaded_importances:
+            enriched_model["feature_importances"] = loaded_importances
+            enriched_model["feature_count"] = len(loaded_importances)
+
+    folds = enriched_model.get("folds", [])
+    if folds:
+        enriched_model["folds"] = [
+            _fold_with_loaded_importances(fold)
+            for fold in folds
+        ]
+
+    return enriched_model
+
+
 def _load_registry_unlocked() -> list[ModelRecord]:
     if not _REGISTRY_PATH.exists():
         return []
@@ -123,7 +275,8 @@ def _load_registry_unlocked() -> list[ModelRecord]:
     if not isinstance(data, list):
         return []
     models = cast(list[ModelRecord], data)
-    return [model for model in models if _is_visible_model_record(model)]
+    visible_models = [model for model in models if _is_visible_model_record(model)]
+    return [_model_with_loaded_importances(model) for model in visible_models]
 
 
 def _save_registry_unlocked(models: list[ModelRecord]) -> None:
@@ -141,6 +294,9 @@ def register_model(model: ModelRecord) -> ModelRecord:
     if not _is_registerable_model_record(record):
         artifact_path = record.get("artifact_path")
         raise ValueError(f"Refusing to register invalid model artifact: {artifact_path}")
+
+    record = _model_with_loaded_importances(record)
+
     with _LOCK:
         models = _load_registry_unlocked()
         for existing in models:
@@ -181,8 +337,10 @@ def get_active_model(asset_class: str) -> ModelRecord | None:
         None,
     )
 
+
 def retire_active_models(asset_class: str, reason: str) -> list[ModelRecord]:
     """Mark all active models for an asset class as retired."""
+
     now = datetime.now(UTC).isoformat()
     retired: list[ModelRecord] = []
 

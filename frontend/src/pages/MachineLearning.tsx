@@ -1060,6 +1060,35 @@ function getNoModelSelectedFolds(
   return rawFolds.filter(isModelFold);
 }
 
+
+function getRegistryRejectedFolds(
+  modelsResponse: MlModelsResponse | null,
+): ModelFold[] {
+  const cryptoModels =
+    modelsResponse?.models.filter(
+      (model) => model.asset_class === "crypto" && model.folds.length > 0,
+    ) ?? [];
+
+  const sortedModels = [...cryptoModels].sort((a, b) => {
+    const latestLeft = Math.max(
+      ...a.folds.map((fold) => Date.parse(fold.test_end)).filter(Number.isFinite),
+    );
+    const latestRight = Math.max(
+      ...b.folds.map((fold) => Date.parse(fold.test_end)).filter(Number.isFinite),
+    );
+    return latestRight - latestLeft;
+  });
+
+  for (const model of sortedModels) {
+    const folds = model.folds.filter(isModelFold);
+    if (folds.length > 0) {
+      return folds;
+    }
+  }
+
+  return [];
+}
+
 function getDiagnosticFold(
   folds: ModelFold[],
   selectedFoldIndex: number | null,
@@ -1512,10 +1541,13 @@ const MachineLearning: React.FC = () => {
       ) ?? [],
     [modelsResponse],
   );
-  const noModelSelectedFolds = useMemo(
-    () => getNoModelSelectedFolds(persistence),
-    [persistence],
-  );
+  const noModelSelectedFolds = useMemo(() => {
+    const registryFolds = getRegistryRejectedFolds(modelsResponse);
+    if (registryFolds.length > 0) {
+      return registryFolds;
+    }
+    return getNoModelSelectedFolds(persistence);
+  }, [modelsResponse, persistence]);
   const cryptoPredictionFreshness =
     predictionsResponse?.freshness_by_asset.crypto ?? null;
   const stockPredictionFreshness =

@@ -38,6 +38,7 @@ from app.ml.features import (
     validate_feature_vector,
 )
 from app.ml.freshness import MlFreshnessResult, evaluate_crypto_ml_freshness
+from app.ml.model_registry import load_feature_importances_from_artifact_path
 from app.ml.predictor import ModelPredictor
 from app.ml.sentiment_refresh import (
     parse_crypto_symbol_list,
@@ -48,7 +49,6 @@ from app.ml.trainer import (
     NoEligibleProductionFoldError,
     TrainerConfig,
     TrainResult,
-    load_feature_importances_from_model_path,
 )
 from app.ml.training_inputs import (
     CryptoTrainingInputAssembler,
@@ -122,6 +122,7 @@ class FoldLike(Protocol):
     n_train_samples: int
     n_test_samples: int
     model_path: str
+    feature_names: list[str]
 
 
 def get_settings() -> Settings:
@@ -603,11 +604,10 @@ def _serialize_fold_results(
     serialized: list[model_registry.FoldSummaryRecord] = []
     for raw_fold in raw_folds:
         fold = cast(FoldLike, raw_fold)
+        feature_names = list(getattr(fold, "feature_names", []))
         feature_importances = dict(getattr(fold, "feature_importances", {}))
         if not feature_importances:
-            feature_names = list(getattr(fold, "feature_names", []))  # safe fallback
-
-            feature_importances = load_feature_importances_from_model_path(
+            feature_importances = load_feature_importances_from_artifact_path(
                 fold.model_path,
                 feature_names,
             )
@@ -623,6 +623,7 @@ def _serialize_fold_results(
                 "n_train_samples": fold.n_train_samples,
                 "n_test_samples": fold.n_test_samples,
                 "model_path": fold.model_path,
+                "feature_names": feature_names,
                 "feature_importances": feature_importances,
                 "eligibility_status": getattr(fold, "eligibility_status", "research_only"),
                 "eligibility_reason": getattr(fold, "eligibility_reason", "not_evaluated"),

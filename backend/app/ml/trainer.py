@@ -47,23 +47,39 @@ def load_feature_importances_from_model_path(
     model_path: str,
     feature_names: list[str],
 ) -> dict[str, float]:
-    try:
-        booster = lgb.Booster(model_file=model_path)
-        gains = booster.feature_importance(importance_type="gain")
+    """Best-effort feature importance loader for legacy model records."""
 
-        total = float(np.sum(gains))
-        if total == 0.0:
-            return dict.fromkeys(feature_names, 0.0)
+    for candidate in _model_path_candidates(model_path):
+        try:
+            booster = lgb.Booster(model_file=str(candidate))
+            model_feature_names = booster.feature_name()
+            names = model_feature_names if model_feature_names else feature_names
+            return _normalized_gain_importances(booster, names)
+        except (LightGBMError, FileNotFoundError, ValueError):
+            continue
 
-        return {
-            name: float(gain / total)
-            for name, gain in zip(feature_names, gains, strict=False)
-        }
+    return {}
 
-    except (LightGBMError, FileNotFoundError, ValueError):
-        # 🔑 CRITICAL: do not break training or tests
-        return {}
 
+def _normalized_gain_importances(
+    booster: Booster,
+    feature_names: Sequence[str],
+) -> dict[str, float]:
+    """Return normalized gain-based feature importances for a fitted booster."""
+
+    gains = np.asarray(booster.feature_importance(importance_type="gain"), dtype=float)
+    names = list(feature_names)
+    if len(names) != len(gains):
+        names = [f"feature_{index}" for index in range(len(gains))]
+
+    total = float(np.sum(gains))
+    if total == 0.0:
+        return dict.fromkeys(names, 0.0)
+
+    return {
+        name: float(gain / total)
+        for name, gain in zip(names, gains, strict=True)
+    }
 
 
 @dataclass(slots=True, frozen=True)
@@ -118,6 +134,7 @@ class FoldResult:
     majority_class: int = 1
     majority_class_baseline_accuracy: float = 0.0
     baseline_margin: float = 0.0
+    feature_names: list[str] = field(default_factory=list)
     feature_importances: dict[str, float] = field(default_factory=dict)
     eligibility_status: str = "research_only"
     eligibility_reason: str = "not_evaluated"
@@ -441,7 +458,11 @@ class WalkForwardTrainer:
         )
         validation_sharpe = self._compute_sharpe(validation_returns)
         model_path = self._save_model(booster, asset_class, fold_index)
-        feature_importances = self._feature_importances(booster, feature_names)
+        persisted_feature_names = booster.feature_name() or feature_names
+        feature_importances = self._feature_importances(
+            booster,
+            persisted_feature_names,
+        )
 
         fold_result = FoldResult(
             fold_index=fold_index,
@@ -459,6 +480,7 @@ class WalkForwardTrainer:
             majority_class=majority_class,
             majority_class_baseline_accuracy=baseline_accuracy,
             baseline_margin=baseline_margin,
+            feature_names=list(persisted_feature_names),
             feature_importances=feature_importances,
         )
 
@@ -885,15 +907,7 @@ class WalkForwardTrainer:
     ) -> dict[str, float]:
         """Return normalized gain-based feature importances."""
 
-        gains = np.asarray(booster.feature_importance(importance_type="gain"), dtype=float)
-        total = float(np.sum(gains))
-        if total == 0.0:
-            return dict.fromkeys(feature_names, 0.0)
-
-        return {
-            name: float(gain / total)
-            for name, gain in zip(feature_names, gains, strict=True)
-        }
+        return _normalized_gain_importances(booster, feature_names)
 
     def _label_candles(self, candles: Sequence[Candle], asset_class: str) -> list[int]:
         """Label each candle: 0=down, 1=flat, 2=up based on next-candle return."""

@@ -75,6 +75,8 @@ class _FakeTrainer:
                     validation_sharpe=0.91,
                     passed=True,
                     model_path=str(fold1_path),
+                    feature_names=["returns_5", "rsi_14"],
+                    feature_importances={"returns_5": 0.61, "rsi_14": 0.39},
                 ),
                 FoldResult(
                     fold_index=2,
@@ -88,6 +90,12 @@ class _FakeTrainer:
                     validation_sharpe=1.24,
                     passed=True,
                     model_path=str(fold2_path),
+                    feature_names=["returns_5", "rsi_14", "macd_hist"],
+                    feature_importances={
+                        "returns_5": 0.27,
+                        "rsi_14": 0.31,
+                        "macd_hist": 0.21,
+                    },
                 ),
             ],
             fold_count=2,
@@ -162,7 +170,11 @@ async def test_run_training_job_registers_active_model(
     assert models[0]["status"] == "active"
     assert models[0]["best_fold"] == 2
     assert len(models[0]["folds"]) == 2
-
+    assert models[0]["folds"][0]["feature_names"] == ["returns_5", "rsi_14"]
+    assert models[0]["folds"][0]["feature_importances"] == {
+        "returns_5": 0.61,
+        "rsi_14": 0.39,
+    }
 
 
 @pytest.mark.asyncio
@@ -276,6 +288,8 @@ async def test_train_crypto_endpoint_returns_no_model_selected_when_guardrails_f
         validation_sharpe=2.64,
         passed=False,
         model_path="models/model_crypto_fold139.lgbm",
+        feature_names=["news_sentiment_1d", "returns_5"],
+        feature_importances={"news_sentiment_1d": 0.72, "returns_5": 0.28},
         eligibility_status="research_only",
         eligibility_reason="accuracy_below_threshold",
     )
@@ -325,6 +339,14 @@ async def test_train_crypto_endpoint_returns_no_model_selected_when_guardrails_f
     assert payload["outcome"] == "no_model_selected"
     assert payload["fold_count"] == 1
     assert payload["folds"][0]["eligibility_reason"] == "accuracy_below_threshold"
+    assert payload["folds"][0]["feature_names"] == [
+        "news_sentiment_1d",
+        "returns_5",
+    ]
+    assert payload["folds"][0]["feature_importances"] == {
+        "news_sentiment_1d": 0.72,
+        "returns_5": 0.28,
+    }
 
     jobs = job_store.list_jobs()
     assert len(jobs) == 1
@@ -433,7 +455,6 @@ def test_get_model_importances_endpoint_returns_sorted_rows(
         "returns_5",
         "macd_hist",
     ]
-
 
 
 def test_model_registry_rejects_and_filters_stock_txt_artifacts(
