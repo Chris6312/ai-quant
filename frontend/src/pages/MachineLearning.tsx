@@ -1162,6 +1162,150 @@ function toFoldRow(fold: ModelFold, activeFold: number | null): Fold {
   };
 }
 
+function formatRate(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSignedValue(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
+}
+
+type CalibrationReportView = NonNullable<ModelFold["calibration_report"]>;
+
+function CalibrationDiagnostics({
+  fold,
+}: {
+  fold: ModelFold | null;
+}): React.ReactElement | null {
+  const report: CalibrationReportView | undefined = fold?.calibration_report;
+  if (!report) {
+    return null;
+  }
+
+  const usable = report.usable_for_live_gate;
+  const statusTone: BadgeVariant = usable ? "green" : "amber";
+  const buckets = report.buckets ?? [];
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "10px 12px",
+        background: S.bg2,
+        border: `0.5px solid ${usable ? S.green3 : S.amber2}`,
+        borderRadius: S.rMd,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 11, color: S.text2, fontWeight: 700 }}>
+            Probability calibration · validation/test only
+          </div>
+          <div style={{ marginTop: 3, fontSize: 10, color: S.text3 }}>
+            Dead zone {report.dead_zone_lower.toFixed(2)}–
+            {report.dead_zone_upper.toFixed(2)} cannot create ALLOW. ML stays a
+            confidence modifier until separation is proven.
+          </div>
+        </div>
+        <Badge v={statusTone}>
+          {usable ? "Calibration usable" : "Research-only"}
+        </Badge>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, minmax(90px, 1fr))",
+          gap: 8,
+          marginTop: 10,
+        }}
+      >
+        {[
+          ["Rows", report.sample_count.toLocaleString()],
+          ["High-conf rows", report.high_confidence_count.toLocaleString()],
+          ["High-conf win", formatRate(report.high_confidence_win_rate)],
+          ["Dead-zone win", formatRate(report.dead_zone_win_rate)],
+          ["Separation", formatRate(report.separation)],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            style={{
+              padding: "8px 9px",
+              border: `0.5px solid ${S.border}`,
+              borderRadius: S.rSm,
+              background: S.bg1,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 8,
+                color: S.text3,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              {label}
+            </div>
+            <div style={{ marginTop: 3, fontSize: 12, color: S.text }}>
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "78px repeat(5, minmax(70px, 1fr))",
+          gap: 8,
+          marginTop: 10,
+          alignItems: "center",
+          fontSize: 9,
+          color: S.text3,
+        }}
+      >
+        {[
+          "Bucket",
+          "Rows",
+          "Pred avg",
+          "Win rate",
+          "False +",
+          "EV proxy",
+        ].map((header) => (
+          <span
+            key={header}
+            style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}
+          >
+            {header}
+          </span>
+        ))}
+        {buckets.map((bucket) => (
+          <React.Fragment key={bucket.label}>
+            <span style={{ color: S.text2 }}>{bucket.label}</span>
+            <span>{bucket.count.toLocaleString()}</span>
+            <span>{formatRate(bucket.predicted_probability_mean)}</span>
+            <span>{formatRate(bucket.actual_win_rate)}</span>
+            <span>{formatRate(bucket.false_positive_rate)}</span>
+            <span>{formatSignedValue(bucket.expected_value_proxy)}</span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ModelCard({ d }: { d: ModelCardData }): React.ReactElement {
   const pending = d.status === "pending";
   const live = d.status === "live";
@@ -2684,6 +2828,15 @@ const MachineLearning: React.FC = () => {
                   </span>
                 </div>
               ) : null}
+              <CalibrationDiagnostics
+                fold={
+                  activeCryptoModel
+                    ? (activeCryptoModel.folds.find(
+                        (fold) => fold.fold_index === activeCryptoModel.best_fold,
+                      ) ?? null)
+                    : diagnosticImportanceFold
+                }
+              />
             </>
           ) : (
             <div style={{ padding: "18px 0", fontSize: 10, color: S.text3 }}>

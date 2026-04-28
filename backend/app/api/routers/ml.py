@@ -627,6 +627,9 @@ def _serialize_fold_results(
                 "feature_names": feature_names,
                 "feature_importances": feature_importances,
                 "class_balance": dict(getattr(fold, "class_balance", {})),
+                "calibration_report": dict(
+                    getattr(fold, "calibration_report", {}) or {},
+                ),
                 "eligibility_status": getattr(fold, "eligibility_status", "research_only"),
                 "eligibility_reason": getattr(fold, "eligibility_reason", "not_evaluated"),
             }

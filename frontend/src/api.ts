@@ -558,6 +558,35 @@ export type GainersResponse = {
   error?: string;
 };
 
+export type CalibrationBucket = {
+  label: string;
+  lower: number;
+  upper: number;
+  count: number;
+  predicted_probability_mean: number;
+  actual_win_rate: number;
+  false_positive_rate: number;
+  expected_value_proxy: number;
+};
+
+export type CalibrationReport = {
+  status: string;
+  usable_for_live_gate: boolean;
+  dead_zone_lower: number;
+  dead_zone_upper: number;
+  sample_count: number;
+  bucket_count: number;
+  high_confidence_count: number;
+  high_confidence_win_rate: number;
+  dead_zone_count: number;
+  dead_zone_win_rate: number;
+  separation: number;
+  false_positive_rate: number;
+  expected_value_proxy: number;
+  buckets: CalibrationBucket[];
+  notes: string[];
+};
+
 export type ModelFold = {
   fold_index: number;
   train_start: string;
@@ -570,6 +599,7 @@ export type ModelFold = {
   n_test_samples: number;
   model_path: string;
   feature_importances?: Record<string, number>;
+  calibration_report?: CalibrationReport;
   eligibility_status?: string;
   eligibility_reason?: string;
 };

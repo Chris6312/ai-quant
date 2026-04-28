@@ -28,6 +28,7 @@ class FoldSummaryRecord(TypedDict):
     feature_names: list[str]
     feature_importances: dict[str, float]
     class_balance: dict[str, object]
+    calibration_report: NotRequired[dict[str, object]]
     eligibility_status: str
     eligibility_reason: str
 
@@ -232,22 +233,32 @@ def load_feature_importances_from_artifact_path(
 
 def _fold_with_loaded_importances(fold: FoldSummaryRecord) -> FoldSummaryRecord:
     existing_importances = fold.get("feature_importances", {})
-    if existing_importances:
-        return fold
-
+    existing_feature_names = fold.get("feature_names", [])
     model_path = fold.get("model_path", "")
     if not model_path:
         return fold
 
-    loaded_importances = load_feature_importances_from_artifact_path(model_path)
+    loaded_importances = load_feature_importances_from_artifact_path(
+        model_path,
+        expected_feature_names=existing_feature_names,
+    )
     if not loaded_importances:
+        return fold
+
+    loaded_feature_names = list(loaded_importances.keys())
+    should_replace_stale_metadata = (
+        not existing_importances
+        or len(loaded_feature_names) > len(existing_feature_names)
+        or set(loaded_feature_names) != set(existing_feature_names)
+    )
+    if not should_replace_stale_metadata:
         return fold
 
     return {
         **fold,
+        "feature_names": loaded_feature_names,
         "feature_importances": loaded_importances,
     }
-
 
 def _model_with_loaded_importances(model: ModelRecord) -> ModelRecord:
     enriched_model: ModelRecord = {**model}

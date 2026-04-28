@@ -13,6 +13,10 @@ import numpy as np
 from lightgbm.basic import Booster, LightGBMError
 from numpy.typing import NDArray
 
+from app.ml.calibration import (
+    CalibrationReport,
+    build_long_probability_calibration_report,
+)
 from app.ml.features import (
     FeatureEngineer,
     FeatureVector,
@@ -31,6 +35,7 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int_]
 ProgressCallback = Callable[[int, int, str], None]
 ResearchLookup = Mapping[str | tuple[str, date], ResearchInputs]
+
 
 def _model_path_candidates(model_path: str) -> list[Path]:
     """Return possible filesystem paths for a persisted fold model artifact."""
@@ -145,6 +150,7 @@ class FoldResult:
     feature_names: list[str] = field(default_factory=list)
     feature_importances: dict[str, float] = field(default_factory=dict)
     class_balance: dict[str, object] = field(default_factory=dict)
+    calibration_report: CalibrationReport | None = None
     eligibility_status: str = "research_only"
     eligibility_reason: str = "not_evaluated"
 
@@ -467,6 +473,7 @@ class WalkForwardTrainer:
             confidences,
             y_test.tolist(),
             test_samples,
+            asset_class,
         )
         validation_sharpe = self._compute_sharpe(validation_returns)
         model_path = self._save_model(booster, asset_class, fold_index)
@@ -495,6 +502,15 @@ class WalkForwardTrainer:
             feature_names=list(persisted_feature_names),
             feature_importances=feature_importances,
             class_balance=label_balance_report(y_test.tolist()),
+            calibration_report=(
+                build_long_probability_calibration_report(
+                    probabilities,
+                    y_test.tolist(),
+                    [sample.next_return for sample in test_samples],
+                )
+                if asset_class.lower().strip() == "crypto"
+                else None
+            ),
         )
 
         return fold_result, feature_importances
@@ -909,6 +925,7 @@ class WalkForwardTrainer:
         confidences: Sequence[float],
         labels: Sequence[int],
         samples: Sequence[_TrainingSample],
+        asset_class: str,
     ) -> list[float]:
         """Turn predictions into per-sample strategy returns."""
 
@@ -921,6 +938,10 @@ class WalkForwardTrainer:
             strict=True,
         ):
             if confidence < self.config.min_confidence_threshold or prediction == 1:
+                returns.append(0.0)
+                continue
+
+            if asset_class.lower().strip() == "crypto" and prediction == 0:
                 returns.append(0.0)
                 continue
 
