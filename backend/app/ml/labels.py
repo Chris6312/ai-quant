@@ -21,6 +21,10 @@ class TradeLabelConfig:
     max_holding_candles: int
     time_decay_min_weight: float = 0.45
     timeout_sample_weight: float = 0.70
+    use_atr_barriers: bool = False
+    atr_period: int = 14
+    profit_target_atr_multiplier: float = 3.0
+    stop_loss_atr_multiplier: float = 1.5
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,15 +55,16 @@ def build_long_trade_label_results(
     candles: Sequence[Candle],
     config: TradeLabelConfig,
 ) -> list[TradeLabelResult]:
-    """Build long-only triple-barrier labels with TP/SL time-decay weights.
+    """Build long-only triple-barrier labels with optional ATR barriers.
 
-    Fast target/stop hits carry full weight. Late target/stop hits decay toward
-    ``time_decay_min_weight`` so slow, noisy outcomes do not dominate training.
-    Timeouts remain the neutral/no-edge class and are down-weighted separately.
+    ATR barriers adapt the TP/SL distance to the symbol's recent volatility.
+    Fast target/stop hits carry stronger weights. Late outcomes decay softly so
+    valid crypto moves are not punished as aggressively as the 5.9 linear decay.
     """
 
     labels: list[TradeLabelResult] = []
     lookahead = max(1, config.max_holding_candles)
+    atr_values = _average_true_ranges(candles, config.atr_period)
 
     for index, candle in enumerate(candles):
         entry = candle.close
@@ -74,8 +79,11 @@ def build_long_trade_label_results(
             )
             continue
 
-        target_price = entry * (1.0 + config.profit_target_pct)
-        stop_price = entry * (1.0 - config.stop_loss_pct)
+        target_price, stop_price = _barrier_prices(
+            entry_price=entry,
+            atr_value=atr_values[index],
+            config=config,
+        )
         future_window = candles[index + 1 : index + 1 + lookahead]
         labels.append(
             _first_barrier_result(
@@ -113,6 +121,59 @@ def label_balance_report(labels: Sequence[int]) -> dict[str, object]:
             "2": "profit_target_hit_first_allow_long_bias",
         },
     }
+
+
+def _barrier_prices(
+    *,
+    entry_price: float,
+    atr_value: float | None,
+    config: TradeLabelConfig,
+) -> tuple[float, float]:
+    """Return target and stop prices using ATR barriers when available."""
+
+    if config.use_atr_barriers and atr_value is not None and atr_value > 0.0:
+        target_distance = atr_value * max(0.01, config.profit_target_atr_multiplier)
+        stop_distance = atr_value * max(0.01, config.stop_loss_atr_multiplier)
+        return entry_price + target_distance, max(0.0, entry_price - stop_distance)
+
+    return (
+        entry_price * (1.0 + config.profit_target_pct),
+        entry_price * (1.0 - config.stop_loss_pct),
+    )
+
+
+def _average_true_ranges(
+    candles: Sequence[Candle],
+    period: int,
+) -> list[float | None]:
+    """Return ATR values aligned to the input candles."""
+
+    bounded_period = max(1, period)
+    true_ranges: list[float] = []
+    atr_values: list[float | None] = []
+    previous_close: float | None = None
+
+    for candle in candles:
+        high_low = max(0.0, candle.high - candle.low)
+        if previous_close is None:
+            true_range = high_low
+        else:
+            true_range = max(
+                high_low,
+                abs(candle.high - previous_close),
+                abs(candle.low - previous_close),
+            )
+        true_ranges.append(true_range)
+        previous_close = candle.close
+
+        if len(true_ranges) < bounded_period:
+            atr_values.append(None)
+            continue
+
+        window = true_ranges[-bounded_period:]
+        atr_values.append(sum(window) / bounded_period)
+
+    return atr_values
 
 
 def _first_barrier_result(
@@ -163,13 +224,14 @@ def _time_decay_weight(
     lookahead: int,
     config: TradeLabelConfig,
 ) -> float:
-    """Return a bounded linear decay from fast outcomes to late outcomes."""
+    """Return a soft bounded decay from fast outcomes to late outcomes."""
 
     minimum = min(1.0, max(0.05, config.time_decay_min_weight))
-    if lookahead <= 1:
+    if lookahead <= 0:
         return 1.0
-    progress = (max(1, bars_to_outcome) - 1) / (lookahead - 1)
-    return max(minimum, 1.0 - ((1.0 - minimum) * progress))
+
+    soft_weight = 1.0 / (1.0 + (max(1, bars_to_outcome) / lookahead))
+    return max(minimum, soft_weight)
 
 
 def _bounded_timeout_weight(config: TradeLabelConfig) -> float:

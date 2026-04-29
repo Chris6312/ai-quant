@@ -199,6 +199,41 @@ CRYPTO_FRESHNESS_MAX_AGE_DAYS = 2
 STOCK_FRESHNESS_MAX_AGE_DAYS = 5
 ALL_CRYPTO_TRAINING_SYMBOL = "ALL_CRYPTO"
 VALID_MODEL_ARTIFACT_SUFFIX = ".lgbm"
+ML_SUMMARY_CACHE_TTL_SECONDS = 15.0
+ML_PREDICTION_CACHE_TTL_SECONDS = 5.0
+_ML_RESPONSE_CACHE: dict[str, tuple[datetime, Mapping[str, object]]] = {}
+
+
+def _cache_key(name: str, **parts: object) -> str:
+    rendered_parts = ":".join(
+        f"{key}={value}" for key, value in sorted(parts.items())
+    )
+    return f"{name}:{rendered_parts}"
+
+
+def _get_cached_response(
+    key: str,
+    *,
+    ttl_seconds: float,
+) -> Mapping[str, object] | None:
+    cached = _ML_RESPONSE_CACHE.get(key)
+    if cached is None:
+        return None
+
+    cached_at, payload = cached
+    age_seconds = (datetime.now(tz=UTC) - cached_at).total_seconds()
+    if age_seconds > ttl_seconds:
+        _ML_RESPONSE_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _set_cached_response(
+    key: str,
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    _ML_RESPONSE_CACHE[key] = (datetime.now(tz=UTC), payload)
+    return payload
 
 
 def _crypto_csv_source_dir() -> Path:
@@ -1442,9 +1477,23 @@ async def _read_prediction_sentiment_features(
 async def _read_persisted_prediction_snapshot(
     *,
     limit: int,
+    offset: int,
     asset_class: str | None,
 ) -> Mapping[str, object]:
     """Read the latest persisted prediction rows without rebuilding them."""
+
+    cache_key = _cache_key(
+        "predictions",
+        asset_class=asset_class or "all",
+        limit=limit,
+        offset=offset,
+    )
+    cached = _get_cached_response(
+        cache_key,
+        ttl_seconds=ML_PREDICTION_CACHE_TTL_SECONDS,
+    )
+    if cached is not None:
+        return cached
 
     settings = get_settings()
     engine = build_engine(settings)
@@ -1453,13 +1502,23 @@ async def _read_persisted_prediction_snapshot(
 
     async with session_factory() as session:
         statement = select(PredictionRow)
+        count_statement = select(func.count()).select_from(PredictionRow)
         if asset_class is not None:
             statement = statement.where(PredictionRow.asset_class == asset_class)
-        statement = statement.order_by(
-            PredictionRow.created_at.desc(),
-            PredictionRow.confidence.desc(),
-            PredictionRow.symbol.asc(),
-        ).limit(limit)
+            count_statement = count_statement.where(
+                PredictionRow.asset_class == asset_class,
+            )
+        total_count_raw = await session.scalar(count_statement)
+        total_count = int(total_count_raw or 0)
+        statement = (
+            statement.order_by(
+                PredictionRow.created_at.desc(),
+                PredictionRow.confidence.desc(),
+                PredictionRow.symbol.asc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
         result = await session.scalars(statement)
         prediction_rows = list(result.all())
         sentiment_by_prediction = await _read_prediction_sentiment_features(
@@ -1481,9 +1540,13 @@ async def _read_persisted_prediction_snapshot(
         if not asset_rows:
             freshness_by_asset[asset] = _prediction_empty_freshness()
 
-    return {
+    payload: Mapping[str, object] = {
         "predictions": api_rows,
         "count": len(api_rows),
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "has_next": offset + len(api_rows) < total_count,
         "active_model_ids": {
             "crypto": _get_active_model_id("crypto"),
             "stock": _get_active_model_id("stock"),
@@ -1492,7 +1555,173 @@ async def _read_persisted_prediction_snapshot(
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "source": "persisted",
     }
+    return _set_cached_response(cache_key, payload)
 
+
+
+def _active_model_summary(asset_class: str) -> dict[str, object]:
+    model = model_registry.get_active_model(asset_class)
+    if model is None:
+        return {
+            "model_id": None,
+            "asset_class": asset_class,
+            "status": "none",
+            "best_fold": None,
+            "validation_accuracy": None,
+            "validation_sharpe": None,
+            "artifact_path": None,
+            "trained_at": None,
+        }
+
+    model_id = model.get("model_id")
+    status = model.get("status")
+    artifact_path = model.get("artifact_path")
+    trained_at = model.get("trained_at")
+    best_fold = model.get("best_fold")
+    return {
+        "model_id": model_id if isinstance(model_id, str) else None,
+        "asset_class": asset_class,
+        "status": status if isinstance(status, str) else "unknown",
+        "best_fold": best_fold if isinstance(best_fold, int) else None,
+        "validation_accuracy": _coerce_numeric(model.get("validation_accuracy")),
+        "validation_sharpe": _coerce_numeric(model.get("validation_sharpe")),
+        "artifact_path": artifact_path if isinstance(artifact_path, str) else None,
+        "trained_at": trained_at if isinstance(trained_at, str) else None,
+    }
+
+
+def _freshness_from_latest_candle(
+    asset_class: str,
+    latest_candle_time: datetime | None,
+) -> dict[str, object]:
+    if latest_candle_time is None:
+        return _prediction_empty_freshness()
+    normalized_time = latest_candle_time
+    if normalized_time.tzinfo is None:
+        normalized_time = normalized_time.replace(tzinfo=UTC)
+    now = datetime.now(tz=UTC)
+    lag_days = max(0.0, (now - normalized_time).total_seconds() / 86400.0)
+    max_age_days = (
+        CRYPTO_FRESHNESS_MAX_AGE_DAYS
+        if asset_class == "crypto"
+        else STOCK_FRESHNESS_MAX_AGE_DAYS
+    )
+    is_stale = lag_days > float(max_age_days)
+    return {
+        "latest_candle_time": normalized_time.isoformat(),
+        "lag_days": round(lag_days, 2),
+        "is_stale": is_stale,
+        "status": "stale" if is_stale else "fresh",
+    }
+
+
+def _iso_or_none(value: object) -> str | None:
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return None
+
+
+async def _build_ml_summary() -> Mapping[str, object]:
+    cache_key = _cache_key("summary")
+    cached = _get_cached_response(
+        cache_key,
+        ttl_seconds=ML_SUMMARY_CACHE_TTL_SECONDS,
+    )
+    if cached is not None:
+        return cached
+
+    settings = get_settings()
+    engine = build_engine(settings)
+    session_factory = build_session_factory(engine)
+    candle_summary: dict[str, dict[str, object]] = {
+        "crypto": {"row_count": 0, "latest_candle_time": None},
+        "stock": {"row_count": 0, "latest_candle_time": None},
+    }
+    prediction_summary: dict[str, dict[str, object]] = {
+        "crypto": {"row_count": 0, "latest_prediction_at": None},
+        "stock": {"row_count": 0, "latest_prediction_at": None},
+    }
+
+    try:
+        async with session_factory() as session:
+            candle_result = await session.execute(
+                select(
+                    CandleRow.asset_class,
+                    func.count().label("row_count"),
+                    func.max(CandleRow.time).label("latest_candle_time"),
+                )
+                .where(CandleRow.usage == ML_CANDLE_USAGE)
+                .group_by(CandleRow.asset_class)
+            )
+            for asset_class, row_count, latest_candle_time in candle_result.all():
+                asset = str(asset_class)
+                if asset in candle_summary:
+                    candle_summary[asset] = {
+                        "row_count": int(row_count),
+                        "latest_candle_time": _iso_or_none(latest_candle_time),
+                    }
+
+            prediction_result = await session.execute(
+                select(
+                    PredictionRow.asset_class,
+                    func.count().label("row_count"),
+                    func.max(PredictionRow.created_at).label("latest_prediction_at"),
+                ).group_by(PredictionRow.asset_class)
+            )
+            for asset_class, row_count, latest_prediction_at in prediction_result.all():
+                asset = str(asset_class)
+                if asset in prediction_summary:
+                    prediction_summary[asset] = {
+                        "row_count": int(row_count),
+                        "latest_prediction_at": _iso_or_none(latest_prediction_at),
+                    }
+    finally:
+        await engine.dispose()
+
+    latest_crypto_raw = candle_summary["crypto"].get("latest_candle_time")
+    latest_crypto_time = (
+        datetime.fromisoformat(str(latest_crypto_raw))
+        if latest_crypto_raw is not None
+        else None
+    )
+    latest_stock_raw = candle_summary["stock"].get("latest_candle_time")
+    latest_stock_time = (
+        datetime.fromisoformat(str(latest_stock_raw))
+        if latest_stock_raw is not None
+        else None
+    )
+    jobs = list(load_jobs())
+    latest_training_run = next(
+        (
+            job
+            for job in sorted(
+                jobs,
+                key=lambda item: str(
+                    item.get("finished_at") or item.get("started_at") or "",
+                ),
+                reverse=True,
+            )
+            if "train" in str(job.get("type") or "")
+        ),
+        None,
+    )
+    payload: Mapping[str, object] = {
+        "active_models": {
+            "crypto": _active_model_summary("crypto"),
+            "stock": _active_model_summary("stock"),
+        },
+        "ml_candles": candle_summary,
+        "predictions": prediction_summary,
+        "freshness_by_asset": {
+            "crypto": _freshness_from_latest_candle("crypto", latest_crypto_time),
+            "stock": _freshness_from_latest_candle("stock", latest_stock_time),
+        },
+        "latest_training_run": latest_training_run,
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "source": "summary",
+        "cache_ttl_seconds": ML_SUMMARY_CACHE_TTL_SECONDS,
+    }
+    return _set_cached_response(cache_key, payload)
 
 
 async def _read_persisted_prediction_shap(
@@ -1918,15 +2147,22 @@ def _prediction_api_row(row: Mapping[str, object]) -> dict[str, object]:
     return api_row
 
 
+@router.get("/summary")
+async def get_ml_summary() -> Mapping[str, object]:
+    return await _build_ml_summary()
+
+
 @router.get("/predictions")
 async def get_predictions(
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     asset_class: str | None = Query(default=None),
 ) -> Mapping[str, object]:
     if asset_class is not None and asset_class not in {"crypto", "stock"}:
         raise HTTPException(status_code=400, detail="asset_class must be crypto or stock")
     return await _read_persisted_prediction_snapshot(
         limit=limit,
+        offset=offset,
         asset_class=asset_class,
     )
 

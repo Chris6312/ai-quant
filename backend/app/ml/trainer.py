@@ -121,8 +121,12 @@ class TrainerConfig:
     crypto_min_baseline_margin: float = 0.03
     stock_label_threshold: float = 0.002
     crypto_label_threshold: float = 0.01
-    trade_label_lookahead_candles: int = 7
+    trade_label_lookahead_candles: int = 10
     label_time_decay_min_weight: float = 0.45
+    crypto_use_atr_barriers: bool = True
+    crypto_atr_period: int = 14
+    crypto_profit_target_atr_multiplier: float = 3.0
+    crypto_stop_loss_atr_multiplier: float = 1.5
     timeout_sample_weight: float = 0.70
     recent_sample_weight_days: int = 540
     recent_sample_weight_multiplier: float = 2.25
@@ -587,6 +591,14 @@ class WalkForwardTrainer:
             "max_holding_candles": self.config.trade_label_lookahead_candles,
             "label_time_decay_min_weight": self.config.label_time_decay_min_weight,
             "timeout_sample_weight": self.config.timeout_sample_weight,
+            "crypto_use_atr_barriers": self.config.crypto_use_atr_barriers,
+            "crypto_atr_period": self.config.crypto_atr_period,
+            "crypto_profit_target_atr_multiplier": (
+                self.config.crypto_profit_target_atr_multiplier
+            ),
+            "crypto_stop_loss_atr_multiplier": (
+                self.config.crypto_stop_loss_atr_multiplier
+            ),
             "crypto_training_start_year": self.config.crypto_training_start_year,
             "regime": regime.regime,
             "max_fold_age_days": regime.max_fold_age_days,
@@ -1064,6 +1076,14 @@ class WalkForwardTrainer:
                 max_holding_candles=self.config.trade_label_lookahead_candles,
                 time_decay_min_weight=self.config.label_time_decay_min_weight,
                 timeout_sample_weight=self.config.timeout_sample_weight,
+                use_atr_barriers=self._use_atr_barriers(asset_class),
+                atr_period=self.config.crypto_atr_period,
+                profit_target_atr_multiplier=(
+                    self.config.crypto_profit_target_atr_multiplier
+                ),
+                stop_loss_atr_multiplier=(
+                    self.config.crypto_stop_loss_atr_multiplier
+                ),
             ),
         )
 
@@ -1083,8 +1103,25 @@ class WalkForwardTrainer:
                 max_holding_candles=self.config.trade_label_lookahead_candles,
                 time_decay_min_weight=self.config.label_time_decay_min_weight,
                 timeout_sample_weight=self.config.timeout_sample_weight,
+                use_atr_barriers=self._use_atr_barriers(asset_class),
+                atr_period=self.config.crypto_atr_period,
+                profit_target_atr_multiplier=(
+                    self.config.crypto_profit_target_atr_multiplier
+                ),
+                stop_loss_atr_multiplier=(
+                    self.config.crypto_stop_loss_atr_multiplier
+                ),
             ),
         )
+
+    def _use_atr_barriers(self, asset_class: str) -> bool:
+        """Return whether training labels should use ATR-based barriers."""
+
+        return (
+            asset_class.lower().strip() == "crypto"
+            and self.config.crypto_use_atr_barriers
+        )
+
 
     def _label_threshold(self, asset_class: str) -> float:
         """Return the class boundary threshold for the requested asset class."""

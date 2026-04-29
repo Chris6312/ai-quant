@@ -22,8 +22,10 @@ async def test_get_predictions_reads_persisted_snapshot_only(
         *,
         limit: int,
         asset_class: str | None,
+        offset: int,
     ) -> Mapping[str, object]:
         captured["limit"] = limit
+        captured["offset"] = offset
         captured["asset_class"] = asset_class
         return {
             "predictions": [],
@@ -60,9 +62,9 @@ async def test_get_predictions_reads_persisted_snapshot_only(
         _fail_if_generation_runs,
     )
 
-    response = await ml_router.get_predictions(limit=15, asset_class="crypto")
+    response = await ml_router.get_predictions(limit=15, offset=25, asset_class="crypto")
 
-    assert captured == {"limit": 15, "asset_class": "crypto"}
+    assert captured == {"limit": 15, "offset": 25, "asset_class": "crypto"}
     assert response["source"] == "persisted"
     assert response["predictions"] == []
 
@@ -77,8 +79,9 @@ async def test_get_predictions_rejects_invalid_asset_class_before_db_read(
         *,
         limit: int,
         asset_class: str | None,
+        offset: int,
     ) -> Mapping[str, object]:
-        del limit, asset_class
+        del limit, asset_class, offset
         raise AssertionError("Invalid asset class should not reach the DB read path")
 
     monkeypatch.setattr(
@@ -88,7 +91,7 @@ async def test_get_predictions_rejects_invalid_asset_class_before_db_read(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await ml_router.get_predictions(limit=15, asset_class="forex")
+        await ml_router.get_predictions(limit=15, offset=0, asset_class="forex")
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "asset_class must be crypto or stock"

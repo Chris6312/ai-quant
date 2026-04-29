@@ -90,3 +90,46 @@ def test_stop_label_blocks_long_without_short_meaning() -> None:
 
     assert labels[0].label == STOP_LOSS_LABEL
     assert labels[0].outcome_return < 0.0
+
+
+def test_atr_barrier_uses_volatility_instead_of_fixed_percent() -> None:
+    config = TradeLabelConfig(
+        profit_target_pct=0.01,
+        stop_loss_pct=0.01,
+        max_holding_candles=2,
+        use_atr_barriers=True,
+        atr_period=2,
+        profit_target_atr_multiplier=3.0,
+        stop_loss_atr_multiplier=1.5,
+    )
+    candles = [
+        _candle(0, high=101.0, low=99.0, close=100.0),
+        _candle(1, high=101.0, low=99.0, close=100.0),
+        _candle(2, high=102.0, low=99.5, close=101.0),
+        _candle(3, high=102.0, low=99.5, close=101.0),
+    ]
+
+    labels = build_long_trade_label_results(candles, config)
+
+    assert labels[1].label == NO_EDGE_LABEL
+
+
+def test_atr_barrier_allows_larger_crypto_target() -> None:
+    config = TradeLabelConfig(
+        profit_target_pct=0.01,
+        stop_loss_pct=0.01,
+        max_holding_candles=2,
+        use_atr_barriers=True,
+        atr_period=2,
+        profit_target_atr_multiplier=3.0,
+        stop_loss_atr_multiplier=1.5,
+    )
+    candles = [
+        _candle(0, high=101.0, low=99.0, close=100.0),
+        _candle(1, high=101.0, low=99.0, close=100.0),
+        _candle(2, high=106.1, low=99.5, close=105.0),
+    ]
+
+    labels = build_long_trade_label_results(candles, config)
+
+    assert labels[1].label == PROFIT_TARGET_LABEL

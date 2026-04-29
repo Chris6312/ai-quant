@@ -19,6 +19,7 @@ import {
   getMlPredictionShap,
   getMlPredictions,
   getMlPersistence,
+  getMlSummary,
   getStockUniverse,
   getTopGainers,
   requestJson,
@@ -37,6 +38,7 @@ import {
   type MlPredictionShapRow,
   type MlPredictionsResponse,
   type MlPersistenceResponse,
+  type MlSummaryResponse,
   type StockUniverseResponse,
 } from "../api";
 import { KRAKEN_UNIVERSE } from "../constants";
@@ -2117,6 +2119,7 @@ const MachineLearning: React.FC = () => {
   const [persistence, setPersistence] = useState<MlPersistenceResponse | null>(
     null,
   );
+  const [mlSummary, setMlSummary] = useState<MlSummaryResponse | null>(null);
   const [featureContract, setFeatureContract] =
     useState<FeatureContractSummary | null>(null);
   const [cryptoUniverse, setCryptoUniverse] =
@@ -2168,8 +2171,27 @@ const MachineLearning: React.FC = () => {
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
   const [showAllCryptoFolds, setShowAllCryptoFolds] = useState(false);
 
+  const loadShellData = useCallback(async () => {
+    const [summaryResult, predictionsResult] = await Promise.allSettled([
+      getMlSummary(),
+      getMlPredictions(50, "crypto", 0),
+    ]);
+
+    if (summaryResult.status === "fulfilled") {
+      setMlSummary(summaryResult.value);
+    }
+
+    if (predictionsResult.status === "fulfilled") {
+      setPredictionsResponse(predictionsResult.value);
+      setPredictionError(null);
+    } else {
+      setPredictionError(normalizeError(predictionsResult.reason));
+    }
+  }, []);
+
   const loadPageData = useCallback(async () => {
     const [
+      summaryResult,
       persistenceResult,
       featureResult,
       cryptoUniverseResult,
@@ -2180,6 +2202,7 @@ const MachineLearning: React.FC = () => {
       parityResult,
       predictionsResult,
     ] = await Promise.allSettled([
+      getMlSummary(),
       getMlPersistence(),
       requestJson<FeatureContractSummary>("/ml/features/contract"),
       getCryptoUniverse(),
@@ -2191,6 +2214,9 @@ const MachineLearning: React.FC = () => {
       getMlPredictions(50),
     ]);
 
+    if (summaryResult.status === "fulfilled") {
+      setMlSummary(summaryResult.value);
+    }
     if (persistenceResult.status === "fulfilled") {
       setPersistence(persistenceResult.value);
     }
@@ -2244,6 +2270,7 @@ const MachineLearning: React.FC = () => {
     }
 
     const errors = [
+      summaryResult,
       persistenceResult,
       featureResult,
       cryptoUniverseResult,
@@ -2273,11 +2300,15 @@ const MachineLearning: React.FC = () => {
 
     const run = async (): Promise<void> => {
       try {
-        await loadPageData();
+        await loadShellData();
       } finally {
         if (alive) {
           setIsLoading(false);
         }
+      }
+
+      if (alive) {
+        void loadPageData();
       }
     };
 
@@ -2286,7 +2317,7 @@ const MachineLearning: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [loadPageData]);
+  }, [loadPageData, loadShellData]);
 
   const activeJob = useMemo(() => {
     if (!persistence?.active_job_id) {
@@ -2317,9 +2348,12 @@ const MachineLearning: React.FC = () => {
   }, [activeJob, loadPageData]);
 
   const training = persistence?.training ?? null;
-  const totalCandles = training?.total_candles ?? 0;
-  const cryptoCandles = training?.crypto_candles ?? 0;
-  const stockCandles = training?.stock_candles ?? 0;
+  const summaryCryptoCandles = mlSummary?.ml_candles.crypto.row_count ?? 0;
+  const summaryStockCandles = mlSummary?.ml_candles.stock.row_count ?? 0;
+  const totalCandles =
+    training?.total_candles ?? summaryCryptoCandles + summaryStockCandles;
+  const cryptoCandles = training?.crypto_candles ?? summaryCryptoCandles;
+  const stockCandles = training?.stock_candles ?? summaryStockCandles;
   const cryptoSymbols =
     training?.crypto_symbols ?? cryptoUniverse?.count ?? KRAKEN_UNIVERSE.length;
   const stockSymbols =
@@ -2358,6 +2392,14 @@ const MachineLearning: React.FC = () => {
       ) ?? null,
     [modelsResponse],
   );
+  const summaryHasActiveModel =
+    Boolean(mlSummary?.active_models.crypto.model_id) ||
+    Boolean(mlSummary?.active_models.stock.model_id);
+  const summaryActiveAsset = mlSummary?.active_models.crypto.model_id
+    ? "crypto"
+    : mlSummary?.active_models.stock.model_id
+      ? "stock"
+      : null;
   const phase8RegistryModels = useMemo(
     () =>
       modelsResponse?.models.filter(
@@ -3002,14 +3044,19 @@ const MachineLearning: React.FC = () => {
           {
             label: "Model status",
             value:
-              activeCryptoModel || activeStockModel
+              activeCryptoModel || activeStockModel || summaryHasActiveModel
                 ? "Models ready"
                 : "Not trained",
-            color: activeCryptoModel || activeStockModel ? S.green : S.amber,
+            color:
+              activeCryptoModel || activeStockModel || summaryHasActiveModel
+                ? S.green
+                : S.amber,
             sub:
               activeCryptoModel || activeStockModel
                 ? `${activeCryptoModel ? "crypto" : "stock"} model active`
-                : "Run training to register first model",
+                : summaryActiveAsset
+                  ? `${summaryActiveAsset} model active · summary cache`
+                  : "Run training to register first model",
           },
           {
             label: "Training data",

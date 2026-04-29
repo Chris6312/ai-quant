@@ -727,9 +727,41 @@ export type MlPredictionShapResponse = {
   source: 'persisted';
 };
 
+export type MlSummaryActiveModel = {
+  model_id: string | null;
+  asset_class: 'crypto' | 'stock';
+  status: string;
+  best_fold: number | null;
+  validation_accuracy: number | null;
+  validation_sharpe: number | null;
+  artifact_path: string | null;
+  trained_at: string | null;
+};
+
+export type MlSummaryCount = {
+  row_count: number;
+  latest_candle_time?: string | null;
+  latest_prediction_at?: string | null;
+};
+
+export type MlSummaryResponse = {
+  active_models: Record<'crypto' | 'stock', MlSummaryActiveModel>;
+  ml_candles: Record<'crypto' | 'stock', MlSummaryCount>;
+  predictions: Record<'crypto' | 'stock', MlSummaryCount>;
+  freshness_by_asset: Partial<Record<'crypto' | 'stock', MlPredictionFreshness>>;
+  latest_training_run: MlJob | null;
+  generated_at: string;
+  source: 'summary';
+  cache_ttl_seconds: number;
+};
+
 export type MlPredictionsResponse = {
   predictions: MlPredictionRow[];
   count: number;
+  total_count?: number;
+  limit?: number;
+  offset?: number;
+  has_next?: boolean;
   persisted_count?: number;
   source?: 'persisted' | 'generated';
   active_model_ids: {
@@ -787,6 +819,8 @@ export type TrainModelResponse = {
 export const getMlJobs = () => requestJson<MlJobsResponse>('/ml/jobs');
 export const getMlPersistence = () =>
   requestJson<MlPersistenceResponse>('/ml/persistence');
+export const getMlSummary = () =>
+  requestJson<MlSummaryResponse>('/ml/summary');
 export const getActiveMlJob = () =>
   requestJson<ActiveMlJobResponse>('/ml/jobs/active');
 export const getMlJob = (id: string) => requestJson<MlJob>(`/ml/jobs/${id}`);
@@ -808,8 +842,15 @@ export const getMlModelImportances = (modelId: string) =>
   requestJson<MlModelImportancesResponse>(`/ml/models/${modelId}/importances`);
 export const getFeatureParity = () =>
   requestJson<FeatureParityResponse>('/ml/features/parity');
-export const getMlPredictions = (limit = 50, assetClass?: 'crypto' | 'stock') => {
-  const query = new URLSearchParams({ limit: String(limit) });
+export const getMlPredictions = (
+  limit = 50,
+  assetClass?: 'crypto' | 'stock',
+  offset = 0,
+) => {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
   if (assetClass) {
     query.set('asset_class', assetClass);
   }
