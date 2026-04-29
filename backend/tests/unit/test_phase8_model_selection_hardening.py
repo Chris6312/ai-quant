@@ -257,3 +257,45 @@ def test_crypto_selector_raises_structured_no_eligible_error(
         assert exc.folds[0].eligibility_reason == "accuracy_below_threshold"
     else:
         raise AssertionError("Expected NoEligibleProductionFoldError")
+
+
+def test_crypto_selector_uses_one_production_baseline_for_all_folds(
+    tmp_path: Path,
+) -> None:
+    """Crypto baseline should be one run-level value, not a moving per-fold target."""
+
+    trainer = WalkForwardTrainer(TrainerConfig(model_dir=str(tmp_path)))
+    fold_a = _fold(
+        index=142,
+        test_end=datetime(2026, 4, 20, tzinfo=UTC),
+        sharpe=1.7,
+        accuracy=0.61,
+        samples=420,
+        model_path=tmp_path / "model_crypto_fold142.lgbm",
+        class_counts={0: 40, 1: 260, 2: 120},
+    )
+    fold_b = _fold(
+        index=143,
+        test_end=datetime(2026, 4, 24, tzinfo=UTC),
+        sharpe=1.9,
+        accuracy=0.62,
+        samples=420,
+        model_path=tmp_path / "model_crypto_fold143.lgbm",
+        class_counts={0: 160, 1: 80, 2: 180},
+    )
+
+    selection = trainer._select_production_fold(
+        asset_class="crypto",
+        candles=_stable_crypto_candles(),
+        folds=[fold_a, fold_b],
+    )
+
+    expected_baseline = (260 + 80) / 840
+    assert selection.policy["production_baseline_accuracy"] == expected_baseline
+    assert {fold.majority_class_baseline_accuracy for fold in selection.folds} == {
+        expected_baseline
+    }
+    assert {round(fold.baseline_margin, 4) for fold in selection.folds} == {
+        round(0.61 - expected_baseline, 4),
+        round(0.62 - expected_baseline, 4),
+    }

@@ -26,6 +26,8 @@ from app.ml.features import (
 )
 from app.ml.labels import (
     TradeLabelConfig,
+    TradeLabelResult,
+    build_long_trade_label_results,
     build_long_trade_labels,
     label_balance_report,
 )
@@ -118,10 +120,13 @@ class TrainerConfig:
     crypto_min_validation_accuracy: float = 0.35
     crypto_min_baseline_margin: float = 0.03
     stock_label_threshold: float = 0.002
-    crypto_label_threshold: float = 0.0075
-    trade_label_lookahead_candles: int = 5
-    recent_sample_weight_days: int = 365
-    recent_sample_weight_multiplier: float = 1.75
+    crypto_label_threshold: float = 0.01
+    trade_label_lookahead_candles: int = 7
+    label_time_decay_min_weight: float = 0.45
+    timeout_sample_weight: float = 0.70
+    recent_sample_weight_days: int = 540
+    recent_sample_weight_multiplier: float = 2.25
+    crypto_training_start_year: int = 2019
     crypto_min_test_samples: int = 300
     crypto_volatility_ratio_threshold: float = 1.35
     crypto_max_drawdown_threshold: float = -0.20
@@ -184,6 +189,7 @@ class _TrainingSample:
     label: int
     next_return: float
     symbol: str
+    label_weight: float = 1.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -324,8 +330,10 @@ class WalkForwardTrainer:
         samples: list[_TrainingSample] = []
         for symbol_candles in grouped.values():
             ordered = sorted(symbol_candles, key=lambda candle: candle.time)
-            labels = self._label_candles(ordered, ordered[0].asset_class)
+            label_results = self._label_candle_results(ordered, ordered[0].asset_class)
             for index in range(199, len(ordered) - 1):
+                if self._skip_training_sample(ordered[index], asset_class):
+                    continue
                 research_inputs = self._research_inputs_for_sample(
                     research_lookup,
                     symbol=ordered[index].symbol,
@@ -346,9 +354,10 @@ class WalkForwardTrainer:
                         timestamp=ordered[index].time,
                         month_key=(ordered[index].time.year, ordered[index].time.month),
                         features=features,
-                        label=labels[index],
+                        label=label_results[index].label,
                         next_return=next_return,
                         symbol=ordered[index].symbol,
+                        label_weight=label_results[index].time_decay_weight,
                     )
                 )
 
@@ -549,6 +558,11 @@ class WalkForwardTrainer:
                 policy={"selector": "highest_validation_sharpe"},
             )
 
+        (
+            folds,
+            baseline_class,
+            baseline_accuracy,
+        ) = self._apply_crypto_production_baseline(folds)
         regime = self._detect_crypto_regime(candles)
         reference_date = datetime.now(UTC).date()
         min_test_end = reference_date - timedelta(days=regime.max_fold_age_days)
@@ -567,12 +581,22 @@ class WalkForwardTrainer:
 
         policy: dict[str, object] = {
             "selector": "highest_recent_eligible_validation_sharpe",
+            "label_policy": "long_only_triple_barrier_time_decay",
+            "crypto_profit_target_pct": self.config.crypto_label_threshold,
+            "crypto_stop_loss_pct": self.config.crypto_label_threshold,
+            "max_holding_candles": self.config.trade_label_lookahead_candles,
+            "label_time_decay_min_weight": self.config.label_time_decay_min_weight,
+            "timeout_sample_weight": self.config.timeout_sample_weight,
+            "crypto_training_start_year": self.config.crypto_training_start_year,
             "regime": regime.regime,
             "max_fold_age_days": regime.max_fold_age_days,
             "min_test_end": min_test_end.isoformat(),
             "min_validation_sharpe": self.config.crypto_min_validation_sharpe,
             "min_validation_accuracy": self.config.crypto_min_validation_accuracy,
             "min_baseline_margin": self.config.crypto_min_baseline_margin,
+            "production_baseline_class": baseline_class,
+            "production_baseline_accuracy": baseline_accuracy,
+            "production_baseline_source": "combined_validation_majority_class",
             "min_test_samples": self.config.crypto_min_test_samples,
             "btc_realized_vol_30d": regime.btc_realized_vol_30d,
             "btc_realized_vol_90d": regime.btc_realized_vol_90d,
@@ -608,6 +632,43 @@ class WalkForwardTrainer:
             folds=labeled,
             regime=regime.regime,
             policy=policy,
+        )
+
+    def _apply_crypto_production_baseline(
+        self,
+        folds: Sequence[FoldResult],
+    ) -> tuple[list[FoldResult], int, float]:
+        """Use one validation baseline for every crypto fold in a run."""
+
+        if not folds:
+            return [], 1, 0.0
+
+        combined_counts = {0: 0, 1: 0, 2: 0}
+        for fold in folds:
+            for label, count in fold.class_counts.items():
+                combined_counts[int(label)] = combined_counts.get(int(label), 0) + count
+
+        total = sum(combined_counts.values())
+        if total <= 0:
+            return list(folds), 1, 0.0
+
+        baseline_class, baseline_count = max(
+            combined_counts.items(),
+            key=lambda item: (item[1], -item[0]),
+        )
+        baseline_accuracy = baseline_count / total
+        return (
+            [
+                replace(
+                    fold,
+                    majority_class=baseline_class,
+                    majority_class_baseline_accuracy=baseline_accuracy,
+                    baseline_margin=fold.validation_accuracy - baseline_accuracy,
+                )
+                for fold in folds
+            ],
+            baseline_class,
+            baseline_accuracy,
         )
 
     def _crypto_fold_eligibility(
@@ -837,7 +898,8 @@ class WalkForwardTrainer:
             return class_weights
 
         recency_weights = self._recent_sample_weights(samples)
-        return class_weights * recency_weights
+        label_weights = self._label_time_decay_weights(samples)
+        return class_weights * recency_weights * label_weights
 
     def _recent_sample_weights(
         self,
@@ -853,6 +915,17 @@ class WalkForwardTrainer:
         multiplier = max(1.0, self.config.recent_sample_weight_multiplier)
         return np.asarray(
             [multiplier if sample.timestamp >= cutoff else 1.0 for sample in samples],
+            dtype=float,
+        )
+
+    def _label_time_decay_weights(
+        self,
+        samples: Sequence[_TrainingSample],
+    ) -> FloatArray:
+        """Return TP/SL time-decay weights attached during labeling."""
+
+        return np.asarray(
+            [min(1.0, max(0.05, sample.label_weight)) for sample in samples],
             dtype=float,
         )
 
@@ -876,6 +949,14 @@ class WalkForwardTrainer:
             key=lambda item: (item[1], -item[0]),
         )
         return majority_class, majority_count / len(labels)
+
+    def _skip_training_sample(self, candle: Candle, asset_class: str) -> bool:
+        """Return True when a sample belongs to an era excluded from training."""
+
+        return (
+            asset_class.lower().strip() == "crypto"
+            and candle.time.year < self.config.crypto_training_start_year
+        )
 
     def _matrix(
         self,
@@ -967,7 +1048,11 @@ class WalkForwardTrainer:
 
         return _normalized_gain_importances(booster, feature_names)
 
-    def _label_candles(self, candles: Sequence[Candle], asset_class: str) -> list[int]:
+    def _label_candles(
+        self,
+        candles: Sequence[Candle],
+        asset_class: str,
+    ) -> list[int]:
         """Label candles by triple-barrier long trade outcome."""
 
         threshold = self._label_threshold(asset_class)
@@ -977,6 +1062,27 @@ class WalkForwardTrainer:
                 profit_target_pct=threshold,
                 stop_loss_pct=threshold,
                 max_holding_candles=self.config.trade_label_lookahead_candles,
+                time_decay_min_weight=self.config.label_time_decay_min_weight,
+                timeout_sample_weight=self.config.timeout_sample_weight,
+            ),
+        )
+
+    def _label_candle_results(
+        self,
+        candles: Sequence[Candle],
+        asset_class: str,
+    ) -> list[TradeLabelResult]:
+        """Label candles and retain time-decay weights for training."""
+
+        threshold = self._label_threshold(asset_class)
+        return build_long_trade_label_results(
+            candles,
+            TradeLabelConfig(
+                profit_target_pct=threshold,
+                stop_loss_pct=threshold,
+                max_holding_candles=self.config.trade_label_lookahead_candles,
+                time_decay_min_weight=self.config.label_time_decay_min_weight,
+                timeout_sample_weight=self.config.timeout_sample_weight,
             ),
         )
 

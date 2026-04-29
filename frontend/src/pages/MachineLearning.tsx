@@ -111,6 +111,33 @@ type BannerState = {
   message: string;
 };
 
+type FoldRequirementKey =
+  | "recency"
+  | "sharpe"
+  | "accuracy"
+  | "baseline"
+  | "samples"
+  | "calibration";
+
+type FoldRequirementDiagnostic = {
+  key: FoldRequirementKey;
+  label: string;
+  passed: boolean;
+  value: string;
+  required: string;
+  weight: number;
+  reason: string;
+  displayValue?: string;
+};
+
+type FoldProductionDiagnostics = {
+  requirements: FoldRequirementDiagnostic[];
+  passCount: number;
+  failCount: number;
+  score: number;
+  failedLabels: string[];
+};
+
 type Fold = {
   foldIndex: number;
   label: string;
@@ -125,6 +152,9 @@ type Fold = {
   eligibilityStatus: string;
   eligibilityReason: string;
   testEndRaw: string;
+  baselineAccuracy: number | null;
+  baselineMargin: number | null;
+  diagnostics: FoldProductionDiagnostics;
 };
 
 type ModelCardData = {
@@ -150,6 +180,9 @@ type ProductionPolicy = {
   minValidationSharpe: number | null;
   minValidationAccuracy: number | null;
   minBaselineMargin: number | null;
+  productionBaselineClass: number | null;
+  productionBaselineAccuracy: number | null;
+  productionBaselineSource: string | null;
   minTestSamples: number | null;
   regimeReasons: string[];
 };
@@ -913,6 +946,42 @@ function PipeConnector({ done }: { done: boolean }): React.ReactElement {
   );
 }
 
+function RequirementPill({
+  requirement,
+}: {
+  requirement: FoldRequirementDiagnostic;
+}): React.ReactElement {
+  const tone: BadgeVariant = requirement.passed ? "green" : "red";
+  const colors = BADGE_TONES[tone];
+  const detailLabel = requirement.displayValue ?? requirement.value;
+  return (
+    <span
+      title={`${requirement.reason} · Value: ${requirement.value} · Required: ${requirement.required}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 5px",
+        borderRadius: S.rSm,
+        background: colors.bg,
+        border: `0.5px solid ${colors.border}`,
+        color: colors.color,
+        fontSize: 8,
+        letterSpacing: "0.04em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span>{requirement.passed ? "✓" : "×"}</span>
+      <span>{requirement.label}</span>
+      {requirement.passed ? null : (
+        <span style={{ color: colors.color, opacity: 0.9 }}>
+          {detailLabel}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function FoldRow({
   fold,
   selected,
@@ -931,8 +1000,14 @@ function FoldRow({
     ? "green"
     : fold.eligibilityStatus === "eligible"
       ? "blue"
-      : "muted";
+      : fold.diagnostics.failCount <= 1
+        ? "amber"
+        : "muted";
   const statusColors = BADGE_TONES[statusTone];
+  const failedLabel =
+    fold.diagnostics.failCount === 0
+      ? "All gates pass"
+      : `${fold.diagnostics.failCount} issue${fold.diagnostics.failCount === 1 ? "" : "s"}`;
   return (
     <div
       role={onSelect ? "button" : undefined}
@@ -949,7 +1024,7 @@ function FoldRow({
       }}
       style={{
         display: "grid",
-        gridTemplateColumns: "70px 1fr 80px 72px 84px",
+        gridTemplateColumns: "70px 1.1fr 80px 72px minmax(260px, 1.2fr) 92px",
         gap: 10,
         alignItems: "center",
         padding: fold.best || selected ? "7px 6px" : "7px 0",
@@ -1023,12 +1098,24 @@ function FoldRow({
       >
         {fold.acc.toFixed(1)}%
       </span>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 4,
+          alignItems: "center",
+        }}
+      >
+        {fold.diagnostics.requirements.map((requirement) => (
+          <RequirementPill key={requirement.key} requirement={requirement} />
+        ))}
+      </div>
       <span
         title={fold.eligibilityReason.replaceAll("_", " ")}
         style={{
           textAlign: "center",
           fontSize: 8,
-          padding: "1px 5px",
+          padding: "2px 5px",
           borderRadius: S.rSm,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
@@ -1038,6 +1125,9 @@ function FoldRow({
         }}
       >
         {statusLabel}
+        <span style={{ display: "block", marginTop: 2, color: statusColors.color }}>
+          {failedLabel}
+        </span>
       </span>
     </div>
   );
@@ -1194,6 +1284,9 @@ function parseProductionPolicy(
     minValidationSharpe: readNumberField(source, "min_validation_sharpe"),
     minValidationAccuracy: readNumberField(source, "min_validation_accuracy"),
     minBaselineMargin: readNumberField(source, "min_baseline_margin"),
+    productionBaselineClass: readNumberField(source, "production_baseline_class"),
+    productionBaselineAccuracy: readNumberField(source, "production_baseline_accuracy"),
+    productionBaselineSource: readStringField(source, "production_baseline_source"),
     minTestSamples: readNumberField(source, "min_test_samples"),
     regimeReasons: readStringArrayField(source, "regime_reasons"),
   };
@@ -1248,8 +1341,195 @@ function isFoldInsideProductionWindow(
   return foldTime >= minTime;
 }
 
-function sortFoldsNewestFirst(folds: Fold[]): Fold[] {
+function formatDiagnosticRequirementValue(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "missing";
+  }
+  return value.toFixed(2);
+}
+
+function formatDiagnosticRequirementRate(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "missing";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function getFoldBaselineAccuracy(fold: ModelFold): number | null {
+  if (
+    typeof fold.majority_class_baseline_accuracy === "number" &&
+    Number.isFinite(fold.majority_class_baseline_accuracy)
+  ) {
+    return fold.majority_class_baseline_accuracy;
+  }
+
+  const ratios = fold.class_balance?.ratios;
+  if (!ratios) {
+    return null;
+  }
+
+  const values = Object.values(ratios).filter((value) => Number.isFinite(value));
+  if (values.length === 0) {
+    return null;
+  }
+  return Math.max(...values);
+}
+
+function getFoldBaselineMargin(fold: ModelFold): number | null {
+  if (typeof fold.baseline_margin === "number" && Number.isFinite(fold.baseline_margin)) {
+    return fold.baseline_margin;
+  }
+  const baselineAccuracy = getFoldBaselineAccuracy(fold);
+  if (baselineAccuracy === null) {
+    return null;
+  }
+  return fold.validation_accuracy - baselineAccuracy;
+}
+
+function buildRequirement(
+  key: FoldRequirementKey,
+  label: string,
+  passed: boolean,
+  value: string,
+  required: string,
+  weight: number,
+  reason: string,
+  displayValue?: string,
+): FoldRequirementDiagnostic {
+  return { key, label, passed, value, required, weight, reason, displayValue };
+}
+
+function getBaselineEdgeReason(
+  baselineAccuracy: number | null,
+  baselineMargin: number | null,
+  minBaselineMargin: number,
+): string {
+  if (baselineAccuracy === null || baselineMargin === null) {
+    return "Production baseline or current edge is missing from this fold payload";
+  }
+
+  const edgeLabel = formatDiagnosticRequirementRate(baselineMargin);
+  const baselineLabel = formatDiagnosticRequirementRate(baselineAccuracy);
+  const requiredLabel = formatDiagnosticRequirementRate(minBaselineMargin);
+  if (baselineMargin >= minBaselineMargin) {
+    return `Accuracy beats the single production baseline ${baselineLabel} by ${edgeLabel}; required edge is ${requiredLabel}`;
+  }
+  return `Accuracy does not beat the single production baseline ${baselineLabel} by enough: current edge ${edgeLabel}, required edge ${requiredLabel}`;
+}
+
+function getCalibrationRequirementReason(
+  report: ModelFold["calibration_report"],
+): string {
+  if (!report) {
+    return "Calibration report is missing from this fold payload";
+  }
+
+  const status = report.status.replaceAll("_", " ");
+  const notes = report.notes.length > 0 ? ` · ${report.notes.join(" · ")}` : "";
+  return `Calibration status: ${status}; high-confidence rows ${report.high_confidence_count.toLocaleString()}; separation ${formatDiagnosticRequirementRate(report.separation)}; false-positive rate ${formatDiagnosticRequirementRate(report.false_positive_rate)}${notes}`;
+}
+
+function buildFoldProductionDiagnostics(
+  fold: ModelFold,
+  policy: ProductionPolicy | null,
+): FoldProductionDiagnostics {
+  const minTestEnd = policy?.minTestEnd ?? null;
+  const minSharpe = policy?.minValidationSharpe ?? 0;
+  const minAccuracy = policy?.minValidationAccuracy ?? 0;
+  const minBaselineMargin = policy?.minBaselineMargin ?? 0;
+  const minTestSamples = policy?.minTestSamples ?? 0;
+  const foldTime = Date.parse(fold.test_end);
+  const minTime = minTestEnd ? Date.parse(minTestEnd) : Number.NaN;
+  const recencyPass =
+    !minTestEnd ||
+    !Number.isFinite(foldTime) ||
+    !Number.isFinite(minTime) ||
+    foldTime >= minTime;
+  const baselineAccuracy = getFoldBaselineAccuracy(fold);
+  const baselineMargin = getFoldBaselineMargin(fold);
+  const calibrationReport = fold.calibration_report;
+  const calibrationPass = calibrationReport?.usable_for_live_gate === true;
+
+  const requirements: FoldRequirementDiagnostic[] = [
+    buildRequirement(
+      "recency",
+      "Recency",
+      recencyPass,
+      formatPolicyDate(fold.test_end),
+      minTestEnd ? `≥ ${formatPolicyDate(minTestEnd)}` : "policy unset",
+      3,
+      recencyPass ? "Fold is inside the production recency window" : "Fold is too old for the current production regime",
+    ),
+    buildRequirement(
+      "sharpe",
+      "Sharpe",
+      fold.validation_sharpe > minSharpe,
+      formatDiagnosticRequirementValue(fold.validation_sharpe),
+      `> ${formatDiagnosticRequirementValue(minSharpe)}`,
+      3,
+      fold.validation_sharpe > minSharpe ? "Validation Sharpe clears production policy" : "Validation Sharpe is not positive enough",
+    ),
+    buildRequirement(
+      "accuracy",
+      "Accuracy",
+      fold.validation_accuracy >= minAccuracy,
+      formatDiagnosticRequirementRate(fold.validation_accuracy),
+      `≥ ${formatDiagnosticRequirementRate(minAccuracy)}`,
+      2,
+      fold.validation_accuracy >= minAccuracy ? "Validation accuracy clears production policy" : "Validation accuracy is below policy",
+    ),
+    buildRequirement(
+      "baseline",
+      "Baseline edge",
+      baselineMargin !== null && baselineMargin >= minBaselineMargin,
+      formatDiagnosticRequirementRate(baselineMargin),
+      `≥ ${formatDiagnosticRequirementRate(minBaselineMargin)}`,
+      2,
+      getBaselineEdgeReason(baselineAccuracy, baselineMargin, minBaselineMargin),
+      `edge ${formatDiagnosticRequirementRate(baselineMargin)}`,
+    ),
+    buildRequirement(
+      "samples",
+      "Samples",
+      fold.n_test_samples >= minTestSamples,
+      fold.n_test_samples.toLocaleString(),
+      `≥ ${minTestSamples.toLocaleString()}`,
+      1,
+      fold.n_test_samples >= minTestSamples ? "Enough test rows for production review" : "Test window is too small",
+    ),
+    buildRequirement(
+      "calibration",
+      "Calibration",
+      calibrationPass,
+      calibrationReport ? calibrationReport.status.replaceAll("_", " ") : "missing",
+      "usable live gate",
+      1,
+      calibrationPass
+        ? "Calibration report is usable for live gating"
+        : getCalibrationRequirementReason(calibrationReport),
+      calibrationReport ? calibrationReport.status.replaceAll("_", " ") : "missing",
+    ),
+  ];
+
+  const failed = requirements.filter((requirement) => !requirement.passed);
+  return {
+    requirements,
+    passCount: requirements.length - failed.length,
+    failCount: failed.length,
+    score: failed.reduce((total, requirement) => total + requirement.weight, 0),
+    failedLabels: failed.map((requirement) => requirement.label),
+  };
+}
+
+function sortFoldsByProductionReadiness(folds: Fold[]): Fold[] {
   return [...folds].sort((a, b) => {
+    const eligibleDelta = Number(b.eligibilityStatus === "eligible") - Number(a.eligibilityStatus === "eligible");
+    if (eligibleDelta !== 0) {
+      return eligibleDelta;
+    }
+    if (a.diagnostics.score !== b.diagnostics.score) {
+      return a.diagnostics.score - b.diagnostics.score;
+    }
     const left = Date.parse(a.testEndRaw);
     const right = Date.parse(b.testEndRaw);
     if (Number.isFinite(left) && Number.isFinite(right) && left !== right) {
@@ -1257,6 +1537,10 @@ function sortFoldsNewestFirst(folds: Fold[]): Fold[] {
     }
     return b.foldIndex - a.foldIndex;
   });
+}
+
+function getClosestProductionFold(folds: Fold[]): Fold | null {
+  return sortFoldsByProductionReadiness(folds)[0] ?? null;
 }
 
 function toDiagnosticImportances(fold: ModelFold): MlModelImportancesResponse {
@@ -1274,7 +1558,11 @@ function toDiagnosticImportances(fold: ModelFold): MlModelImportancesResponse {
   };
 }
 
-function toFoldRow(fold: ModelFold, activeFold: number | null): Fold {
+function toFoldRow(
+  fold: ModelFold,
+  activeFold: number | null,
+  policy: ProductionPolicy | null,
+): Fold {
   return {
     foldIndex: fold.fold_index,
     label: `Fold ${fold.fold_index}`,
@@ -1293,6 +1581,9 @@ function toFoldRow(fold: ModelFold, activeFold: number | null): Fold {
         : "research_only"),
     eligibilityReason: fold.eligibility_reason ?? "not_evaluated",
     testEndRaw: fold.test_end,
+    baselineAccuracy: getFoldBaselineAccuracy(fold),
+    baselineMargin: getFoldBaselineMargin(fold),
+    diagnostics: buildFoldProductionDiagnostics(fold, policy),
   };
 }
 
@@ -1478,6 +1769,7 @@ function CalibrationDiagnostics({
 function ProductionRequirementsCard({
   policy,
   selectedFold,
+  closestFold,
   visibleFoldCount,
   hiddenFoldCount,
   showAll,
@@ -1485,6 +1777,7 @@ function ProductionRequirementsCard({
 }: {
   policy: ProductionPolicy | null;
   selectedFold: ModelFold | null;
+  closestFold: Fold | null;
   visibleFoldCount: number;
   hiddenFoldCount: number;
   showAll: boolean;
@@ -1494,6 +1787,18 @@ function ProductionRequirementsCard({
     selectedFold?.eligibility_reason?.replaceAll("_", " ") ??
     "No diagnostic fold selected";
   const reasons = policy?.regimeReasons ?? [];
+  const closestFailedLabels = closestFold?.diagnostics.failedLabels ?? [];
+  const closestSummary = closestFold
+    ? closestFold.diagnostics.failCount === 0
+      ? `${closestFold.label} passes every visible production gate.`
+      : `${closestFold.label} missed by ${closestFailedLabels.join(", ")}.`
+    : "No recent fold is available for production-distance diagnostics.";
+  const closestBaselineLabel = closestFold
+    ? formatPolicyPercent(closestFold.baselineAccuracy)
+    : "—";
+  const closestBaselineMarginLabel = closestFold
+    ? formatPolicyPercent(closestFold.baselineMargin)
+    : "—";
 
   return (
     <Card>
@@ -1511,8 +1816,9 @@ function ProductionRequirementsCard({
       >
         <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.55 }}>
           Confidence threshold controls prediction gating after a model exists.
-          Production selection also requires recency, positive Sharpe, baseline
-          margin, enough samples, and usable calibration.
+          Crypto production selection uses one validation-wide majority-class
+          baseline for every fold, then requires model edge over that baseline,
+          recency, positive Sharpe, enough samples, and usable calibration.
         </div>
         <div
           style={{
@@ -1532,8 +1838,18 @@ function ProductionRequirementsCard({
               formatPolicyPercent(policy?.minValidationAccuracy ?? null),
             ],
             [
-              "Beat baseline by",
+              "Current baseline",
+              formatPolicyPercent(policy?.productionBaselineAccuracy ?? null),
+            ],
+            [
+              "Required edge over baseline",
               formatPolicyPercent(policy?.minBaselineMargin ?? null),
+            ],
+            [
+              "Baseline class",
+              policy?.productionBaselineClass === null || policy?.productionBaselineClass === undefined
+                ? "—"
+                : String(policy.productionBaselineClass),
             ],
             [
               "Minimum test rows",
@@ -1570,6 +1886,27 @@ function ProductionRequirementsCard({
               </div>
             </div>
           ))}
+        </div>
+        <div
+          style={{
+            padding: "10px 12px",
+            border: `0.5px solid ${closestFold ? S.blue2 : S.border}`,
+            borderRadius: S.rMd,
+            background: closestFold ? S.blueBg : S.bg2,
+            color: closestFold ? S.blue : S.text3,
+            fontSize: 10,
+            lineHeight: 1.55,
+          }}
+        >
+          <span style={{ color: closestFold ? S.text : S.text2 }}>
+            Closest to production:
+          </span>{" "}
+          {closestSummary}
+          {closestFold ? (
+            <span style={{ display: "block", marginTop: 3, color: S.text3 }}>
+              Readiness score {closestFold.diagnostics.score} · {closestFold.diagnostics.passCount}/6 gates passing · test end {formatPolicyDate(closestFold.testEndRaw)} · current baseline {closestBaselineLabel} · model edge over baseline {closestBaselineMarginLabel} · required edge {formatPolicyPercent(policy?.minBaselineMargin ?? null)}
+            </span>
+          ) : null}
         </div>
         <div
           style={{
@@ -2373,16 +2710,16 @@ const MachineLearning: React.FC = () => {
 
   const liveCryptoFolds = useMemo(() => {
     if (activeCryptoModel && activeCryptoModel.folds.length > 0) {
-      return sortFoldsNewestFirst(
+      return sortFoldsByProductionReadiness(
         activeCryptoModel.folds.map((fold) =>
-          toFoldRow(fold, activeCryptoModel.best_fold),
+          toFoldRow(fold, activeCryptoModel.best_fold, productionPolicy),
         ),
       );
     }
-    return sortFoldsNewestFirst(
-      noModelSelectedFolds.map((fold) => toFoldRow(fold, null)),
+    return sortFoldsByProductionReadiness(
+      noModelSelectedFolds.map((fold) => toFoldRow(fold, null, productionPolicy)),
     );
-  }, [activeCryptoModel, noModelSelectedFolds]);
+  }, [activeCryptoModel, noModelSelectedFolds, productionPolicy]);
 
   const recentCryptoFolds = useMemo(() => {
     return liveCryptoFolds.filter((fold) =>
@@ -2399,6 +2736,7 @@ const MachineLearning: React.FC = () => {
   );
 
   const hasCryptoFoldDiagnostics = liveCryptoFolds.length > 0;
+  const closestProductionFold = getClosestProductionFold(recentCryptoFolds);
 
   const handlePendingAction = (message: string): void => {
     setBanner({ tone: "info", message });
@@ -2689,11 +3027,15 @@ const MachineLearning: React.FC = () => {
             label: "Walk-forward folds",
             value: activeCryptoModel
               ? String(activeCryptoModel.fold_count)
-              : "Pending",
+              : hasCryptoFoldDiagnostics
+                ? String(liveCryptoFolds.length)
+                : "Pending",
             color: S.text,
             sub: activeCryptoModel
               ? `Best fold ${activeCryptoModel.best_fold}`
-              : "Awaiting first trained crypto model",
+              : hasCryptoFoldDiagnostics
+                ? "Rejected diagnostic folds"
+                : "Awaiting first trained crypto model",
           },
           {
             label: "Confidence threshold",
@@ -3040,6 +3382,7 @@ const MachineLearning: React.FC = () => {
       <ProductionRequirementsCard
         policy={productionPolicy}
         selectedFold={diagnosticImportanceFold}
+        closestFold={closestProductionFold}
         visibleFoldCount={visibleCryptoFolds.length}
         hiddenFoldCount={hiddenCryptoFoldCount}
         showAll={showAllCryptoFolds}
@@ -3108,10 +3451,11 @@ const MachineLearning: React.FC = () => {
                     lineHeight: 1.5,
                   }}
                 >
-                  No production model is active because the latest crypto
-                  training run failed guardrails. Recent diagnostic folds are
-                  shown first from the production recency window; older folds are
-                  hidden unless you expand them. Global feature importance is
+                  No production model selected because no fold meets all
+                  production requirements. Recent diagnostic folds are sorted by
+                  production eligibility, closest-to-passing score, then newest
+                  test end. Older folds remain hidden unless you expand them.
+                  Global feature importance is
                   available when the rejected fold returned training weights;
                   live inference and local prediction SHAP stay disabled.
                 </div>
@@ -3119,7 +3463,7 @@ const MachineLearning: React.FC = () => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "70px 1fr 80px 72px 84px",
+                  gridTemplateColumns: "70px 1.1fr 80px 72px minmax(260px, 1.2fr) 92px",
                   gap: 10,
                   padding: "0 0 6px",
                   borderBottom: `0.5px solid ${S.border}`,
@@ -3130,6 +3474,7 @@ const MachineLearning: React.FC = () => {
                   "Time window",
                   "Sharpe",
                   "Accuracy",
+                  "Gate checklist",
                   "Eligibility",
                 ].map((h) => (
                   <span

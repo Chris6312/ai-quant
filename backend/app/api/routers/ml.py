@@ -627,6 +627,11 @@ def _serialize_fold_results(
                 "feature_names": feature_names,
                 "feature_importances": feature_importances,
                 "class_balance": dict(getattr(fold, "class_balance", {})),
+                "majority_class": int(getattr(fold, "majority_class", 1)),
+                "majority_class_baseline_accuracy": float(
+                    getattr(fold, "majority_class_baseline_accuracy", 0.0)
+                ),
+                "baseline_margin": float(getattr(fold, "baseline_margin", 0.0)),
                 "calibration_report": dict(
                     getattr(fold, "calibration_report", {}) or {},
                 ),

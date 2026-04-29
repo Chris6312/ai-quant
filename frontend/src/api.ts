@@ -591,6 +591,13 @@ export type CalibrationReport = {
   notes: string[];
 };
 
+export type MlClassBalance = {
+  total: number;
+  counts: Record<string, number>;
+  ratios: Record<string, number>;
+  label_meanings?: Record<string, string>;
+};
+
 export type ModelFold = {
   fold_index: number;
   train_start: string;
@@ -603,6 +610,10 @@ export type ModelFold = {
   n_test_samples: number;
   model_path: string;
   feature_importances?: Record<string, number>;
+  class_balance?: MlClassBalance;
+  majority_class?: number;
+  majority_class_baseline_accuracy?: number;
+  baseline_margin?: number;
   calibration_report?: CalibrationReport;
   eligibility_status?: string;
   eligibility_reason?: string;

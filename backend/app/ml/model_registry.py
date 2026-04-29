@@ -28,6 +28,9 @@ class FoldSummaryRecord(TypedDict):
     feature_names: list[str]
     feature_importances: dict[str, float]
     class_balance: dict[str, object]
+    majority_class: int
+    majority_class_baseline_accuracy: float
+    baseline_margin: float
     calibration_report: NotRequired[dict[str, object]]
     eligibility_status: str
     eligibility_reason: str

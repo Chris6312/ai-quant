@@ -42,6 +42,10 @@ class CalibrationReport(TypedDict):
     separation: float
     false_positive_rate: float
     expected_value_proxy: float
+    baseline_class: int
+    baseline_class_rate: float
+    model_accuracy: float
+    accuracy_over_baseline: float
     buckets: list[CalibrationBucket]
     notes: list[str]
 
@@ -121,6 +125,9 @@ def build_long_probability_calibration_report(
     separation = high_win_rate - comparison_win_rate if high_indexes else 0.0
     false_positive_rate = _false_positive_rate(high_indexes, normalized_labels)
     expected_value_proxy = _average_return(high_indexes, normalized_returns)
+    baseline_class, baseline_class_rate = _majority_class_rate(normalized_labels)
+    model_accuracy = _model_accuracy(long_probabilities, probabilities, normalized_labels)
+    accuracy_over_baseline = model_accuracy - baseline_class_rate
 
     notes: list[str] = [
         "Calibration uses validation/test fold rows only.",
@@ -149,6 +156,10 @@ def build_long_probability_calibration_report(
         "separation": separation,
         "false_positive_rate": false_positive_rate,
         "expected_value_proxy": expected_value_proxy,
+        "baseline_class": baseline_class,
+        "baseline_class_rate": baseline_class_rate,
+        "model_accuracy": model_accuracy,
+        "accuracy_over_baseline": accuracy_over_baseline,
         "buckets": buckets,
         "notes": notes,
     }
@@ -204,6 +215,10 @@ def _empty_report(dead_zone_lower: float, dead_zone_upper: float) -> Calibration
         "separation": 0.0,
         "false_positive_rate": 0.0,
         "expected_value_proxy": 0.0,
+        "baseline_class": 1,
+        "baseline_class_rate": 0.0,
+        "model_accuracy": 0.0,
+        "accuracy_over_baseline": 0.0,
         "buckets": [],
         "notes": ["No validation/test rows were available for calibration."],
     }
@@ -231,3 +246,33 @@ def _false_positive_rate(indexes: Sequence[int], labels: Sequence[int]) -> float
         return 0.0
     false_positives = sum(1 for index in indexes if labels[index] != PROFIT_TARGET_LABEL)
     return false_positives / len(indexes)
+
+
+def _majority_class_rate(labels: Sequence[int]) -> tuple[int, float]:
+    if not labels:
+        return 1, 0.0
+    counts = {0: 0, 1: 0, 2: 0}
+    for label in labels:
+        counts[int(label)] = counts.get(int(label), 0) + 1
+    majority_class, count = max(counts.items(), key=lambda item: (item[1], -item[0]))
+    return majority_class, count / len(labels)
+
+
+def _model_accuracy(
+    long_probabilities: Sequence[float],
+    probabilities: FloatArray,
+    labels: Sequence[int],
+) -> float:
+    if not labels:
+        return 0.0
+    matrix = np.asarray(probabilities, dtype=float)[: len(labels)]
+    if matrix.ndim == 1 or matrix.shape[1] <= PROFIT_TARGET_LABEL:
+        predicted = [PROFIT_TARGET_LABEL if value >= 0.5 else 1 for value in long_probabilities]
+    else:
+        predicted = [int(np.argmax(row)) for row in matrix]
+    hits = sum(
+        1
+        for expected, actual in zip(labels, predicted, strict=True)
+        if expected == actual
+    )
+    return hits / len(labels)
