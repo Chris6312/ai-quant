@@ -504,6 +504,10 @@ export type ActiveMlJobResponse = {
   job: MlJob | null;
 };
 
+export type MlJobsResponse = MlJob[] | {
+  jobs: MlJob[];
+};
+
 export type FeatureContractResponse = {
   feature_count: number;
   technical_feature_count: number;
@@ -755,6 +759,7 @@ export type MlModelsResponse = {
 
 export type TrainModelResponse = {
   job?: MlJob;
+  job_id?: string;
   active_model_id?: string | null;
   model_id?: string;
   best_fold?: number;
@@ -768,7 +773,7 @@ export type TrainModelResponse = {
   selection_policy?: Record<string, unknown>;
 };
 
-export const getMlJobs = () => requestJson<MlJob[]>('/ml/jobs');
+export const getMlJobs = () => requestJson<MlJobsResponse>('/ml/jobs');
 export const getMlPersistence = () =>
   requestJson<MlPersistenceResponse>('/ml/persistence');
 export const getActiveMlJob = () =>

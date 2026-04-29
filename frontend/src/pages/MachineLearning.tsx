@@ -12,6 +12,8 @@ import {
   backfillSp500Stocks,
   getCryptoUniverse,
   getFeatureParity,
+  getMlJob,
+  getMlJobs,
   getMlModelImportances,
   getMlModels,
   getMlPredictionShap,
@@ -25,6 +27,7 @@ import {
   type CryptoUniverseResponse,
   type FeatureParityResponse,
   type GainersResponse,
+  type MlJob,
   type MlModelImportancesResponse,
   type MlModelRecord,
   type ModelFold,
@@ -121,6 +124,7 @@ type Fold = {
   best?: boolean;
   eligibilityStatus: string;
   eligibilityReason: string;
+  testEndRaw: string;
 };
 
 type ModelCardData = {
@@ -136,6 +140,18 @@ type ModelCardData = {
   testN: number | null;
   foldLabel: string;
   artifact: string;
+};
+
+type ProductionPolicy = {
+  selector: string | null;
+  regime: string | null;
+  maxFoldAgeDays: number | null;
+  minTestEnd: string | null;
+  minValidationSharpe: number | null;
+  minValidationAccuracy: number | null;
+  minBaselineMargin: number | null;
+  minTestSamples: number | null;
+  regimeReasons: string[];
 };
 
 const BADGE_TONES: Record<
@@ -1044,20 +1060,30 @@ function isModelFold(value: unknown): value is ModelFold {
   );
 }
 
+function getResultFolds(job: MlJob | null): ModelFold[] {
+  const rawFolds = job?.result?.folds;
+  if (!Array.isArray(rawFolds)) {
+    return [];
+  }
+  return rawFolds.filter(isModelFold);
+}
+
 function getNoModelSelectedFolds(
   persistence: MlPersistenceResponse | null,
+  latestCryptoTrainingJob: MlJob | null,
 ): ModelFold[] {
+  const latestJobFolds = getResultFolds(latestCryptoTrainingJob);
+  if (latestJobFolds.length > 0) {
+    return latestJobFolds;
+  }
+
   const job = persistence?.jobs.find((item) => {
     const result = item.result;
     return (
       item.asset_class === "crypto" && result?.outcome === "no_model_selected"
     );
   });
-  const rawFolds = job?.result?.folds;
-  if (!Array.isArray(rawFolds)) {
-    return [];
-  }
-  return rawFolds.filter(isModelFold);
+  return getResultFolds(job ?? null);
 }
 
 
@@ -1126,6 +1152,113 @@ function formatFoldSharpe(value: number | null | undefined): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
+function readStringField(
+  source: Record<string, unknown> | null | undefined,
+  field: string,
+): string | null {
+  const value = source?.[field];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readNumberField(
+  source: Record<string, unknown> | null | undefined,
+  field: string,
+): number | null {
+  const value = source?.[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readStringArrayField(
+  source: Record<string, unknown> | null | undefined,
+  field: string,
+): string[] {
+  const value = source?.[field];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function parseProductionPolicy(
+  source: Record<string, unknown> | null | undefined,
+): ProductionPolicy | null {
+  if (!source) {
+    return null;
+  }
+
+  return {
+    selector: readStringField(source, "selector"),
+    regime: readStringField(source, "regime"),
+    maxFoldAgeDays: readNumberField(source, "max_fold_age_days"),
+    minTestEnd: readStringField(source, "min_test_end"),
+    minValidationSharpe: readNumberField(source, "min_validation_sharpe"),
+    minValidationAccuracy: readNumberField(source, "min_validation_accuracy"),
+    minBaselineMargin: readNumberField(source, "min_baseline_margin"),
+    minTestSamples: readNumberField(source, "min_test_samples"),
+    regimeReasons: readStringArrayField(source, "regime_reasons"),
+  };
+}
+
+function getJobSelectionPolicy(job: MlJob | null): ProductionPolicy | null {
+  const rawPolicy = job?.result?.selection_policy;
+  if (!rawPolicy || typeof rawPolicy !== "object" || Array.isArray(rawPolicy)) {
+    return null;
+  }
+  return parseProductionPolicy(rawPolicy as Record<string, unknown>);
+}
+
+function getModelSelectionPolicy(model: MlModelRecord | null): ProductionPolicy | null {
+  return parseProductionPolicy(model?.selection_policy);
+}
+
+function formatPolicyDate(value: string | null): string {
+  if (!value) {
+    return "—";
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
+}
+
+function formatPolicyPercent(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatPolicyNumber(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "—";
+  }
+  return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2);
+}
+
+function isFoldInsideProductionWindow(
+  fold: Fold,
+  minTestEnd: string | null | undefined,
+): boolean {
+  if (!minTestEnd) {
+    return true;
+  }
+  const foldTime = Date.parse(fold.testEndRaw);
+  const minTime = Date.parse(minTestEnd);
+  if (!Number.isFinite(foldTime) || !Number.isFinite(minTime)) {
+    return true;
+  }
+  return foldTime >= minTime;
+}
+
+function sortFoldsNewestFirst(folds: Fold[]): Fold[] {
+  return [...folds].sort((a, b) => {
+    const left = Date.parse(a.testEndRaw);
+    const right = Date.parse(b.testEndRaw);
+    if (Number.isFinite(left) && Number.isFinite(right) && left !== right) {
+      return right - left;
+    }
+    return b.foldIndex - a.foldIndex;
+  });
+}
+
 function toDiagnosticImportances(fold: ModelFold): MlModelImportancesResponse {
   const entries = Object.entries(fold.feature_importances ?? {});
   const importances = entries
@@ -1159,6 +1292,7 @@ function toFoldRow(fold: ModelFold, activeFold: number | null): Fold {
         ? "active"
         : "research_only"),
     eligibilityReason: fold.eligibility_reason ?? "not_evaluated",
+    testEndRaw: fold.test_end,
   };
 }
 
@@ -1184,8 +1318,43 @@ function CalibrationDiagnostics({
   fold: ModelFold | null;
 }): React.ReactElement | null {
   const report: CalibrationReportView | undefined = fold?.calibration_report;
-  if (!report) {
+  if (!fold) {
     return null;
+  }
+  if (!report) {
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: "10px 12px",
+          background: S.bg2,
+          border: `0.5px solid ${S.amber2}`,
+          borderRadius: S.rMd,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 11, color: S.text2, fontWeight: 700 }}>
+              Probability calibration · unavailable
+            </div>
+            <div style={{ marginTop: 3, fontSize: 10, color: S.text3 }}>
+              This selected fold was created before calibration diagnostics were
+              written to the training payload. Rerun crypto training to populate
+              bucket win rates, false-positive rate, and the 0.40–0.60 dead zone.
+            </div>
+          </div>
+          <Badge v="amber">Needs retrain</Badge>
+        </div>
+      </div>
+    );
   }
 
   const usable = report.usable_for_live_gate;
@@ -1303,6 +1472,151 @@ function CalibrationDiagnostics({
         ))}
       </div>
     </div>
+  );
+}
+
+function ProductionRequirementsCard({
+  policy,
+  selectedFold,
+  visibleFoldCount,
+  hiddenFoldCount,
+  showAll,
+  onToggleShowAll,
+}: {
+  policy: ProductionPolicy | null;
+  selectedFold: ModelFold | null;
+  visibleFoldCount: number;
+  hiddenFoldCount: number;
+  showAll: boolean;
+  onToggleShowAll: () => void;
+}): React.ReactElement {
+  const latestReason =
+    selectedFold?.eligibility_reason?.replaceAll("_", " ") ??
+    "No diagnostic fold selected";
+  const reasons = policy?.regimeReasons ?? [];
+
+  return (
+    <Card>
+      <CardHeader title="Production model requirements">
+        <Badge v={policy ? "blue" : "muted"}>
+          {policy?.regime ? `${policy.regime} regime` : "policy pending"}
+        </Badge>
+      </CardHeader>
+      <div
+        style={{
+          padding: "12px 16px 14px",
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.55 }}>
+          Confidence threshold controls prediction gating after a model exists.
+          Production selection also requires recency, positive Sharpe, baseline
+          margin, enough samples, and usable calibration.
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {[
+            ["Minimum test end", formatPolicyDate(policy?.minTestEnd ?? null)],
+            [
+              "Minimum Sharpe",
+              `>${formatPolicyNumber(policy?.minValidationSharpe ?? null)}`,
+            ],
+            [
+              "Minimum accuracy",
+              formatPolicyPercent(policy?.minValidationAccuracy ?? null),
+            ],
+            [
+              "Beat baseline by",
+              formatPolicyPercent(policy?.minBaselineMargin ?? null),
+            ],
+            [
+              "Minimum test rows",
+              formatPolicyNumber(policy?.minTestSamples ?? null),
+            ],
+            [
+              "Max fold age",
+              `${formatPolicyNumber(policy?.maxFoldAgeDays ?? null)} days`,
+            ],
+            ["Visible folds", visibleFoldCount.toLocaleString()],
+            ["Hidden older folds", hiddenFoldCount.toLocaleString()],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              style={{
+                padding: "8px 9px",
+                border: `0.5px solid ${S.border}`,
+                borderRadius: S.rSm,
+                background: S.bg2,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 8,
+                  color: S.text3,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {label}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 12, color: S.text }}>
+                {value}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 10, color: S.text3, lineHeight: 1.55 }}>
+            <span style={{ color: S.text2 }}>Selected fold rejection:</span>{" "}
+            {latestReason}
+            {reasons.length > 0 ? (
+              <span style={{ display: "block", marginTop: 3 }}>
+                Regime reason:{" "}
+                {reasons.map((item) => item.replaceAll("_", " ")).join(", ")}
+              </span>
+            ) : null}
+          </div>
+          {hiddenFoldCount > 0 ? (
+            <button
+              type="button"
+              onClick={onToggleShowAll}
+              style={{
+                background: showAll ? S.bg3 : ACTION_TONES.blue.bg,
+                border: `0.5px solid ${
+                  showAll ? S.border2 : ACTION_TONES.blue.border
+                }`,
+                color: showAll ? S.text2 : ACTION_TONES.blue.color,
+                borderRadius: S.rSm,
+                cursor: "pointer",
+                fontFamily: S.mono,
+                fontSize: 9,
+                letterSpacing: "0.08em",
+                padding: "6px 10px",
+                textTransform: "uppercase",
+              }}
+            >
+              {showAll
+                ? "Hide older folds"
+                : `Show ${hiddenFoldCount.toLocaleString()} older folds`}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -1476,6 +1790,8 @@ const MachineLearning: React.FC = () => {
   const [modelsResponse, setModelsResponse] = useState<MlModelsResponse | null>(
     null,
   );
+  const [latestCryptoTrainingJob, setLatestCryptoTrainingJob] =
+    useState<MlJob | null>(null);
   const [featureParity, setFeatureParity] =
     useState<FeatureParityResponse | null>(null);
   const [selectedImportanceAsset, setSelectedImportanceAsset] =
@@ -1513,6 +1829,7 @@ const MachineLearning: React.FC = () => {
   const [isTrainingStock, setIsTrainingStock] = useState(false);
   const [isRunningPredictions, setIsRunningPredictions] = useState(false);
   const [stockDriftDismissed, setStockDriftDismissed] = useState(false);
+  const [showAllCryptoFolds, setShowAllCryptoFolds] = useState(false);
 
   const loadPageData = useCallback(async () => {
     const [
@@ -1522,6 +1839,7 @@ const MachineLearning: React.FC = () => {
       stockUniverseResult,
       gainersResult,
       modelsResult,
+      jobsResult,
       parityResult,
       predictionsResult,
     ] = await Promise.allSettled([
@@ -1531,6 +1849,7 @@ const MachineLearning: React.FC = () => {
       getStockUniverse(),
       getTopGainers(100),
       getMlModels(),
+      getMlJobs(),
       getFeatureParity(),
       getMlPredictions(50),
     ]);
@@ -1553,6 +1872,29 @@ const MachineLearning: React.FC = () => {
     if (modelsResult.status === "fulfilled") {
       setModelsResponse(modelsResult.value);
     }
+    if (jobsResult.status === "fulfilled") {
+      const jobs = Array.isArray(jobsResult.value)
+        ? jobsResult.value
+        : jobsResult.value.jobs;
+      const latestCryptoJob =
+        [...jobs]
+          .filter((job) => job.asset_class === "crypto")
+          .sort((a, b) => {
+            const left = Date.parse(b.finished_at ?? b.started_at ?? "");
+            const right = Date.parse(a.finished_at ?? a.started_at ?? "");
+            return left - right;
+          })[0] ?? null;
+
+      if (latestCryptoJob) {
+        try {
+          setLatestCryptoTrainingJob(await getMlJob(latestCryptoJob.job_id));
+        } catch {
+          setLatestCryptoTrainingJob(null);
+        }
+      } else {
+        setLatestCryptoTrainingJob(null);
+      }
+    }
     if (parityResult.status === "fulfilled") {
       setFeatureParity(parityResult.value);
     }
@@ -1571,6 +1913,7 @@ const MachineLearning: React.FC = () => {
       stockUniverseResult,
       gainersResult,
       modelsResult,
+      jobsResult,
       parityResult,
       predictionsResult,
     ]
@@ -1686,12 +2029,22 @@ const MachineLearning: React.FC = () => {
     [modelsResponse],
   );
   const noModelSelectedFolds = useMemo(() => {
-    const registryFolds = getRegistryRejectedFolds(modelsResponse);
-    if (registryFolds.length > 0) {
-      return registryFolds;
+    const latestFailedTrainingFolds = getNoModelSelectedFolds(
+      persistence,
+      latestCryptoTrainingJob,
+    );
+    if (latestFailedTrainingFolds.length > 0) {
+      return latestFailedTrainingFolds;
     }
-    return getNoModelSelectedFolds(persistence);
-  }, [modelsResponse, persistence]);
+
+    return getRegistryRejectedFolds(modelsResponse);
+  }, [latestCryptoTrainingJob, modelsResponse, persistence]);
+  const productionPolicy = useMemo(() => {
+    return (
+      getJobSelectionPolicy(latestCryptoTrainingJob) ??
+      getModelSelectionPolicy(activeCryptoModel)
+    );
+  }, [activeCryptoModel, latestCryptoTrainingJob]);
   const cryptoPredictionFreshness =
     predictionsResponse?.freshness_by_asset.crypto ?? null;
   const stockPredictionFreshness =
@@ -1741,6 +2094,10 @@ const MachineLearning: React.FC = () => {
     selectedDiagnosticFoldIndex,
     selectedImportanceAsset,
   ]);
+
+  useEffect(() => {
+    setShowAllCryptoFolds(false);
+  }, [latestCryptoTrainingJob?.job_id, productionPolicy?.minTestEnd]);
 
   useEffect(() => {
     let alive = true;
@@ -2016,12 +2373,30 @@ const MachineLearning: React.FC = () => {
 
   const liveCryptoFolds = useMemo(() => {
     if (activeCryptoModel && activeCryptoModel.folds.length > 0) {
-      return activeCryptoModel.folds.map((fold) =>
-        toFoldRow(fold, activeCryptoModel.best_fold),
+      return sortFoldsNewestFirst(
+        activeCryptoModel.folds.map((fold) =>
+          toFoldRow(fold, activeCryptoModel.best_fold),
+        ),
       );
     }
-    return noModelSelectedFolds.map((fold) => toFoldRow(fold, null));
+    return sortFoldsNewestFirst(
+      noModelSelectedFolds.map((fold) => toFoldRow(fold, null)),
+    );
   }, [activeCryptoModel, noModelSelectedFolds]);
+
+  const recentCryptoFolds = useMemo(() => {
+    return liveCryptoFolds.filter((fold) =>
+      isFoldInsideProductionWindow(fold, productionPolicy?.minTestEnd),
+    );
+  }, [liveCryptoFolds, productionPolicy?.minTestEnd]);
+
+  const visibleCryptoFolds = showAllCryptoFolds
+    ? liveCryptoFolds
+    : recentCryptoFolds;
+  const hiddenCryptoFoldCount = Math.max(
+    liveCryptoFolds.length - visibleCryptoFolds.length,
+    0,
+  );
 
   const hasCryptoFoldDiagnostics = liveCryptoFolds.length > 0;
 
@@ -2662,6 +3037,15 @@ const MachineLearning: React.FC = () => {
         <div style={{ flex: 1, height: "0.5px", background: S.border2 }} />
       </div>
 
+      <ProductionRequirementsCard
+        policy={productionPolicy}
+        selectedFold={diagnosticImportanceFold}
+        visibleFoldCount={visibleCryptoFolds.length}
+        hiddenFoldCount={hiddenCryptoFoldCount}
+        showAll={showAllCryptoFolds}
+        onToggleShowAll={() => setShowAllCryptoFolds((current) => !current)}
+      />
+
       <Card>
         <CardHeader
           title={
@@ -2725,10 +3109,11 @@ const MachineLearning: React.FC = () => {
                   }}
                 >
                   No production model is active because the latest crypto
-                  training run failed guardrails. These folds are shown for
-                  diagnostics only. Global feature importance is available when
-                  the rejected fold returned training weights; live inference
-                  and local prediction SHAP stay disabled.
+                  training run failed guardrails. Recent diagnostic folds are
+                  shown first from the production recency window; older folds are
+                  hidden unless you expand them. Global feature importance is
+                  available when the rejected fold returned training weights;
+                  live inference and local prediction SHAP stay disabled.
                 </div>
               ) : null}
               <div
@@ -2761,8 +3146,8 @@ const MachineLearning: React.FC = () => {
                 ))}
               </div>
               <div style={{ marginTop: 6 }}>
-                {liveCryptoFolds.length > 0 ? (
-                  liveCryptoFolds.map((fold) => (
+                {visibleCryptoFolds.length > 0 ? (
+                  visibleCryptoFolds.map((fold) => (
                     <FoldRow
                       key={fold.label}
                       fold={fold}
