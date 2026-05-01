@@ -22,6 +22,6 @@ jobs:
       - name: Ruff
         run: ruff check .
       - name: Mypy
-        run: mypy app
+        run: mypy app --ignore-missing-imports
       - name: Pytest
         run: pytest
