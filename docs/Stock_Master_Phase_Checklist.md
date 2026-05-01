@@ -1,42 +1,122 @@
-Below is the **Stock Master Phase Checklist** ordered by dependency. This should become its own planning doc later, likely:
+# Stock Master Phase Checklist
+
+This document is the authoritative roadmap for adding stocks to AI-Quant. It is ordered by dependency and must remain append-only with checkmarks unless Christian explicitly approves a structural change.
+
+Stocks and crypto must stay separated. Stocks are event-driven, screened-universe, multi-strategy, and support long plus conditional short logic. Crypto remains fixed-universe, spot-only, long-only, and macro-sentiment driven.
+
+---
+
+# Checklist Integrity Rules
+
+GPT **IS allowed** to:
+
+* Mark items as `[x]` when completed
+* Add sub-bullets inside a slice for clarity
+* Add implementation notes under a slice
+
+GPT **IS NOT allowed** to:
+
+* Delete any existing phases
+* Delete any existing slices
+* Rename phases without explicit instruction
+* Collapse multiple phases into one
+* Skip phases out of order
+* Modify previous completed phase definitions retroactively
+
+If something changes later:
+
+* Add a note under the phase
+* Do not rewrite history
+
+This checklist is append-only with checkmarks.
+
+---
+
+# Phase Ordering
 
 ```text
-docs/Stock_Master_Phase_Checklist.md
+S1 Guardrails
+→ S2 Schema
+→ S3 Providers
+→ S4 Universe
+→ S5 Candles
+→ S6 News
+→ S7 Congress
+→ S8 Insiders
+→ S9 Strategy Engine
+→ S10 Watchlist
+→ S11 ML Inputs
+→ S12 ML Training
+→ S13 Prediction Persistence
+→ S14 Final Decision Engine
+→ S15 Paper Ledger
+→ S16 Risk
+→ S17 Runtime
+→ S18 Frontend
+→ S19 Backtesting
+→ S20 Live Execution
 ```
 
-# Stock Master Phase Checklist
+---
 
 ## Phase S1 — Stock Scope & Guardrails
 
-## Goal
+### Goal
 
-Define what stocks are allowed to do before building workers or ML.
+Define stock behavior, constraints, and separation from crypto before building schema, workers, UI, ML, runtime logic, or execution logic.
 
 ### Rules
 
-* [ ] Stocks are separate from crypto logic
-* [ ] Crypto remains spot-only / long-only
-* [ ] Stock shorts allowed only when stock cash > $2,500
-* [ ] Stocks use their own strategy weights
-* [ ] Stocks use their own watchlist and runtime lane
-* [ ] Stocks use Eastern Time market sessions
-* [ ] Stock positions get frozen `max_hold_hours` at entry
-* [ ] Congress and insider signals are context/confidence inputs, not direct trade triggers
+* [x] Stocks are a separate asset lane from crypto
+* [x] Crypto remains spot-only / long-only with no shorting under any condition
+* [x] Stock shorts allowed only when stock cash > $2,500
+* [x] Stocks use independent strategy weights, not crypto weights
+* [x] Stocks use their own watchlist, not the crypto universe
+* [x] Stocks use their own runtime workers
+* [x] Stocks respect U.S. market hours in Eastern Time
+* [x] Stock positions must have `max_hold_hours` frozen at entry
+* [x] Congress signals are context only, not direct triggers
+* [x] Insider signals are supporting signals, not triggers
+* [x] ML is a confidence modifier, not a trade authority
+* [x] ML cannot extend hold time
+* [x] ML cannot override hard risk rules
+* [x] Each stock trade must map to a specific strategy type
+* [x] Strategy must define entry logic
+* [x] Strategy must define invalidation
+* [x] Strategy must define exit conditions
+* [x] Strategy must define max hold time
+* [x] No global-score-only decision making allowed
 
 ### Must happen before
 
+* Stock schema
 * Stock screening
 * Stock strategies
 * Stock ML
 * Stock paper trading
+* Stock runtime workers
+* Stock frontend pages
+
+### Exit Criteria
+
+* [x] Existing `docs/Stock_Master_Phase_Checklist.md` updated
+* [x] Phase S1 guardrails completed/checked off as appropriate
+* [x] No future slices/phases deleted
+* [x] No backend/frontend code changes made
+
+### Implementation Notes
+
+* Phase S1 is planning-only.
+* Do not touch backend code, frontend code, DB models, migrations, workers, runtime logic, or providers in this phase.
+* Validation still runs backend quality gates to prove the planning-only patch did not introduce code drift.
 
 ---
 
 ## Phase S2 — Stock Schema & Persistence
 
-## Goal
+### Goal
 
-Create the database foundation.
+Create the database foundation for stocks without contaminating crypto schema behavior.
 
 ### Backend
 
@@ -62,9 +142,9 @@ Create the database foundation.
 
 ## Phase S3 — Stock Provider Boundaries
 
-## Goal
+### Goal
 
-Decide which source owns each job.
+Decide which data provider owns each stock job and isolate provider failures.
 
 ### Provider roles
 
@@ -94,7 +174,7 @@ Decide which source owns each job.
 
 ## Phase S4 — Stock Universe & Screening Foundation
 
-## Goal
+### Goal
 
 Build the raw stock pool before deciding what deserves attention.
 
@@ -127,7 +207,7 @@ Build the raw stock pool before deciding what deserves attention.
 
 ## Phase S5 — Stock Candle Workers
 
-## Goal
+### Goal
 
 Fetch stock candles cleanly without polluting crypto candle logic.
 
@@ -158,7 +238,7 @@ Fetch stock candles cleanly without polluting crypto candle logic.
 
 ## Phase S6 — Stock News Pipeline
 
-## Goal
+### Goal
 
 Add company-specific catalyst detection.
 
@@ -195,9 +275,9 @@ Add company-specific catalyst detection.
 
 ## Phase S7 — Congress Filing Pipeline
 
-## Goal
+### Goal
 
-Use congressional filings with filing-lag decay.
+Use congressional filings with filing-lag decay as context, not direct triggers.
 
 ### Backend
 
@@ -229,7 +309,7 @@ Use congressional filings with filing-lag decay.
 
 ## Phase S8 — Insider Buy Pipeline
 
-## Goal
+### Goal
 
 Use SEC Form 4 data for slow accumulation signals.
 
@@ -261,7 +341,7 @@ Use SEC Form 4 data for slow accumulation signals.
 
 ## Phase S9 — Stock Strategy Engine
 
-## Goal
+### Goal
 
 Score each stock by actual strategy fit, not one giant soup score.
 
@@ -275,6 +355,15 @@ Score each stock by actual strategy fit, not one giant soup score.
 * [ ] Insider accumulation long
 * [ ] Congress accumulation long
 * [ ] Mean reversion long
+
+### Required strategy contract
+
+* [ ] Entry logic
+* [ ] Invalidation
+* [ ] Exit conditions
+* [ ] Max hold time
+* [ ] Direction
+* [ ] Risk flags
 
 ### Outputs
 
@@ -296,7 +385,7 @@ Score each stock by actual strategy fit, not one giant soup score.
 
 ## Phase S10 — Stock Watchlist Promotion
 
-## Goal
+### Goal
 
 Turn screened candidates into active monitored symbols.
 
@@ -329,7 +418,7 @@ Turn screened candidates into active monitored symbols.
 
 ## Phase S11 — Stock ML Training Inputs
 
-## Goal
+### Goal
 
 Build stock-specific ML features.
 
@@ -359,7 +448,7 @@ Build stock-specific ML features.
 
 ## Phase S12 — Stock ML Labels & Training
 
-## Goal
+### Goal
 
 Train stock models on trade-like outcomes.
 
@@ -396,7 +485,7 @@ Train stock models on trade-like outcomes.
 
 ## Phase S13 — Stock Prediction Persistence
 
-## Goal
+### Goal
 
 Persist stock predictions so UI loads fast.
 
@@ -420,7 +509,7 @@ Persist stock predictions so UI loads fast.
 
 ## Phase S14 — Stock Final Decision Engine
 
-## Goal
+### Goal
 
 Convert strategy + ML + risk into final actions.
 
@@ -441,6 +530,7 @@ Convert strategy + ML + risk into final actions.
 * [ ] Earnings danger window can block trades
 * [ ] ML confidence can reduce/block, not force a trade
 * [ ] Congress/insider can support, not command
+* [ ] No global-score-only decisions
 
 ### Must happen before
 
@@ -451,7 +541,7 @@ Convert strategy + ML + risk into final actions.
 
 ## Phase S15 — Stock Paper Ledger Durability
 
-## Goal
+### Goal
 
 Make stock paper trading survive restart.
 
@@ -478,7 +568,7 @@ Make stock paper trading survive restart.
 
 ## Phase S16 — Stock Risk Management
 
-## Goal
+### Goal
 
 Prevent the bot from turning into a confetti cannon.
 
@@ -505,7 +595,7 @@ Prevent the bot from turning into a confetti cannon.
 
 ## Phase S17 — Stock Runtime Workers
 
-## Goal
+### Goal
 
 Run stock decisions safely during market hours.
 
@@ -530,7 +620,7 @@ Run stock decisions safely during market hours.
 
 ## Phase S18 — Stock Frontend Pages
 
-## Goal
+### Goal
 
 Make stock behavior visible without cluttering crypto pages.
 
@@ -565,7 +655,7 @@ Make stock behavior visible without cluttering crypto pages.
 
 ## Phase S19 — Backtesting & Forward Testing
 
-## Goal
+### Goal
 
 Prove stock strategies before trusting them.
 
@@ -588,7 +678,7 @@ Prove stock strategies before trusting them.
 
 ## Phase S20 — Tradier Live Execution
 
-## Goal
+### Goal
 
 Only after paper trading proves stable.
 
@@ -608,32 +698,3 @@ Only after paper trading proves stable.
 ### Must happen before
 
 * Any live stock automation
-
----
-
-# Dependency Chain
-
-```text
-S1 Guardrails
-→ S2 Schema
-→ S3 Providers
-→ S4 Universe
-→ S5 Candles
-→ S6 News
-→ S7 Congress
-→ S8 Insiders
-→ S9 Strategy Engine
-→ S10 Watchlist
-→ S11 ML Inputs
-→ S12 ML Training
-→ S13 Prediction Persistence
-→ S14 Final Decision Engine
-→ S15 Paper Ledger
-→ S16 Risk
-→ S17 Runtime
-→ S18 Frontend
-→ S19 Backtesting
-→ S20 Live Execution
-```
-
-
