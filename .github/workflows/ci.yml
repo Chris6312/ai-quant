@@ -21,7 +21,7 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Ruff
         run: ruff check .
-            - name: Mypy
+      - name: Mypy
         run: python -m mypy app --install-types --non-interactive --disable-error-code=untyped-decorator --disable-error-code=unused-ignore
       - name: Pytest
         run: pytest
