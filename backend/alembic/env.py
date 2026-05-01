@@ -14,8 +14,8 @@ from app.config.settings import get_settings
 from app.db.base import Base
 from app.db.models import (  # noqa: F401
     CandleRow,
-    CryptoDailySentimentRow,
     CongressTradeRow,
+    CryptoDailySentimentRow,
     InsiderTradeRow,
     PositionRow,
     PredictionRow,
