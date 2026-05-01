@@ -23,6 +23,7 @@ from app.config.settings import get_settings
 from app.db.models import CandleRow
 from app.db.session import build_engine, build_session_factory
 from app.repositories.candles import CandleRepository
+from app.runtime_events import record_runtime_task_event
 from app.tasks.worker import celery_app
 
 CRYPTO_ML_TIMEFRAMES: tuple[str, ...] = (ALPACA_DEFAULT_TIMEFRAME,)
@@ -52,12 +53,35 @@ def ml_daily_sync_task(
 
     requested_symbols = symbols or list_crypto_watchlist_symbols()
     requested_timeframes = list(CRYPTO_ML_TIMEFRAMES)
-    row_count = asyncio.run(
-        _run_ml_sync(
-            symbols=requested_symbols,
-            timeframes=requested_timeframes,
-            lookback_days=lookback_days,
+    record_runtime_task_event(
+        worker_id="ml:crypto:1D",
+        status="starting",
+        detail="ML daily candle sync started",
+    )
+    try:
+        row_count = asyncio.run(
+            _run_ml_sync(
+                symbols=requested_symbols,
+                timeframes=requested_timeframes,
+                lookback_days=lookback_days,
+            )
         )
+    except Exception as exc:
+        record_runtime_task_event(
+            worker_id="ml:crypto:1D",
+            status="error",
+            detail=f"ML daily candle sync failed: {type(exc).__name__}: {exc}",
+        )
+        raise
+
+    finished_at = datetime.now(tz=UTC).isoformat()
+    record_runtime_task_event(
+        worker_id="ml:crypto:1D",
+        status="running",
+        detail=(
+            "ML daily candle sync succeeded: "
+            f"{row_count} rows, {len(requested_symbols)} symbols"
+        ),
     )
     return {
         "status": "ok",
@@ -69,7 +93,7 @@ def ml_daily_sync_task(
         "symbols": requested_symbols,
         "timeframes": requested_timeframes,
         "rows": row_count,
-        "finished_at": datetime.now(tz=UTC).isoformat(),
+        "finished_at": finished_at,
     }
 
 

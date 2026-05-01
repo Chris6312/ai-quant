@@ -20,6 +20,7 @@ from app.ml.freshness import (
     ml_candle_date,
 )
 from app.repositories.watchlist import WatchlistRepository
+from app.runtime_events import RuntimeTaskEvent, list_runtime_task_events
 from app.services.crypto_runtime_targets import list_crypto_runtime_targets
 from app.workers.worker_health_service import WorkerHealthService
 from app.workers.worker_runtime_state import (
@@ -63,7 +64,7 @@ async def get_runtime_workers(
     """Return the current managed worker health snapshot plus watchlist coverage."""
 
     service = _get_worker_health_service(request)
-    snapshot = service.snapshot(event_limit=event_limit)
+    snapshot = service.snapshot(event_limit=max(event_limit, 100))
     supervisor = _get_worker_supervisor(request).snapshot()
     ml_freshness = await _serialize_ml_freshness(session)
     workers = [_serialize_worker(worker) for worker in snapshot.workers]
@@ -90,7 +91,11 @@ async def get_runtime_workers(
         "workers": workers,
         "ml_workers": _serialize_ml_workers(snapshot.workers, ml_freshness),
         "watchlist_targets": targets,
-        "recent_events": [_serialize_event(event) for event in snapshot.recent_events],
+        "recent_events": _serialize_recent_events(
+            worker_events=snapshot.recent_events,
+            task_events=list_runtime_task_events(limit=100),
+            event_limit=event_limit,
+        ),
         "supervisor": {
             "name": supervisor.name,
             "interval_seconds": supervisor.interval_seconds,
@@ -104,6 +109,25 @@ async def get_runtime_workers(
             "last_result": _serialize_sync_result(supervisor.last_result),
         },
     }
+
+
+def _serialize_recent_events(
+    *,
+    worker_events: list[WorkerLifecycleEvent],
+    task_events: list[RuntimeTaskEvent],
+    event_limit: int,
+) -> list[dict[str, Any]]:
+    """Merge in-process worker events with shared Celery task events."""
+
+    if event_limit <= 0:
+        return []
+
+    events: list[WorkerLifecycleEvent | RuntimeTaskEvent] = [
+        *worker_events,
+        *task_events,
+    ]
+    events.sort(key=lambda event: event.recorded_at)
+    return [_serialize_event(event) for event in events[-event_limit:]]
 
 def _serialize_crypto_scope(workers: list[WorkerSnapshot]) -> dict[str, Any]:
     """Return the current crypto universe, watchlist, and active runtime scope."""
@@ -257,12 +281,15 @@ def _serialize_worker(worker: WorkerSnapshot) -> dict[str, Any]:
     }
 
 
-def _serialize_event(event: WorkerLifecycleEvent) -> dict[str, Any]:
+def _serialize_event(
+    event: WorkerLifecycleEvent | RuntimeTaskEvent,
+) -> dict[str, Any]:
     """Convert a lifecycle event to an API payload."""
 
+    status = event.status.value if isinstance(event.status, WorkerStatus) else event.status
     return {
         "worker_id": event.worker_id,
-        "status": event.status.value,
+        "status": status,
         "recorded_at": event.recorded_at.isoformat(),
         "detail": event.detail,
     }

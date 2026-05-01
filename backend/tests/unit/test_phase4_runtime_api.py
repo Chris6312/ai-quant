@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 
 from app.api.dependencies import get_session
 from app.api.routers.runtime import _classify_ml_freshness
@@ -236,3 +238,38 @@ def _build_runtime_app() -> FastAPI:
     )
     app.include_router(runtime_router)
     return app
+
+
+def test_runtime_workers_endpoint_includes_shared_ml_task_events(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Runtime events should include Celery ML task events from the shared log."""
+
+    import app.runtime_events as runtime_events
+
+    runtime_dir = tmp_path / ".runtime"
+    monkeypatch.setattr(runtime_events, "_RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(
+        runtime_events,
+        "_RUNTIME_EVENT_PATH",
+        runtime_dir / "runtime_task_events.json",
+    )
+    runtime_events.record_runtime_task_event(
+        worker_id="ml:crypto:predictions",
+        status="running",
+        detail="ML prediction snapshot succeeded: 15 predictions, 15 persisted",
+    )
+
+    app = _build_runtime_app()
+    app.dependency_overrides[get_session] = _override_session
+    with TestClient(app) as client:
+        response = client.get("/runtime/workers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recent_events"][-1]["worker_id"] == "ml:crypto:predictions"
+    assert payload["recent_events"][-1]["status"] == "running"
+    assert payload["recent_events"][-1]["detail"] == (
+        "ML prediction snapshot succeeded: 15 predictions, 15 persisted"
+    )

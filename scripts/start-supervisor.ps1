@@ -159,14 +159,54 @@ if (-not $SkipFrontendInstall) {
     }
 }
 
-$CeleryCommand = @"
+$CeleryDefaultCommand = @"
 Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath '$BackendRoot'
 `$env:PYTHONPATH = '$BackendRoot'
-Write-Host 'Starting Celery worker...' -ForegroundColor Cyan
-& '$BackendVenvPython' -m celery -A app.tasks.worker worker --loglevel=INFO --pool=solo
+Write-Host 'Starting Celery default worker...' -ForegroundColor Cyan
+& '$BackendVenvPython' -m celery -A app.tasks.worker:celery_app worker -Q default --loglevel=INFO --pool=solo --hostname=default@%h
 exit `$LASTEXITCODE
+"@
+
+$CeleryMlCommand = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$BackendRoot'
+`$env:PYTHONPATH = '$BackendRoot'
+Write-Host 'Starting Celery ML worker...' -ForegroundColor Cyan
+& '$BackendVenvPython' -m celery -A app.tasks.worker:celery_app worker -Q ml --loglevel=INFO --pool=solo --hostname=ml@%h
+exit `$LASTEXITCODE
+"@
+
+$StartupMlSentimentCommand = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$BackendRoot'
+`$env:PYTHONPATH = '$BackendRoot'
+
+Write-Host 'Waiting for Celery workers before startup ML, sentiment, and prediction sync...' -ForegroundColor Cyan
+Start-Sleep -Seconds 15
+
+Write-Host 'Dispatching startup ML daily candle sync...' -ForegroundColor Cyan
+& '$BackendVenvPython' -m celery -A app.tasks.worker:celery_app call tasks.ml_candles.daily_sync --queue ml
+if (`$LASTEXITCODE -ne 0) {
+    throw 'Failed to dispatch startup ML daily candle sync.'
+}
+
+Write-Host 'Dispatching startup crypto news sentiment sync...' -ForegroundColor Cyan
+& '$BackendVenvPython' -m celery -A app.tasks.worker:celery_app call tasks.news_sentiment.daily_crypto_sync --queue ml
+if (`$LASTEXITCODE -ne 0) {
+    throw 'Failed to dispatch startup crypto news sentiment sync.'
+}
+
+Write-Host 'Dispatching startup ML prediction refresh...' -ForegroundColor Cyan
+& '$BackendVenvPython' -m celery -A app.tasks.worker:celery_app call tasks.ml_predictions.run --queue ml
+if (`$LASTEXITCODE -ne 0) {
+    throw 'Failed to dispatch startup ML prediction refresh.'
+}
+
+Write-Host 'Startup ML, sentiment, and prediction sync tasks dispatched.' -ForegroundColor Green
 "@
 
 $BackendCommand = @"
@@ -188,7 +228,9 @@ Write-Host 'Starting Vite frontend...' -ForegroundColor Cyan
 exit `$LASTEXITCODE
 "@
 
-$CeleryEncoded = Get-EncodedPwshCommand -CommandText $CeleryCommand
+$CeleryDefaultEncoded = Get-EncodedPwshCommand -CommandText $CeleryDefaultCommand
+$CeleryMlEncoded = Get-EncodedPwshCommand -CommandText $CeleryMlCommand
+$StartupMlSentimentEncoded = Get-EncodedPwshCommand -CommandText $StartupMlSentimentCommand
 $BackendEncoded = Get-EncodedPwshCommand -CommandText $BackendCommand
 $FrontendEncoded = Get-EncodedPwshCommand -CommandText $FrontendCommand
 
@@ -197,9 +239,19 @@ Write-Step 'Opening tabs in the current Windows Terminal window'
 $wtArgs = @(
     '-w', '0',
     'new-tab',
-    '--title', 'Celery',
+    '--title', 'Celery Default',
     '--startingDirectory', $BackendRoot,
-    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $CeleryEncoded,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $CeleryDefaultEncoded,
+    ';',
+    'new-tab',
+    '--title', 'Celery ML',
+    '--startingDirectory', $BackendRoot,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $CeleryMlEncoded,
+    ';',
+    'new-tab',
+    '--title', 'Startup ML + Sentiment',
+    '--startingDirectory', $BackendRoot,
+    'pwsh.exe', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $StartupMlSentimentEncoded,
     ';',
     'new-tab',
     '--title', 'Backend',
@@ -216,5 +268,7 @@ $wtArgs = @(
 
 Write-Host ''
 Write-Host 'Supervisor started.' -ForegroundColor Green
-Write-Host 'Backend  : http://127.0.0.1:8000' -ForegroundColor White
-Write-Host 'Frontend : http://127.0.0.1:5173' -ForegroundColor White
+Write-Host 'Backend        : http://127.0.0.1:8000' -ForegroundColor White
+Write-Host 'Frontend       : http://127.0.0.1:5173' -ForegroundColor White
+Write-Host 'Celery default : queue default' -ForegroundColor White
+Write-Host 'Celery ML      : queue ml' -ForegroundColor White

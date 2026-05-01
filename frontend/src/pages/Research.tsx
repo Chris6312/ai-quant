@@ -309,9 +309,9 @@ function getPredictionStateLabel(row: MlPredictionRow): string {
     return "High-confidence signal";
   }
   if (row.confidence < row.confidence_threshold) {
-    return "Low confidence — no trade";
+    return "Low confidence — observe";
   }
-  return "Prediction skipped — no trade";
+  return "Prediction skipped — observe";
 }
 
 function getPredictionExplanation(row: MlPredictionRow): string {
@@ -350,7 +350,7 @@ function getSentimentText(row: MlPredictionRow): string {
 }
 
 function getPredictionBadgeLabel(row: MlPredictionRow): string {
-  return row.action === "signal" ? "signal" : "no trade";
+  return row.action === "signal" ? "signal" : "observe";
 }
 
 function getPredictionTimeMs(row: MlPredictionRow): number {
@@ -759,8 +759,8 @@ function getDecisionAction(
   if (row.action === "signal") {
     return row.sentiment_gate?.risk_flag === "aligned" ? "allow" : "watch";
   }
-  if (row.direction === "flat") {
-    return "no_trade";
+  if (row.action === "observe" || row.direction === "flat") {
+    return intradayHasProof(intraday) ? "watch" : "no_trade";
   }
   return "watch";
 }

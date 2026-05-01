@@ -9,9 +9,9 @@ from app.config.constants import (
     APP_NAME,
     CELERY_DEFAULT_QUEUE,
     CELERY_ML_QUEUE,
-    CELERY_RESEARCH_QUEUE,
 )
 from app.config.settings import get_settings
+from app.runtime_events import record_runtime_task_event
 
 try:
     import structlog
@@ -53,7 +53,7 @@ celery_app.conf.update(
         "tasks.ml_candles.*": {"queue": CELERY_ML_QUEUE},
         "tasks.ml_predictions.run": {"queue": CELERY_ML_QUEUE},
         "tasks.retrain_models": {"queue": CELERY_ML_QUEUE},
-        "tasks.news_sentiment.*": {"queue": CELERY_RESEARCH_QUEUE},
+        "tasks.news_sentiment.*": {"queue": CELERY_ML_QUEUE},
     },
     timezone="America/New_York",
     beat_schedule={
@@ -106,10 +106,36 @@ def run_ml_predictions_task(
 
     from app.api.routers.ml import generate_prediction_snapshot
 
-    result = asyncio.run(
-        generate_prediction_snapshot(
-            asset_class=asset_class,
-            limit=limit,
-        )
+    asset_label = asset_class or "both"
+    record_runtime_task_event(
+        worker_id="ml:crypto:predictions",
+        status="starting",
+        detail=f"ML prediction snapshot started for {asset_label}",
     )
-    return dict(result)
+    try:
+        result = asyncio.run(
+            generate_prediction_snapshot(
+                asset_class=asset_class,
+                limit=limit,
+            )
+        )
+    except Exception as exc:
+        record_runtime_task_event(
+            worker_id="ml:crypto:predictions",
+            status="error",
+            detail=f"ML prediction snapshot failed: {type(exc).__name__}: {exc}",
+        )
+        raise
+
+    payload = dict(result)
+    count = payload.get("count")
+    persisted_count = payload.get("persisted_count")
+    record_runtime_task_event(
+        worker_id="ml:crypto:predictions",
+        status="running",
+        detail=(
+            "ML prediction snapshot succeeded: "
+            f"{count} predictions, {persisted_count} persisted"
+        ),
+    )
+    return payload

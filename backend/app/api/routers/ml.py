@@ -30,11 +30,11 @@ from app.exceptions import ResearchParseError
 from app.ml import job_store, model_registry
 from app.ml.crypto_csv_ingestion import CryptoCsvTrainingIngestor
 from app.ml.features import (
-    ALL_FEATURES,
     FeatureEngineer,
     FeatureVector,
     ResearchInputs,
     build_feature_contract_summary,
+    feature_names_for_asset_class,
     validate_feature_vector,
 )
 from app.ml.freshness import MlFreshnessResult, evaluate_crypto_ml_freshness
@@ -1525,6 +1525,10 @@ async def _read_persisted_prediction_snapshot(
             session,
             [row.id for row in prediction_rows],
         )
+        freshness_by_asset = await _read_ml_candle_freshness_by_asset(
+            session,
+            assets,
+        )
 
     api_rows = [
         _prediction_api_row_from_db(
@@ -1533,12 +1537,8 @@ async def _read_persisted_prediction_snapshot(
         )
         for row in prediction_rows
     ]
-    freshness_by_asset: dict[str, object] = {}
     for asset in assets:
-        asset_rows = [row for row in api_rows if row["asset_class"] == asset]
-        freshness_by_asset[asset] = _prediction_freshness(asset, asset_rows)
-        if not asset_rows:
-            freshness_by_asset[asset] = _prediction_empty_freshness()
+        freshness_by_asset.setdefault(asset, _prediction_empty_freshness())
 
     payload: Mapping[str, object] = {
         "predictions": api_rows,
@@ -1557,6 +1557,33 @@ async def _read_persisted_prediction_snapshot(
     }
     return _set_cached_response(cache_key, payload)
 
+
+
+async def _read_ml_candle_freshness_by_asset(
+    session: AsyncSession,
+    assets: Sequence[str],
+) -> dict[str, object]:
+    """Read freshness from the ML candle lane, not stale prediction rows."""
+
+    if not assets:
+        return {}
+
+    statement = (
+        select(
+            CandleRow.asset_class,
+            func.max(CandleRow.time).label("latest_candle_time"),
+        )
+        .where(CandleRow.asset_class.in_(assets))
+        .where(CandleRow.timeframe == CRYPTO_DAILY_TIMEFRAME)
+        .where(CandleRow.usage == ML_CANDLE_USAGE)
+        .group_by(CandleRow.asset_class)
+    )
+    result = await session.execute(statement)
+    latest_by_asset = {str(asset): latest for asset, latest in result.all()}
+    return {
+        asset: _freshness_from_latest_candle(asset, latest_by_asset.get(asset))
+        for asset in assets
+    }
 
 
 def _active_model_summary(asset_class: str) -> dict[str, object]:
@@ -2112,7 +2139,11 @@ async def _build_asset_predictions(
                     sentiment_gate,
                     model_confidence=prediction.confidence,
                 ),
-                "feature_values": {name: float(features[name]) for name in ALL_FEATURES},
+                "feature_values": {
+                    name: float(features[name])
+                    for name in feature_names_for_asset_class(asset_class)
+                    if name in features
+                },
                 "shap_values": shap_values,
             }
         )

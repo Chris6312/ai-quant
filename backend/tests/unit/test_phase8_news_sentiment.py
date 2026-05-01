@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 from pytest import MonkeyPatch
 
-from app.config.constants import CELERY_RESEARCH_QUEUE
+from app.config.constants import CELERY_ML_QUEUE
 from app.db.models import CryptoDailySentimentRow
 from app.research.crypto_sentiment import CryptoArticleSentiment
 from app.research.rss_client import RssArticle
@@ -117,12 +117,12 @@ def test_news_sentiment_payload_targets_research_task() -> None:
     }
 
 
-def test_news_sentiment_task_uses_research_queue() -> None:
-    """News sentiment work should not share the ML candle/prediction queue."""
+def test_news_sentiment_task_uses_ml_queue() -> None:
+    """News sentiment should run on the ML queue for startup freshness ordering."""
 
     routes = celery_app.conf.task_routes
 
-    assert routes["tasks.news_sentiment.*"] == {"queue": CELERY_RESEARCH_QUEUE}
+    assert routes["tasks.news_sentiment.*"] == {"queue": CELERY_ML_QUEUE}
 
 
 def test_news_sentiment_task_persists_daily_sentiment(monkeypatch: MonkeyPatch) -> None:

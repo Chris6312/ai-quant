@@ -357,6 +357,19 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
   );
 }
 
+function formatEventWorker(event: RuntimeWorkerEvent): string {
+  switch (event.worker_id) {
+    case 'ml:crypto:1D':
+      return 'ML Daily Fill';
+    case 'ml:crypto:sentiment':
+      return 'Crypto Sentiment';
+    case 'ml:crypto:predictions':
+      return 'ML Predictions';
+    default:
+      return event.worker_id;
+  }
+}
+
 function RuntimeEventTable({ events }: { events: RuntimeWorkerEvent[] }): React.ReactElement {
   if (events.length === 0) {
     return (
@@ -380,7 +393,18 @@ function RuntimeEventTable({ events }: { events: RuntimeWorkerEvent[] }): React.
         <tbody>
           {events.map((event, index) => (
             <tr key={`${event.worker_id}:${event.recorded_at}:${index}`}>
-              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={event.worker_id}>{event.worker_id}</td>
+              <td
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={event.worker_id}
+              >
+                {formatEventWorker(event)}
+              </td>
               <td>
                 <span style={pillStyle(toneForStatus(event.status))}>{event.status}</span>
               </td>

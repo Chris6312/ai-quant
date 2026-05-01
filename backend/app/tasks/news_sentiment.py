@@ -31,6 +31,7 @@ from app.research.rss_client import (
     prepare_articles_for_scoring,
     summarize_article_matches,
 )
+from app.runtime_events import record_runtime_task_event
 from app.tasks.worker import celery_app
 
 
@@ -65,12 +66,44 @@ def daily_crypto_news_sentiment_task(
 
     requested_symbols = symbols or list_crypto_watchlist_symbols()
     requested_date = sentiment_date or date.today().isoformat()
-    return asyncio.run(
-        persist_daily_crypto_rss_sentiment(
-            symbols=requested_symbols,
-            sentiment_date=requested_date,
-        )
+    record_runtime_task_event(
+        worker_id="ml:crypto:sentiment",
+        status="starting",
+        detail=f"Crypto news sentiment sync started for {requested_date}",
     )
+    try:
+        result = asyncio.run(
+            persist_daily_crypto_rss_sentiment(
+                symbols=requested_symbols,
+                sentiment_date=requested_date,
+            )
+        )
+    except Exception as exc:
+        record_runtime_task_event(
+            worker_id="ml:crypto:sentiment",
+            status="error",
+            detail=f"Crypto news sentiment sync failed: {type(exc).__name__}: {exc}",
+        )
+        raise
+
+    raw_match_summary = result.get("raw_match_summary")
+    matched_article_count = 0
+    if isinstance(raw_match_summary, dict):
+        raw_matched = raw_match_summary.get("matched_article_count")
+        if isinstance(raw_matched, int):
+            matched_article_count = raw_matched
+    raw_article_count = result.get("raw_article_count")
+    rows_upserted = result.get("rows_upserted")
+    record_runtime_task_event(
+        worker_id="ml:crypto:sentiment",
+        status="running",
+        detail=(
+            "Crypto news sentiment sync persisted: "
+            f"{raw_article_count} raw articles, "
+            f"{matched_article_count} matched, {rows_upserted} rows"
+        ),
+    )
+    return result
 
 
 @celery_app.task(name="tasks.news_sentiment.historical_crypto_backfill")
