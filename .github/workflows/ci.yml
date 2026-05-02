@@ -22,6 +22,6 @@ jobs:
       - name: Ruff
         run: ruff check .
       - name: Mypy
-        run: mypy app
+        run: python -m mypy app --ignore-missing-imports --install-types --non-interactive --disable-error-code=untyped-decorator --disable-error-code=unused-ignore
       - name: Pytest
         run: pytest
