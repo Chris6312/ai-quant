@@ -86,20 +86,27 @@ Decide which source owns each job.
 
 ### Provider roles
 
-* [ ] Alpaca = historical stock candles for ML/backtesting
-* [ ] Tradier = live quotes
-* [ ] Tradier = active stock watchlist intraday candles
-* [ ] SEC = insider/Form 4 data
-* [ ] Congress source/API = congressional filings
-* [ ] News/RSS/API = article ingestion
-* [ ] Optional later: earnings/analyst provider
+* [x] Alpaca = historical stock candles for ML/backtesting
+* [x] Tradier = live quotes
+* [x] Tradier = active stock watchlist intraday candles
+* [x] SEC = insider/Form 4 data
+* [x] Congress source/API = congressional filings
+* [x] News/RSS/API = article ingestion
+* [x] Optional later: earnings/analyst provider
 
 ### Backend
 
-* [ ] Add stock provider config
-* [ ] Add provider health checks
-* [ ] Add symbol normalization rules
-* [ ] Add failure logging per provider
+* [x] Add stock provider config
+* [x] Add provider health checks
+* [x] Add symbol normalization rules
+* [x] Add failure logging per provider
+
+### Implementation notes
+
+* Added stock-only provider boundary contracts in `backend/app/stock/providers.py`.
+* Added disabled-by-default provider config placeholders to backend settings.
+* Added config-only health status checks, stock symbol normalization, and a bounded provider failure log contract.
+* No provider data fetching, workers, frontend, ML logic, stock strategies, or crypto behavior changes were added.
 
 ### Must happen before
 
