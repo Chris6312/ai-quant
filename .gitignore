@@ -26,3 +26,8 @@ backend/.runtime/
 backend/models/*.lgbm
 backend/backend/.runtime/*.json
 backend/backend/
+
+# pytest temp / cache
+backend/.tmp/
+backend/.pytest-*
+backend/pytest-*
