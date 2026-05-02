@@ -10,6 +10,7 @@ from app.ml.timeframe_config import (
     get_ml_timeframes,
     get_model_role,
     get_timeframe_contract,
+    get_trade_label_config,
     is_supported_ml_timeframe,
 )
 
@@ -92,3 +93,49 @@ def test_timeframe_lookbacks_are_contract_driven() -> None:
     assert get_ml_lookback_days("stock", "15m") == 365
     assert get_ml_lookback_days("stock", "1h") == 456
     assert get_ml_lookback_days("stock", "4h") == 548
+
+
+def test_timeframe_label_configs_match_phase_tf3_contract() -> None:
+    """Production timeframes should expose fee-aware label barriers."""
+
+    crypto_15m = get_trade_label_config("crypto", "15m")
+    crypto_1h = get_trade_label_config("crypto", "1h")
+    crypto_4h = get_trade_label_config("crypto", "4h")
+    stock_5m = get_trade_label_config("stock", "5m")
+    stock_15m = get_trade_label_config("stock", "15m")
+    stock_1h = get_trade_label_config("stock", "1h")
+    stock_4h = get_trade_label_config("stock", "4h")
+
+    assert crypto_15m.use_atr_barriers is True
+    assert crypto_15m.profit_target_atr_multiplier == 1.8
+    assert crypto_15m.stop_loss_atr_multiplier == 1.1
+    assert crypto_15m.max_holding_candles == 6
+    assert crypto_15m.min_profitable_move_pct == 0.013
+    assert crypto_1h.profit_target_atr_multiplier == 2.2
+    assert crypto_1h.stop_loss_atr_multiplier == 1.4
+    assert crypto_1h.max_holding_candles == 8
+    assert crypto_4h.use_atr_barriers is False
+    assert crypto_4h.profit_target_pct == 0.035
+    assert crypto_4h.stop_loss_pct == 0.022
+    assert crypto_4h.max_holding_candles == 6
+
+    assert stock_5m.use_atr_barriers is True
+    assert stock_5m.profit_target_atr_multiplier == 1.6
+    assert stock_5m.stop_loss_atr_multiplier == 1.0
+    assert stock_5m.max_holding_candles == 12
+    assert stock_5m.min_profitable_move_pct == 0.002
+    assert stock_15m.profit_target_atr_multiplier == 1.8
+    assert stock_15m.stop_loss_atr_multiplier == 1.1
+    assert stock_15m.max_holding_candles == 8
+    assert stock_1h.profit_target_atr_multiplier == 2.0
+    assert stock_1h.stop_loss_atr_multiplier == 1.2
+    assert stock_1h.max_holding_candles == 6
+    assert stock_4h.use_atr_barriers is False
+    assert stock_4h.profit_target_pct == 0.020
+    assert stock_4h.stop_loss_pct == 0.012
+    assert stock_4h.max_holding_candles == 4
+
+
+def test_context_timeframe_has_no_trade_label_config() -> None:
+    with pytest.raises(ValueError, match="Context-only ML timeframe"):
+        get_trade_label_config("crypto", "1Day")

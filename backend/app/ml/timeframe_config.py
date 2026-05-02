@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from app.ml.labels import TradeLabelConfig
 from app.ml.model_contracts import AssetClass, ModelRole, TimeframeContract
 
 _ML_LOOKBACK_DAYS: dict[AssetClass, dict[str, int]] = {
@@ -98,6 +101,34 @@ _CONTEXT_CONTRACTS: dict[AssetClass, tuple[TimeframeContract, ...]] = {
 }
 
 
+@dataclass(slots=True, frozen=True)
+class _LabelConfigDefaults:
+    profit_target_pct: float
+    stop_loss_pct: float
+    max_holding_candles: int
+    use_atr_barriers: bool
+    profit_target_atr_multiplier: float
+    stop_loss_atr_multiplier: float
+    min_profitable_move_pct: float
+
+
+_TRADE_LABEL_CONFIGS: dict[AssetClass, dict[str, _LabelConfigDefaults]] = {
+    AssetClass.CRYPTO: {
+        "15m": _LabelConfigDefaults(0.0, 0.0, 6, True, 1.8, 1.1, 0.013),
+        "1h": _LabelConfigDefaults(0.0, 0.0, 8, True, 2.2, 1.4, 0.013),
+        "4h": _LabelConfigDefaults(0.035, 0.022, 6, False, 0.0, 0.0, 0.013),
+        "1Day": _LabelConfigDefaults(0.035, 0.022, 6, False, 0.0, 0.0, 0.013),
+    },
+    AssetClass.STOCK: {
+        "5m": _LabelConfigDefaults(0.0, 0.0, 12, True, 1.6, 1.0, 0.002),
+        "15m": _LabelConfigDefaults(0.0, 0.0, 8, True, 1.8, 1.1, 0.002),
+        "1h": _LabelConfigDefaults(0.0, 0.0, 6, True, 2.0, 1.2, 0.002),
+        "4h": _LabelConfigDefaults(0.020, 0.012, 4, False, 0.0, 0.0, 0.002),
+        "1Day": _LabelConfigDefaults(0.020, 0.012, 4, False, 0.0, 0.0, 0.002),
+    },
+}
+
+
 def get_ml_timeframes(asset_class: AssetClass | str) -> tuple[str, ...]:
     """Return production ML trading timeframes for an asset class."""
 
@@ -120,6 +151,24 @@ def get_model_role(asset_class: AssetClass | str, timeframe: str) -> ModelRole:
     """Return the canonical model role for an asset/timeframe pair."""
 
     return get_timeframe_contract(asset_class, timeframe).model_role
+
+
+def get_trade_label_config(asset_class: AssetClass | str, timeframe: str) -> TradeLabelConfig:
+    """Return the canonical label config for an asset/timeframe pair."""
+
+    contract = get_timeframe_contract(asset_class, timeframe)
+    if contract.timeframe.lower() in {"1day", "1d"}:
+        raise ValueError("Context-only ML timeframe")
+    config = _TRADE_LABEL_CONFIGS[contract.asset_class][contract.timeframe]
+    return TradeLabelConfig(
+        profit_target_pct=config.profit_target_pct,
+        stop_loss_pct=config.stop_loss_pct,
+        max_holding_candles=config.max_holding_candles,
+        use_atr_barriers=config.use_atr_barriers,
+        profit_target_atr_multiplier=config.profit_target_atr_multiplier,
+        stop_loss_atr_multiplier=config.stop_loss_atr_multiplier,
+        min_profitable_move_pct=config.min_profitable_move_pct,
+    )
 
 
 def get_timeframe_contract(
@@ -165,7 +214,7 @@ def _normalize_asset_class(asset_class: AssetClass | str) -> AssetClass:
     try:
         return AssetClass(normalized_asset_class)
     except ValueError as exc:
-        supported_asset_classes = ", ".join(asset_class.value for asset_class in AssetClass)
+        supported_asset_classes = ", ".join(asset.value for asset in AssetClass)
         raise ValueError(
             f"Unsupported ML asset class {asset_class!r}. "
             f"Supported asset classes: {supported_asset_classes}."

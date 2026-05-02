@@ -25,6 +25,7 @@ class TradeLabelConfig:
     atr_period: int = 14
     profit_target_atr_multiplier: float = 3.0
     stop_loss_atr_multiplier: float = 1.5
+    min_profitable_move_pct: float = 0.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -79,14 +80,23 @@ def build_long_trade_label_results(
             )
             continue
 
-        target_price, stop_price = _barrier_prices(
-            entry_price=entry,
-            atr_value=atr_values[index],
-            config=config,
-        )
+        lagged_atr = atr_values[index - 1] if index > 0 else None
         future_window = candles[index + 1 : index + 1 + lookahead]
-        labels.append(
-            _first_barrier_result(
+        if config.use_atr_barriers:
+            result = _first_atr_barrier_result(
+                future_window,
+                entry_price=entry,
+                atr_value=lagged_atr,
+                config=config,
+                lookahead=lookahead,
+            )
+        else:
+            target_price, stop_price = _barrier_prices(
+                entry_price=entry,
+                atr_value=lagged_atr,
+                config=config,
+            )
+            result = _first_barrier_result(
                 future_window,
                 entry_price=entry,
                 target_price=target_price,
@@ -94,9 +104,54 @@ def build_long_trade_label_results(
                 lookahead=lookahead,
                 config=config,
             )
-        )
+        # Fee-aware directional relabeling is applied only by timeout handling.
+        # Barrier hits remain true trade outcomes and must not be downgraded here.
+
+        labels.append(result)
 
     return labels
+
+
+
+
+def barrier_health_report(
+    results: Sequence[TradeLabelResult] | Sequence[int],
+) -> dict[str, object]:
+    """Return health diagnostics for triple-barrier label outcomes."""
+
+    labels = [
+        result.label if isinstance(result, TradeLabelResult) else int(result)
+        for result in results
+    ]
+    total = len(labels)
+    tp_hit_rate = _label_rate(labels, PROFIT_TARGET_LABEL)
+    sl_hit_rate = _label_rate(labels, STOP_LOSS_LABEL)
+    timeout_rate = _label_rate(labels, NO_EDGE_LABEL)
+    warnings: list[str] = []
+
+    if tp_hit_rate > 0.45:
+        warnings.append("tp_hit_rate_above_0.45")
+    elif tp_hit_rate < 0.30:
+        warnings.append("tp_hit_rate_below_0.30")
+
+    if sl_hit_rate > 0.45:
+        warnings.append("sl_hit_rate_above_0.45")
+    elif sl_hit_rate < 0.30:
+        warnings.append("sl_hit_rate_below_0.30")
+
+    if timeout_rate > 0.30:
+        warnings.append("timeout_rate_above_0.30")
+    elif timeout_rate < 0.15:
+        warnings.append("timeout_rate_below_0.15")
+
+    return {
+        "total": total,
+        "tp_hit_rate": tp_hit_rate,
+        "sl_hit_rate": sl_hit_rate,
+        "timeout_rate": timeout_rate,
+        "is_healthy": not warnings and total > 0,
+        "warnings": warnings,
+    }
 
 
 def label_balance_report(labels: Sequence[int]) -> dict[str, object]:
@@ -141,6 +196,59 @@ def _barrier_prices(
         entry_price * (1.0 - config.stop_loss_pct),
     )
 
+
+def _first_atr_barrier_result(
+    future_window: Sequence[Candle],
+    *,
+    entry_price: float,
+    atr_value: float | None,
+    config: TradeLabelConfig,
+    lookahead: int,
+) -> TradeLabelResult:
+    """Return the first ATR barrier reached using the previous bar ATR."""
+
+    if atr_value is None or atr_value <= 0.0:
+        return TradeLabelResult(
+            label=NO_EDGE_LABEL,
+            bars_to_outcome=None,
+            outcome_return=0.0,
+            time_decay_weight=_bounded_timeout_weight(config),
+        )
+
+    target_price = entry_price + (atr_value * config.profit_target_atr_multiplier)
+    stop_price = max(0.0, entry_price - (atr_value * config.stop_loss_atr_multiplier))
+
+    for offset, future in enumerate(future_window, start=1):
+        hit_target = future.high >= target_price
+        hit_stop = future.low <= stop_price
+        if hit_target and hit_stop:
+            return TradeLabelResult(
+                label=NO_EDGE_LABEL,
+                bars_to_outcome=offset,
+                outcome_return=0.0,
+                time_decay_weight=_bounded_timeout_weight(config),
+            )
+        if hit_target:
+            return TradeLabelResult(
+                label=PROFIT_TARGET_LABEL,
+                bars_to_outcome=offset,
+                outcome_return=(target_price - entry_price) / entry_price,
+                time_decay_weight=_time_decay_weight(offset, lookahead, config),
+            )
+        if hit_stop:
+            return TradeLabelResult(
+                label=STOP_LOSS_LABEL,
+                bars_to_outcome=offset,
+                outcome_return=(stop_price - entry_price) / entry_price,
+                time_decay_weight=_time_decay_weight(offset, lookahead, config),
+            )
+
+    return TradeLabelResult(
+        label=NO_EDGE_LABEL,
+        bars_to_outcome=None,
+        outcome_return=_timeout_return(future_window, entry_price),
+        time_decay_weight=_bounded_timeout_weight(config),
+    )
 
 def _average_true_ranges(
     candles: Sequence[Candle],
@@ -211,10 +319,11 @@ def _first_barrier_result(
                 outcome_return=(stop_price - entry_price) / entry_price,
                 time_decay_weight=_time_decay_weight(offset, lookahead, config),
             )
+    timeout_return = _timeout_return(future_window, entry_price)
     return TradeLabelResult(
-        label=NO_EDGE_LABEL,
+        label=_timeout_label(timeout_return, config.min_profitable_move_pct),
         bars_to_outcome=None,
-        outcome_return=0.0,
+        outcome_return=timeout_return,
         time_decay_weight=_bounded_timeout_weight(config),
     )
 
@@ -236,3 +345,39 @@ def _time_decay_weight(
 
 def _bounded_timeout_weight(config: TradeLabelConfig) -> float:
     return min(1.0, max(0.05, config.timeout_sample_weight))
+
+
+def _timeout_return(future_window: Sequence[Candle], entry_price: float) -> float:
+    if entry_price <= 0.0 or not future_window:
+        return 0.0
+    return (future_window[-1].close - entry_price) / entry_price
+
+
+def _timeout_label(timeout_return: float, min_profitable_move_pct: float) -> int:
+    threshold = max(0.0, min_profitable_move_pct)
+    if abs(timeout_return) < threshold:
+        return NO_EDGE_LABEL
+    if timeout_return > 0.0:
+        return PROFIT_TARGET_LABEL
+    if timeout_return < 0.0:
+        return STOP_LOSS_LABEL
+    return NO_EDGE_LABEL
+
+
+def _label_rate(labels: Sequence[int], target_label: int) -> float:
+    if not labels:
+        return 0.0
+    return sum(1 for label in labels if label == target_label) / len(labels)
+
+
+def _append_band_warning(
+    warnings: list[str],
+    name: str,
+    value: float,
+    minimum: float,
+    maximum: float,
+) -> None:
+    if value < minimum:
+        warnings.append(f"{name} below healthy band: {value:.3f} < {minimum:.3f}")
+    elif value > maximum:
+        warnings.append(f"{name} above healthy band: {value:.3f} > {maximum:.3f}")

@@ -19,7 +19,6 @@ from app.ml.calibration import (
 )
 from app.ml.features import (
     FeatureEngineer,
-    FeatureVector,
     ResearchInputs,
     feature_names_for_asset_class,
     ordered_feature_row,
@@ -28,9 +27,9 @@ from app.ml.labels import (
     TradeLabelConfig,
     TradeLabelResult,
     build_long_trade_label_results,
-    build_long_trade_labels,
     label_balance_report,
 )
+from app.ml.timeframe_config import get_trade_label_config
 from app.models.domain import Candle
 
 FloatArray = NDArray[np.float64]
@@ -189,11 +188,13 @@ class _TrainingSample:
 
     timestamp: datetime
     month_key: tuple[int, int]
-    features: FeatureVector
+    features: dict[str, float]
     label: int
     next_return: float
     symbol: str
+    label_window_end: datetime | None = None
     label_weight: float = 1.0
+    label_horizon_bars: int = 1
 
 
 @dataclass(slots=True, frozen=True)
@@ -334,7 +335,8 @@ class WalkForwardTrainer:
         samples: list[_TrainingSample] = []
         for symbol_candles in grouped.values():
             ordered = sorted(symbol_candles, key=lambda candle: candle.time)
-            label_results = self._label_candle_results(ordered, ordered[0].asset_class)
+            label_config = self._trade_label_config(ordered[0].asset_class, ordered[0].timeframe)
+            label_results = build_long_trade_label_results(ordered, label_config)
             for index in range(199, len(ordered) - 1):
                 if self._skip_training_sample(ordered[index], asset_class):
                     continue
@@ -353,6 +355,10 @@ class WalkForwardTrainer:
                     continue
 
                 next_return = self._next_return(ordered[index], ordered[index + 1])
+                label_window_end_index = min(
+                    index + label_config.max_holding_candles,
+                    len(ordered) - 1,
+                )
                 samples.append(
                     _TrainingSample(
                         timestamp=ordered[index].time,
@@ -362,6 +368,8 @@ class WalkForwardTrainer:
                         next_return=next_return,
                         symbol=ordered[index].symbol,
                         label_weight=label_results[index].time_decay_weight,
+                        label_horizon_bars=label_config.max_holding_candles,
+                        label_window_end=ordered[label_window_end_index].time,
                     )
                 )
 
@@ -427,6 +435,10 @@ class WalkForwardTrainer:
             train_samples = [sample for sample in samples if sample.month_key in train_months]
             test_samples = [sample for sample in samples if sample.month_key in test_months]
 
+            train_samples, test_samples = self._apply_purge_and_embargo(
+                train_samples,
+                test_samples,
+            )
             if train_samples and test_samples:
                 folds.append((train_samples, test_samples))
 
@@ -446,7 +458,50 @@ class WalkForwardTrainer:
             test_samples = train_samples[-1:]
             train_samples = train_samples[:-1] or train_samples
 
-        return train_samples, test_samples
+        purged_train, embargoed_test = self._apply_purge_and_embargo(
+            train_samples,
+            test_samples,
+        )
+        return purged_train or train_samples, embargoed_test or test_samples
+
+    def _apply_purge_and_embargo(
+        self,
+        train_samples: Sequence[_TrainingSample],
+        test_samples: Sequence[_TrainingSample],
+    ) -> tuple[list[_TrainingSample], list[_TrainingSample]]:
+        """Remove train/validation rows whose triple-barrier windows can overlap."""
+
+        if not train_samples or not test_samples:
+            return list(train_samples), list(test_samples)
+
+        validation_start = min(sample.timestamp for sample in test_samples)
+        train_end = max(sample.timestamp for sample in train_samples)
+        max_horizon_bars = max(sample.label_horizon_bars for sample in train_samples)
+        purge_window = timedelta(days=max(1, max_horizon_bars))
+        embargo = timedelta(minutes=1)
+
+        filtered_train = [
+            sample
+            for sample in train_samples
+            if self._sample_label_window_end(sample) < validation_start
+            and sample.timestamp < validation_start - purge_window
+            and sample.timestamp <= train_end - embargo
+        ]
+
+        filtered_test = [
+            sample
+            for sample in test_samples
+            if sample.timestamp > train_end - embargo
+        ]
+
+        return filtered_train, filtered_test
+
+    def _sample_label_window_end(self, sample: _TrainingSample) -> datetime:
+        """Return the label window end, deriving it from horizon bars when absent."""
+
+        if sample.label_window_end is not None:
+            return sample.label_window_end
+        return sample.timestamp + timedelta(days=sample.label_horizon_bars)
 
     def _train_fold(
         self,
@@ -724,7 +779,7 @@ class WalkForwardTrainer:
         btc_vol_30d = self._realized_volatility(btc_returns[-30:])
         btc_vol_90d = self._realized_volatility(btc_returns[-90:])
         btc_ratio = btc_vol_30d / btc_vol_90d if btc_vol_90d > 0 else 0.0
-        btc_drawdown = self._max_drawdown(btc_closes[-30:])
+        btc_drawdown = self._max_drawdown(btc_candles[-30:])
         atr_values = self._atr_pct_values(crypto_candles)
         recent_atr = self._recent_average(atr_values, 30)
         atr_percentile = self._percentile_rank(atr_values, recent_atr)
@@ -771,18 +826,20 @@ class WalkForwardTrainer:
             return 0.0
         return float(np.std(np.asarray(returns, dtype=float), ddof=1))
 
-    def _max_drawdown(self, closes: Sequence[float]) -> float:
+    def _max_drawdown(self, closes: Sequence[float | Candle]) -> float:
         """Return the most negative drawdown in a close-price window."""
 
         if not closes:
             return 0.0
-        peak = closes[0]
+        first = closes[0]
+        peak = first.close if isinstance(first, Candle) else first
         max_drawdown = 0.0
         for close in closes:
-            peak = max(peak, close)
+            current = close.close if isinstance(close, Candle) else close
+            peak = max(peak, current)
             if peak <= 0:
                 continue
-            drawdown = (close - peak) / peak
+            drawdown = (current - peak) / peak
             max_drawdown = min(max_drawdown, drawdown)
         return max_drawdown
 
@@ -1067,25 +1124,11 @@ class WalkForwardTrainer:
     ) -> list[int]:
         """Label candles by triple-barrier long trade outcome."""
 
-        threshold = self._label_threshold(asset_class)
-        return build_long_trade_labels(
+        timeframe = candles[0].timeframe if candles else "1Day"
+        return [result.label for result in build_long_trade_label_results(
             candles,
-            TradeLabelConfig(
-                profit_target_pct=threshold,
-                stop_loss_pct=threshold,
-                max_holding_candles=self.config.trade_label_lookahead_candles,
-                time_decay_min_weight=self.config.label_time_decay_min_weight,
-                timeout_sample_weight=self.config.timeout_sample_weight,
-                use_atr_barriers=self._use_atr_barriers(asset_class),
-                atr_period=self.config.crypto_atr_period,
-                profit_target_atr_multiplier=(
-                    self.config.crypto_profit_target_atr_multiplier
-                ),
-                stop_loss_atr_multiplier=(
-                    self.config.crypto_stop_loss_atr_multiplier
-                ),
-            ),
-        )
+            self._trade_label_config(asset_class, timeframe),
+        )]
 
     def _label_candle_results(
         self,
@@ -1094,24 +1137,30 @@ class WalkForwardTrainer:
     ) -> list[TradeLabelResult]:
         """Label candles and retain time-decay weights for training."""
 
-        threshold = self._label_threshold(asset_class)
+        timeframe = candles[0].timeframe if candles else "1Day"
         return build_long_trade_label_results(
             candles,
-            TradeLabelConfig(
-                profit_target_pct=threshold,
-                stop_loss_pct=threshold,
-                max_holding_candles=self.config.trade_label_lookahead_candles,
-                time_decay_min_weight=self.config.label_time_decay_min_weight,
-                timeout_sample_weight=self.config.timeout_sample_weight,
-                use_atr_barriers=self._use_atr_barriers(asset_class),
-                atr_period=self.config.crypto_atr_period,
-                profit_target_atr_multiplier=(
-                    self.config.crypto_profit_target_atr_multiplier
-                ),
-                stop_loss_atr_multiplier=(
-                    self.config.crypto_stop_loss_atr_multiplier
-                ),
-            ),
+            self._trade_label_config(asset_class, timeframe),
+        )
+
+    def _trade_label_config(self, asset_class: str, timeframe: str) -> TradeLabelConfig:
+        """Return canonical label config with trainer weight overrides."""
+
+        try:
+            config = get_trade_label_config(asset_class, timeframe)
+        except ValueError:
+            if timeframe.lower() not in {"1day", "1d"}:
+                raise
+            config = TradeLabelConfig(
+                profit_target_pct=0.0075,
+                stop_loss_pct=0.0075,
+                max_holding_candles=1,
+            )
+        return replace(
+            config,
+            time_decay_min_weight=self.config.label_time_decay_min_weight,
+            timeout_sample_weight=self.config.timeout_sample_weight,
+            atr_period=self.config.crypto_atr_period,
         )
 
     def _use_atr_barriers(self, asset_class: str) -> bool:

@@ -109,3 +109,78 @@ def test_crypto_sample_weights_combine_class_balance_and_recency() -> None:
 
     assert weights is not None
     assert weights.tolist() == [1.0, 2.0, 2.0]
+
+
+def test_walk_forward_folds_purge_and_embargo_label_windows() -> None:
+    """Train rows near validation should be removed when labels overlap the fold."""
+
+    trainer = WalkForwardTrainer(
+        TrainerConfig(
+            train_months=1,
+            test_months=1,
+            trade_label_lookahead_candles=2,
+        )
+    )
+    samples = [
+        _TrainingSample(
+            timestamp=datetime(2026, 1, 28, tzinfo=UTC),
+            month_key=(2026, 1),
+            features={},
+            label=1,
+            next_return=0.0,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 1, 30, tzinfo=UTC),
+        ),
+        _TrainingSample(
+            timestamp=datetime(2026, 1, 29, tzinfo=UTC),
+            month_key=(2026, 1),
+            features={},
+            label=1,
+            next_return=0.0,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 1, 31, tzinfo=UTC),
+        ),
+        _TrainingSample(
+            timestamp=datetime(2026, 1, 30, tzinfo=UTC),
+            month_key=(2026, 1),
+            features={},
+            label=1,
+            next_return=0.0,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 2, 1, tzinfo=UTC),
+        ),
+        _TrainingSample(
+            timestamp=datetime(2026, 1, 31, tzinfo=UTC),
+            month_key=(2026, 1),
+            features={},
+            label=1,
+            next_return=0.0,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 2, 2, tzinfo=UTC),
+        ),
+        _TrainingSample(
+            timestamp=datetime(2026, 2, 1, tzinfo=UTC),
+            month_key=(2026, 2),
+            features={},
+            label=2,
+            next_return=0.01,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 2, 3, tzinfo=UTC),
+        ),
+        _TrainingSample(
+            timestamp=datetime(2026, 2, 2, tzinfo=UTC),
+            month_key=(2026, 2),
+            features={},
+            label=0,
+            next_return=-0.01,
+            symbol="BTC/USD",
+            label_window_end=datetime(2026, 2, 4, tzinfo=UTC),
+        ),
+    ]
+
+    folds = trainer._build_folds(samples)
+
+    assert len(folds) == 1
+    train_samples, test_samples = folds[0]
+    assert [sample.timestamp.day for sample in train_samples] == [28, 29]
+    assert [sample.timestamp.day for sample in test_samples] == [1, 2]
