@@ -6,6 +6,7 @@ score candidates, write to storage, start workers, or make trading decisions.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from app.stock.universe import StockUniverseCandidate
@@ -87,6 +88,12 @@ def validate_price(
             code="price_missing",
             reason="price is missing",
         )
+    if not math.isfinite(price):
+        return _fail(
+            symbol=symbol,
+            code="price_non_finite",
+            reason="Non-finite price value",
+        )
     if price < thresholds.min_price:
         return _fail(
             symbol=symbol,
@@ -116,6 +123,12 @@ def validate_dollar_volume(
             code="dollar_volume_missing",
             reason="dollar volume is missing",
         )
+    if not math.isfinite(dollar_volume):
+        return _fail(
+            symbol=symbol,
+            code="dollar_volume_non_finite",
+            reason="Non-finite dollar volume value",
+        )
     if dollar_volume < thresholds.min_dollar_volume:
         return _fail(
             symbol=symbol,
@@ -141,6 +154,12 @@ def validate_liquidity(
             symbol=symbol,
             code="liquidity_snapshot_missing",
             reason="liquidity snapshot is missing",
+        )
+    if not math.isfinite(snapshot.average_daily_volume):
+        return _fail(
+            symbol=snapshot.symbol,
+            code="average_daily_volume_non_finite",
+            reason="Non-finite liquidity value",
         )
     if snapshot.average_daily_volume < thresholds.min_average_daily_volume:
         return _fail(
@@ -174,7 +193,25 @@ def validate_spread(
             code="spread_quote_missing",
             reason="bid or ask is missing",
         )
+    if not math.isfinite(snapshot.bid) or not math.isfinite(snapshot.ask):
+        return _fail(
+            symbol=snapshot.symbol,
+            code="spread_input_non_finite",
+            reason="Non-finite spread input",
+        )
+    if snapshot.ask < snapshot.bid:
+        return _fail(
+            symbol=snapshot.symbol,
+            code="spread_inverted",
+            reason="Inverted spread (ask < bid)",
+        )
     midpoint = (snapshot.bid + snapshot.ask) / 2
+    if not math.isfinite(midpoint):
+        return _fail(
+            symbol=snapshot.symbol,
+            code="spread_midpoint_non_finite",
+            reason="Non-finite spread input",
+        )
     if midpoint <= 0:
         return _fail(
             symbol=snapshot.symbol,
@@ -297,6 +334,24 @@ def screen_stock_candidate(
     """Aggregate deterministic screening checks for one stock candidate."""
 
     checks = (
+        _validate_snapshot_symbol(
+            expected_symbol=candidate.symbol,
+            snapshot_symbol=liquidity_snapshot.symbol
+            if liquidity_snapshot is not None
+            else None,
+        ),
+        _validate_snapshot_symbol(
+            expected_symbol=candidate.symbol,
+            snapshot_symbol=tradability_snapshot.symbol
+            if tradability_snapshot is not None
+            else None,
+        ),
+        _validate_snapshot_symbol(
+            expected_symbol=candidate.symbol,
+            snapshot_symbol=earnings_risk_snapshot.symbol
+            if earnings_risk_snapshot is not None
+            else None,
+        ),
         validate_price(
             symbol=candidate.symbol,
             price=liquidity_snapshot.price if liquidity_snapshot is not None else None,
@@ -344,6 +399,23 @@ def screen_stock_candidate(
         passed=not failures,
         failures=failures,
     )
+
+
+def _validate_snapshot_symbol(
+    *,
+    expected_symbol: str,
+    snapshot_symbol: str | None,
+) -> StockScreeningResult:
+    if snapshot_symbol is not None and snapshot_symbol != expected_symbol:
+        return _fail(
+            symbol=expected_symbol,
+            code="snapshot_symbol_mismatch",
+            reason=(
+                "Snapshot symbol mismatch: "
+                f"expected {expected_symbol}, got {snapshot_symbol}"
+            ),
+        )
+    return _pass(expected_symbol)
 
 
 def _pass(symbol: str) -> StockScreeningResult:
