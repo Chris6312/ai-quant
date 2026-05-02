@@ -125,22 +125,29 @@ Build the raw stock pool before deciding what deserves attention.
 
 ### Universe tiers
 
-* [ ] S&P 500
-* [ ] Nasdaq 100
-* [ ] High-volume liquid stocks
-* [ ] Manual/user-added symbols
-* [ ] Event-driven candidates
+* [x] S&P 500
+* [x] Nasdaq 100
+* [x] High-volume liquid stocks
+* [x] Manual/user-added symbols
+* [x] Event-driven candidates
 
 ### Screening filters
 
-* [ ] Price filter
-* [ ] Dollar-volume filter
-* [ ] Liquidity filter
-* [ ] Spread filter
-* [ ] Halt/exclusion filter
-* [ ] Tradier tradability check
-* [ ] Earnings danger window placeholder
-* [ ] Sector classification
+* [x] Price filter
+* [x] Dollar-volume filter
+* [x] Liquidity filter
+* [x] Spread filter
+* [x] Halt/exclusion filter
+* [x] Tradier tradability check
+* [x] Earnings danger window placeholder
+* [x] Sector classification
+
+### Implementation notes
+
+* Added provider-neutral universe composition in `backend/app/stock/universe.py`.
+* Added pure snapshot-based screening validation in `backend/app/stock/validation.py`.
+* Added S4 unit coverage in `backend/tests/unit/test_phase_s4_stock_universe.py` and `backend/tests/unit/test_phase_s4_stock_validation.py`.
+* No worker persistence, provider fetching, ML, strategy logic, frontend code, or crypto behavior changes were added in S4.
 
 ### Must happen before
 
@@ -150,7 +157,46 @@ Build the raw stock pool before deciding what deserves attention.
 
 ---
 
-## Phase S5 — Stock Candle Workers
+## Phase S5 — Stock Screener Worker
+
+## Goal
+
+Persist screened stock universe candidates without fetching real market data or ranking symbols.
+
+### Backend
+
+* [x] Add stock screener worker orchestration
+* [x] Build stock universe using S4 universe helpers
+* [x] Use deterministic local S5 stub snapshots only
+* [x] Call S4 `screen_stock_candidate(...)`
+* [x] Persist `stock_universe_candidates` rows
+* [x] Use UUID ids
+* [x] Use timezone-aware UTC `as_of` timestamps
+* [x] Persist `reason="pass"` for passing candidates
+* [x] Persist compact failure reason text for failed candidates
+* [x] Keep score as `None`/placeholder only, with no ranking semantics
+* [x] Add Celery task hook without beat scheduling
+
+### Guardrails
+
+* [x] No provider fetching
+* [x] No real market data fetching
+* [x] No ML
+* [x] No strategy logic
+* [x] No ranking beyond pass/fail
+* [x] No frontend changes
+* [x] No crypto changes
+* [x] No duplicated validation thresholds or validation logic
+
+### Must happen before
+
+* Watchlist promotion
+* Stock research page
+* Strategy scoring
+
+---
+
+## Phase S6 — Stock Candle Workers
 
 ## Goal
 
@@ -181,7 +227,7 @@ Fetch stock candles cleanly without polluting crypto candle logic.
 
 ---
 
-## Phase S6 — Stock News Pipeline
+## Phase S7 — Stock News Pipeline
 
 ## Goal
 
@@ -218,7 +264,7 @@ Add company-specific catalyst detection.
 
 ---
 
-## Phase S7 — Congress Filing Pipeline
+## Phase S8 — Congress Filing Pipeline
 
 ## Goal
 
@@ -252,7 +298,7 @@ Use congressional filings with filing-lag decay.
 
 ---
 
-## Phase S8 — Insider Buy Pipeline
+## Phase S9 — Insider Buy Pipeline
 
 ## Goal
 
@@ -284,7 +330,7 @@ Use SEC Form 4 data for slow accumulation signals.
 
 ---
 
-## Phase S9 — Stock Strategy Engine
+## Phase S10 — Stock Strategy Engine
 
 ## Goal
 
@@ -319,7 +365,7 @@ Score each stock by actual strategy fit, not one giant soup score.
 
 ---
 
-## Phase S10 — Stock Watchlist Promotion
+## Phase S11 — Stock Watchlist Promotion
 
 ## Goal
 
@@ -352,7 +398,7 @@ Turn screened candidates into active monitored symbols.
 
 ---
 
-## Phase S11 — Stock ML Training Inputs
+## Phase S12 — Stock ML Training Inputs
 
 ## Goal
 
@@ -382,7 +428,7 @@ Build stock-specific ML features.
 
 ---
 
-## Phase S12 — Stock ML Labels & Training
+## Phase S13 — Stock ML Labels & Training
 
 ## Goal
 
@@ -419,7 +465,7 @@ Train stock models on trade-like outcomes.
 
 ---
 
-## Phase S13 — Stock Prediction Persistence
+## Phase S14 — Stock Prediction Persistence
 
 ## Goal
 
@@ -443,7 +489,7 @@ Persist stock predictions so UI loads fast.
 
 ---
 
-## Phase S14 — Stock Final Decision Engine
+## Phase S15 — Stock Final Decision Engine
 
 ## Goal
 
@@ -474,7 +520,7 @@ Convert strategy + ML + risk into final actions.
 
 ---
 
-## Phase S15 — Stock Paper Ledger Durability
+## Phase S16 — Stock Paper Ledger Durability
 
 ## Goal
 
@@ -501,7 +547,7 @@ Make stock paper trading survive restart.
 
 ---
 
-## Phase S16 — Stock Risk Management
+## Phase S17 — Stock Risk Management
 
 ## Goal
 
@@ -528,7 +574,7 @@ Prevent the bot from turning into a confetti cannon.
 
 ---
 
-## Phase S17 — Stock Runtime Workers
+## Phase S18 — Stock Runtime Workers
 
 ## Goal
 
@@ -553,7 +599,7 @@ Run stock decisions safely during market hours.
 
 ---
 
-## Phase S18 — Stock Frontend Pages
+## Phase S19 — Stock Frontend Pages
 
 ## Goal
 
@@ -588,7 +634,7 @@ Make stock behavior visible without cluttering crypto pages.
 
 ---
 
-## Phase S19 — Backtesting & Forward Testing
+## Phase S20 — Backtesting & Forward Testing
 
 ## Goal
 
@@ -611,7 +657,7 @@ Prove stock strategies before trusting them.
 
 ---
 
-## Phase S20 — Tradier Live Execution
+## Phase S21 — Tradier Live Execution
 
 ## Goal
 
@@ -643,22 +689,23 @@ S1 Guardrails
 → S2 Schema
 → S3 Providers
 → S4 Universe
-→ S5 Candles
-→ S6 News
-→ S7 Congress
-→ S8 Insiders
-→ S9 Strategy Engine
-→ S10 Watchlist
-→ S11 ML Inputs
-→ S12 ML Training
-→ S13 Prediction Persistence
-→ S14 Final Decision Engine
-→ S15 Paper Ledger
-→ S16 Risk
-→ S17 Runtime
-→ S18 Frontend
-→ S19 Backtesting
-→ S20 Live Execution
+→ S5 Screener Worker
+→ S6 Candles
+→ S7 News
+→ S8 Congress
+→ S9 Insiders
+→ S10 Strategy Engine
+→ S11 Watchlist
+→ S12 ML Inputs
+→ S13 ML Training
+→ S14 Prediction Persistence
+→ S15 Final Decision Engine
+→ S16 Paper Ledger
+→ S17 Risk
+→ S18 Runtime
+→ S19 Frontend
+→ S20 Backtesting
+→ S21 Live Execution
 ```
 
 
