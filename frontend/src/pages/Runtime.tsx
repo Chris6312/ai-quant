@@ -151,7 +151,7 @@ function toneForStatus(status: string): Tone {
 function isMlWorker(worker: RuntimeWorkerRecord): boolean {
   const taskName = worker.task_name ?? '';
   const workerKey = `${worker.worker_id} ${worker.source} ${taskName}`.toLowerCase();
-  return workerKey.includes('ml_daily') || workerKey.includes('ml daily') || workerKey.includes('ml_candles');
+  return workerKey.includes('ml_daily') || workerKey.includes('ml daily') || workerKey.includes('ml intraday') || workerKey.includes('ml_candles');
 }
 
 function workerLane(worker: RuntimeWorkerRecord): string {
@@ -170,7 +170,7 @@ function formatWorkerPurpose(worker: RuntimeWorkerRecord): string {
   const workerKey = `${worker.worker_id} ${worker.source} ${taskName}`.toLowerCase();
 
   if (isMlWorker(worker)) {
-    return 'Crypto ML Daily Fill';
+    return worker.worker_id.includes('stock') ? 'Stock ML Intraday Fill' : 'Crypto ML Intraday Fill';
   }
   if (workerKey.includes('initial_backfill') || workerKey.includes('backfill')) {
     return 'Crypto Initial Backfill';
@@ -359,8 +359,12 @@ function RuntimeTargetTable({ targets }: { targets: RuntimeWatchlistTarget[] }):
 
 function formatEventWorker(event: RuntimeWorkerEvent): string {
   switch (event.worker_id) {
-    case 'ml:crypto:1D':
-      return 'ML Daily Fill';
+    case 'ml:crypto:intraday':
+      return 'ML Crypto Intraday';
+    case 'ml:crypto:context:1D':
+      return 'ML Crypto Context';
+    case 'ml:stock:intraday':
+      return 'ML Stock Intraday';
     case 'ml:crypto:sentiment':
       return 'Crypto Sentiment';
     case 'ml:crypto:predictions':
@@ -743,7 +747,7 @@ const Runtime: React.FC = () => {
           </div>
           <div className="card-body" style={{ display: 'grid', gap: 10 }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.7 }}>
-              Managed workers include both the trading candle scheduler and the ML daily candle
+              Managed workers include both the trading candle scheduler and the ML intraday candle
               sync lane. The ML lane shows latest ML candle freshness and symbol coverage instead
               of pretending it should heartbeat like the trading scheduler.
             </div>

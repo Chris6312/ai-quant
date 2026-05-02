@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.constants import ALPACA_DEFAULT_TIMEFRAME, ML_CANDLE_USAGE
+from app.config.constants import CRYPTO_ML_TIMEFRAMES, ML_CANDLE_USAGE
 from app.config.crypto_scope import list_crypto_ml_symbols
 from app.repositories.candles import CandleRepository
 
@@ -75,7 +75,7 @@ def classify_ml_freshness(
 
 
 def ml_candle_date(value: datetime | None) -> date | None:
-    """Return the ML daily candle's stored date without timezone shifting."""
+    """Return the ML candle's stored date without timezone shifting."""
 
     if value is None:
         return None
@@ -87,23 +87,38 @@ async def evaluate_crypto_ml_freshness(
     *,
     current_date: date | None = None,
 ) -> MlFreshnessResult:
-    """Evaluate whether canonical crypto ML daily candles are complete enough for scoring."""
+    """Evaluate whether canonical crypto ML intraday candles are complete enough for scoring."""
 
     symbols = list_crypto_ml_symbols()
-    latest_by_symbol = await CandleRepository(session).get_latest_candle_times(
-        symbols=symbols,
-        timeframe=ALPACA_DEFAULT_TIMEFRAME,
-        usage=ML_CANDLE_USAGE,
-    )
-    latest_values = [value for value in latest_by_symbol.values() if value is not None]
+    repository = CandleRepository(session)
+    latest_by_symbol_timeframe: dict[tuple[str, str], datetime | None] = {}
+    for timeframe in CRYPTO_ML_TIMEFRAMES:
+        latest_for_timeframe = await repository.get_latest_candle_times(
+            symbols=symbols,
+            timeframe=timeframe,
+            usage=ML_CANDLE_USAGE,
+        )
+        latest_by_symbol_timeframe.update(
+            {
+                (symbol, timeframe): latest_for_timeframe.get(symbol)
+                for symbol in symbols
+            }
+        )
+    latest_values = [
+        value for value in latest_by_symbol_timeframe.values() if value is not None
+    ]
     latest_candle_at = max(latest_values) if latest_values else None
     latest_candle_date = ml_candle_date(latest_candle_at)
-    stale_symbols = [symbol for symbol, value in latest_by_symbol.items() if value is None]
+    stale_symbols = [
+        symbol
+        for (symbol, _timeframe), value in latest_by_symbol_timeframe.items()
+        if value is None
+    ]
 
     if latest_candle_date is not None:
         stale_symbols.extend(
             symbol
-            for symbol, value in latest_by_symbol.items()
+            for (symbol, _timeframe), value in latest_by_symbol_timeframe.items()
             if value is not None and ml_candle_date(value) != latest_candle_date
         )
 
@@ -113,7 +128,14 @@ async def evaluate_crypto_ml_freshness(
         has_missing_or_stale_symbols=bool(missing_or_stale_symbols),
         current_date=current_date,
     )
-    symbols_with_ml_candles = len(latest_values)
+    symbols_with_ml_candles = sum(
+        1
+        for symbol in symbols
+        if all(
+            latest_by_symbol_timeframe.get((symbol, timeframe)) is not None
+            for timeframe in CRYPTO_ML_TIMEFRAMES
+        )
+    )
     tracked_symbol_count = len(symbols)
     can_score = (
         freshness == "fresh"

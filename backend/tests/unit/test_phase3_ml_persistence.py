@@ -327,14 +327,15 @@ async def test_build_training_status_splits_crypto_and_stock_rows(
 
     Row = namedtuple(
         "Row",
-        ["symbol", "asset_class", "timeframe", "row_count", "earliest", "latest"],
+        ["symbol", "asset_class", "timeframe", "usage", "row_count", "earliest", "latest"],
     )
 
     rows = [
         Row(
             symbol="BTC/USD",
             asset_class="crypto",
-            timeframe="1Day",
+            timeframe="15m",
+            usage="ml",
             row_count=10,
             earliest=datetime(2026, 1, 1, tzinfo=UTC),
             latest=datetime(2026, 1, 10, tzinfo=UTC),
@@ -342,7 +343,8 @@ async def test_build_training_status_splits_crypto_and_stock_rows(
         Row(
             symbol="AAPL",
             asset_class="stock",
-            timeframe="1Day",
+            timeframe="5m",
+            usage="ml",
             row_count=20,
             earliest=datetime(2026, 2, 1, tzinfo=UTC),
             latest=datetime(2026, 2, 20, tzinfo=UTC),

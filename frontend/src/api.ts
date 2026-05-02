@@ -473,6 +473,7 @@ export type TrainingDetail = {
   symbol: string;
   asset_class: string;
   timeframe: string;
+  usage: string;
   candle_count: number;
   earliest: string | null;
   latest: string | null;

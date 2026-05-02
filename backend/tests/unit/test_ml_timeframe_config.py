@@ -6,6 +6,7 @@ import pytest
 
 from app.ml.model_contracts import AssetClass, ModelRole
 from app.ml.timeframe_config import (
+    get_ml_lookback_days,
     get_ml_timeframes,
     get_model_role,
     get_timeframe_contract,
@@ -78,3 +79,16 @@ def test_model_roles_map_correctly() -> None:
     assert get_model_role("stock", "1h") == ModelRole.DIRECTION
     assert get_model_role("stock", "15m") == ModelRole.SETUP_TIMING
     assert get_model_role("stock", "5m") == ModelRole.EXECUTION_TIMING
+
+
+def test_timeframe_lookbacks_are_contract_driven() -> None:
+    """Each production and context timeframe should expose a sync lookback."""
+
+    assert get_ml_lookback_days("crypto", "15m") == 183
+    assert get_ml_lookback_days("crypto", "1h") == 274
+    assert get_ml_lookback_days("crypto", "4h") == 365
+    assert get_ml_lookback_days("crypto", "1Day") == 730
+    assert get_ml_lookback_days("stock", "5m") == 365
+    assert get_ml_lookback_days("stock", "15m") == 365
+    assert get_ml_lookback_days("stock", "1h") == 456
+    assert get_ml_lookback_days("stock", "4h") == 548

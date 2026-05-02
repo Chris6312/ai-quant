@@ -27,6 +27,12 @@ type ProgressCallback = Callable[[int, int, int], None]
 
 _STOCK_BARS_URL = "https://data.alpaca.markets/v2/stocks/bars"
 _CRYPTO_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us/bars"
+_ALPACA_TIMEFRAME_ALIASES: dict[str, str] = {
+    "5m": "5Min",
+    "15m": "15Min",
+    "1h": "1Hour",
+    "4h": "4Hour",
+}
 
 
 def _as_float(value: object | None) -> float:
@@ -80,6 +86,10 @@ def _get_raw_bars_for_symbol(
         ):
             return raw_list
     return []
+
+
+def _alpaca_timeframe(timeframe: str) -> str:
+    return _ALPACA_TIMEFRAME_ALIASES.get(timeframe, timeframe)
 
 
 class AlpacaTrainingFetcher:
@@ -215,7 +225,7 @@ class AlpacaTrainingFetcher:
     ) -> dict[str, list[Candle]]:
         params_base: dict[str, object] = {
             "symbols": ",".join(symbols),
-            "timeframe": timeframe,
+            "timeframe": _alpaca_timeframe(timeframe),
             "start": start.isoformat(),
             "end": end.isoformat(),
             "limit": 10_000,

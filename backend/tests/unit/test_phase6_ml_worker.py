@@ -15,15 +15,14 @@ from app.tasks.ml_candles import build_ml_daily_sync_payload
 from app.tasks.worker import celery_app
 
 
-def test_ml_daily_sync_payload_targets_ml_task() -> None:
-    """The ML daily sync payload should target the isolated ML task."""
+def test_ml_daily_sync_payload_targets_primary_intraday_ml_task() -> None:
+    """The ML sync payload should target the isolated primary intraday ML task."""
 
     payload = build_ml_daily_sync_payload(["BTC/USD", "ETH/USD"])
 
-    assert payload.name == "tasks.ml_candles.daily_sync"
+    assert payload.name == "tasks.ml_candles.crypto_intraday_sync"
     assert payload.kwargs == {
         "symbols": ["BTC/USD", "ETH/USD"],
-        "lookback_days": 730,
     }
 
 
