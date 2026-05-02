@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session
 from app.config.constants import (
-    ML_DAILY_WORKER_ID,
-    ML_DAILY_WORKER_SOURCE,
+    ML_CRYPTO_INTRADAY_WORKER_ID,
+    ML_CRYPTO_INTRADAY_WORKER_SOURCE,
 )
 from app.config.crypto_scope import list_crypto_universe_symbols, list_crypto_watchlist_symbols
 from app.ml.freshness import (
@@ -227,7 +227,7 @@ def _serialize_ml_workers(
     """Return configured ML worker visibility without mixing it into candle workers."""
 
     existing = next(
-        (worker for worker in workers if worker.key.id == ML_DAILY_WORKER_ID),
+        (worker for worker in workers if worker.key.id == ML_CRYPTO_INTRADAY_WORKER_ID),
         None,
     )
     if existing is not None:
@@ -239,11 +239,11 @@ def _serialize_ml_workers(
     now = datetime.now(tz=UTC).isoformat()
     return [
         {
-            "worker_id": ML_DAILY_WORKER_ID,
+            "worker_id": ML_CRYPTO_INTRADAY_WORKER_ID,
             "symbol": "crypto",
             "asset_class": "ml",
-            "timeframe": "1D",
-            "source": ML_DAILY_WORKER_SOURCE,
+            "timeframe": "15m/1h/4h",
+            "source": ML_CRYPTO_INTRADAY_WORKER_SOURCE,
             "status": "configured",
             "health": ml_freshness["freshness"],
             "started_at": now,
@@ -251,7 +251,7 @@ def _serialize_ml_workers(
             "last_heartbeat_at": None,
             "last_candle_close_at": ml_freshness["latest_ml_candle_at"],
             "last_error": None,
-            "task_name": "tasks.ml_candles.daily_sync",
+            "task_name": "tasks.ml_candles.crypto_intraday_sync",
             "heartbeat_ttl_s": 0,
             "heartbeat_age_s": None,
             **ml_freshness,

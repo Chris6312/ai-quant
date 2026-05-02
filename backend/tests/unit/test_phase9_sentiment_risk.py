@@ -34,13 +34,20 @@ def test_celery_beat_schedules_crypto_news_every_four_hours() -> None:
     assert refresh["schedule"].minute == {30}
 
 
-def test_celery_beat_preserves_ml_daily_timing() -> None:
-    """The crypto sentiment refresh should not move ML candle or prediction jobs."""
+def test_celery_beat_schedules_ml_candle_lanes() -> None:
+    """ML candle lanes should be scheduled independently from prediction jobs."""
 
     schedule = celery_app.conf.beat_schedule
 
-    assert schedule["ml-daily-candle-sync"]["schedule"].hour == {8}
-    assert schedule["ml-daily-candle-sync"]["schedule"].minute == {40}
+    assert schedule["ml-crypto-intraday-candle-sync"]["task"] == (
+        "tasks.ml_candles.crypto_intraday_sync"
+    )
+    assert schedule["ml-crypto-intraday-candle-sync"]["schedule"].hour == {3}
+    assert schedule["ml-crypto-intraday-candle-sync"]["schedule"].minute == {15}
+    assert schedule["ml-stock-intraday-candle-sync"]["task"] == (
+        "tasks.ml_candles.stock_intraday_sync"
+    )
+    assert schedule["ml-stock-intraday-candle-sync"]["schedule"].day_of_week == {6}
     assert schedule["ml-prediction-snapshot"]["schedule"].hour == {8}
     assert schedule["ml-prediction-snapshot"]["schedule"].minute == {55}
 

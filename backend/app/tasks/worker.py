@@ -63,9 +63,17 @@ celery_app.conf.update(
             "task": "tasks.news_sentiment.daily_crypto_sync",
             "schedule": crontab(hour="2,6,10,14,18,22", minute=30),
         },
-        "ml-daily-candle-sync": {
-            "task": "tasks.ml_candles.daily_sync",
-            "schedule": crontab(hour=8, minute=40),
+        "ml-crypto-intraday-candle-sync": {
+            "task": "tasks.ml_candles.crypto_intraday_sync",
+            "schedule": crontab(hour=3, minute=15),
+        },
+        "ml-crypto-context-candle-sync": {
+            "task": "tasks.ml_candles.crypto_context_sync",
+            "schedule": crontab(hour=3, minute=45),
+        },
+        "ml-stock-intraday-candle-sync": {
+            "task": "tasks.ml_candles.stock_intraday_sync",
+            "schedule": crontab(hour=18, minute=30, day_of_week=6),
         },
         "ml-prediction-snapshot": {
             "task": "tasks.ml_predictions.run",

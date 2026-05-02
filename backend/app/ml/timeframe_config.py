@@ -4,6 +4,22 @@ from __future__ import annotations
 
 from app.ml.model_contracts import AssetClass, ModelRole, TimeframeContract
 
+_ML_LOOKBACK_DAYS: dict[AssetClass, dict[str, int]] = {
+    AssetClass.CRYPTO: {
+        "15m": 183,
+        "1h": 274,
+        "4h": 365,
+        "1Day": 730,
+    },
+    AssetClass.STOCK: {
+        "5m": 365,
+        "15m": 365,
+        "1h": 456,
+        "4h": 548,
+        "1Day": 1600,
+    },
+}
+
 _PRODUCTION_CONTRACTS: dict[AssetClass, tuple[TimeframeContract, ...]] = {
     AssetClass.CRYPTO: (
         TimeframeContract(
@@ -91,6 +107,13 @@ def get_ml_timeframes(asset_class: AssetClass | str) -> tuple[str, ...]:
         for contract in _PRODUCTION_CONTRACTS[normalized_asset_class]
         if contract.is_primary_trading_model
     )
+
+
+def get_ml_lookback_days(asset_class: AssetClass | str, timeframe: str) -> int:
+    """Return the historical candle lookback for an ML asset/timeframe contract."""
+
+    contract = get_timeframe_contract(asset_class, timeframe)
+    return _ML_LOOKBACK_DAYS[contract.asset_class][contract.timeframe]
 
 
 def get_model_role(asset_class: AssetClass | str, timeframe: str) -> ModelRole:

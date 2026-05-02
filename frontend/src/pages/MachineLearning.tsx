@@ -2361,6 +2361,19 @@ const MachineLearning: React.FC = () => {
     stockUniverse?.supported_symbol_count ??
     gainers?.count ??
     0;
+  const mlCandleDetails = useMemo(
+    () =>
+      [
+        ...(training?.crypto_detail ?? []),
+        ...(training?.stock_detail ?? []),
+      ].sort((a, b) =>
+        `${a.asset_class}:${a.symbol}:${a.timeframe}:${a.usage}`.localeCompare(
+          `${b.asset_class}:${b.symbol}:${b.timeframe}:${b.usage}`,
+        ),
+      ),
+    [training?.crypto_detail, training?.stock_detail],
+  );
+  const visibleMlCandleDetails = mlCandleDetails.slice(0, 36);
   const featureCount = featureContract?.feature_count ?? 51;
   const technicalFeatureCount = featureContract?.technical_feature_count ?? 36;
   const researchFeatureCount = featureContract?.research_feature_count ?? 15;
@@ -4645,6 +4658,77 @@ const MachineLearning: React.FC = () => {
                 ? "Refreshing top 100…"
                 : "Refresh top 100 stocks"}
             </ActionButton>
+          </div>
+        </div>
+        <div style={{ padding: "0 16px 16px" }}>
+          <div
+            style={{
+              overflowX: "auto",
+              borderTop: `0.5px solid ${S.border}`,
+              paddingTop: 12,
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                minWidth: 620,
+                borderCollapse: "collapse",
+                fontSize: 10,
+              }}
+            >
+              <thead style={{ color: S.text3, textAlign: "left" }}>
+                <tr>
+                  {["Asset", "Symbol", "Timeframe", "Usage", "Candles", "Latest"].map(
+                    (header) => (
+                      <th key={header} style={{ padding: "0 10px 8px 0" }}>
+                        {header}
+                      </th>
+                    ),
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleMlCandleDetails.length > 0 ? (
+                  visibleMlCandleDetails.map((detail) => (
+                    <tr
+                      key={`${detail.asset_class}:${detail.symbol}:${detail.timeframe}:${detail.usage}`}
+                      style={{ borderTop: `0.5px solid ${S.border}` }}
+                    >
+                      <td style={{ padding: "8px 10px 8px 0", color: S.text2 }}>
+                        {detail.asset_class}
+                      </td>
+                      <td style={{ padding: "8px 10px 8px 0", color: S.text }}>
+                        {detail.symbol}
+                      </td>
+                      <td style={{ padding: "8px 10px 8px 0", color: S.blue }}>
+                        {detail.timeframe}
+                      </td>
+                      <td style={{ padding: "8px 10px 8px 0", color: S.green }}>
+                        {detail.usage}
+                      </td>
+                      <td style={{ padding: "8px 10px 8px 0", color: S.text }}>
+                        {formatNumber(detail.candle_count)}
+                      </td>
+                      <td style={{ padding: "8px 0", color: S.text3 }}>
+                        {detail.latest ? formatTimestamp(detail.latest) : "pending"}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr style={{ borderTop: `0.5px solid ${S.border}` }}>
+                    <td colSpan={6} style={{ padding: "10px 0", color: S.text3 }}>
+                      No ML candle rows are available yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {mlCandleDetails.length > visibleMlCandleDetails.length ? (
+              <div style={{ fontSize: 10, color: S.text3, marginTop: 8 }}>
+                Showing {visibleMlCandleDetails.length} of {mlCandleDetails.length}{" "}
+                symbol × timeframe × usage rows.
+              </div>
+            ) : null}
           </div>
         </div>
       </Card>

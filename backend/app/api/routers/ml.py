@@ -94,6 +94,7 @@ class TrainingStatusRow(Protocol):
     symbol: object
     asset_class: object
     timeframe: object
+    usage: object
     row_count: object
     earliest: object
     latest: object
@@ -144,6 +145,7 @@ async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
             CandleRow.symbol.label("symbol"),
             CandleRow.asset_class.label("asset_class"),
             CandleRow.timeframe.label("timeframe"),
+            CandleRow.usage.label("usage"),
             func.count().label("row_count"),
             func.min(CandleRow.time).label("earliest"),
             func.max(CandleRow.time).label("latest"),
@@ -153,11 +155,13 @@ async def _training_status_stmt(session: AsyncSession) -> TrainingStatusResult:
             CandleRow.symbol,
             CandleRow.asset_class,
             CandleRow.timeframe,
+            CandleRow.usage,
         )
         .order_by(
             CandleRow.asset_class.asc(),
             CandleRow.symbol.asc(),
             CandleRow.timeframe.asc(),
+            CandleRow.usage.asc(),
         )
     )
     result = await session.execute(statement)
@@ -482,8 +486,8 @@ async def _build_training_status() -> dict[str, object]:
     total_candles = 0
     crypto_candles = 0
     stock_candles = 0
-    crypto_symbols = 0
-    stock_symbols = 0
+    crypto_symbol_set: set[str] = set()
+    stock_symbol_set: set[str] = set()
     crypto_detail: list[dict[str, object]] = []
     stock_detail: list[dict[str, object]] = []
 
@@ -491,6 +495,7 @@ async def _build_training_status() -> dict[str, object]:
         symbol = str(row.symbol)
         asset_class = str(row.asset_class)
         timeframe = str(row.timeframe)
+        usage = str(row.usage)
         row_count_raw = row.row_count
         row_count = (
             row_count_raw
@@ -504,6 +509,7 @@ async def _build_training_status() -> dict[str, object]:
             "symbol": symbol,
             "asset_class": asset_class,
             "timeframe": timeframe,
+            "usage": usage,
             "candle_count": row_count,
             "earliest": (
                 earliest.isoformat()
@@ -520,13 +526,15 @@ async def _build_training_status() -> dict[str, object]:
         total_candles += row_count
         if asset_class == "crypto":
             crypto_candles += row_count
-            crypto_symbols += 1
+            crypto_symbol_set.add(symbol)
             crypto_detail.append(detail)
         else:
             stock_candles += row_count
-            stock_symbols += 1
+            stock_symbol_set.add(symbol)
             stock_detail.append(detail)
 
+    crypto_symbols = len(crypto_symbol_set)
+    stock_symbols = len(stock_symbol_set)
     return {
         "source": ",".join(default_sources),
         "total_candles": total_candles,
@@ -1362,7 +1370,7 @@ async def _catch_up_crypto_daily_candles() -> Mapping[str, object]:
     return finished
 
 async def _ensure_crypto_ml_can_score() -> MlFreshnessResult:
-    """Block crypto scoring when the ML daily candle lane is stale or incomplete."""
+    """Block crypto scoring when the primary ML candle lane is stale or incomplete."""
 
     settings = get_settings()
     engine = build_engine(settings)

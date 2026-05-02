@@ -107,6 +107,39 @@ async def test_fetch_batch_parses_multi_symbol_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_batch_translates_contract_intraday_timeframe() -> None:
+    """Contract timeframe labels should be translated for Alpaca requests only."""
+
+    payload = {
+        "bars": {
+            "AAPL": [
+                {
+                    "t": "2026-04-18T14:30:00Z",
+                    "o": 100.0,
+                    "h": 102.0,
+                    "l": 99.5,
+                    "c": 101.0,
+                    "v": 1_000.0,
+                }
+            ]
+        }
+    }
+    client = _FakeClient(payload)
+    fetcher = AlpacaTrainingFetcher(client=client)
+
+    batch = await fetcher.fetch_batch(
+        symbols=["AAPL"],
+        timeframe="15m",
+        start=datetime(2026, 4, 1, tzinfo=UTC),
+        end=datetime(2026, 4, 18, tzinfo=UTC),
+        asset_class="stock",
+    )
+
+    assert batch["AAPL"][0].timeframe == "15m"
+    assert client.calls[0]["params"]["timeframe"] == "15Min"
+
+
+@pytest.mark.asyncio
 async def test_sync_universe_persists_new_rows() -> None:
     """The sync flow should persist only new training candles."""
 
