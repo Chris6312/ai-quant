@@ -41,6 +41,7 @@ celery_app = Celery(
         "app.tasks.crypto_candles",
         "app.tasks.ml_candles",
         "app.tasks.news_sentiment",
+        "app.tasks.stock_screener",
     ],
 )
 
@@ -54,6 +55,7 @@ celery_app.conf.update(
         "tasks.ml_predictions.run": {"queue": CELERY_ML_QUEUE},
         "tasks.retrain_models": {"queue": CELERY_ML_QUEUE},
         "tasks.news_sentiment.*": {"queue": CELERY_ML_QUEUE},
+        "tasks.stock_screener.*": {"queue": CELERY_DEFAULT_QUEUE},
     },
     timezone="America/New_York",
     beat_schedule={
