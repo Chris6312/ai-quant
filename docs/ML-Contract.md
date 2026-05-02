@@ -71,7 +71,7 @@ crypto 15m = entry_timing
 
 stock 4h = regime_filter
 stock 1h = direction
-stock 15m = entry_timing
+stock 15m = setup_timing
 stock 5m = execution_timing
 ```
 
