@@ -21,6 +21,16 @@ from app.db.models import (  # noqa: F401
     PredictionRow,
     PredictionShapRow,
     ResearchSignalRow,
+    StockCandleRow,
+    StockCongressEventRow,
+    StockInsiderEventRow,
+    StockNewsEventRow,
+    StockPaperFillRow,
+    StockPaperPositionRow,
+    StockStrategyProfileRow,
+    StockSymbolRow,
+    StockUniverseCandidateRow,
+    StockWatchlistRow,
     WatchlistRow,
 )
 

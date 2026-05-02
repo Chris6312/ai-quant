@@ -432,3 +432,16 @@ class PortfolioSnapshotRow(Base):
         default=lambda: datetime.now(tz=UTC),
         nullable=False,
     )
+
+from app.db.stock_models import (  # noqa: E402,F401
+    StockCandleRow,
+    StockCongressEventRow,
+    StockInsiderEventRow,
+    StockNewsEventRow,
+    StockPaperFillRow,
+    StockPaperPositionRow,
+    StockStrategyProfileRow,
+    StockSymbolRow,
+    StockUniverseCandidateRow,
+    StockWatchlistRow,
+)

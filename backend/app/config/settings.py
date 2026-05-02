@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     coingecko_api_key: str | None = Field(default=None)
     coingecko_api_key_header: str = Field(default="x-cg-demo-api-key")
 
+    stock_alpaca_historical_enabled: bool = Field(default=False)
+    stock_tradier_quotes_enabled: bool = Field(default=False)
+    stock_tradier_intraday_candles_enabled: bool = Field(default=False)
+    stock_sec_insider_enabled: bool = Field(default=False)
+    stock_sec_base_url: str = Field(default="https://www.sec.gov")
+    stock_congress_enabled: bool = Field(default=False)
+    stock_congress_base_url: str = Field(default="https://housestockwatcher.com")
+    stock_congress_api_key: str | None = Field(default=None)
+    stock_news_enabled: bool = Field(default=False)
+    stock_earnings_analyst_enabled: bool = Field(default=False)
+    stock_earnings_analyst_base_url: str | None = Field(default=None)
+    stock_earnings_analyst_api_key: str | None = Field(default=None)
+    stock_provider_failure_log_capacity: int = Field(default=100, ge=1)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
