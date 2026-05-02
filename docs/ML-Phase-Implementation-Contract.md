@@ -50,8 +50,9 @@ The worker ID is `ml:crypto:1D`. No 15m, 1h, or 4h ML candles are being fetched.
 - [ ] Retire `ml:crypto:1D` as a primary beat schedule entry
 
 ### Database
-- [ ] Migration required — ML and trading intraday candle lanes can overlap on the same symbol/timeframe/time, so `usage` must be part of candle uniqueness
-- [ ] Update `CandleRow` identity from `(time, symbol, timeframe)` to `(time, symbol, timeframe, usage)`
+- [ ] Alembic migration required — ML and trading intraday candle lanes can overlap on the same symbol/timeframe/time
+- [ ] Candle uniqueness must include `usage`; existing `CandleRow` timeframe support is not sufficient without usage in uniqueness
+- [ ] Candle primary key must be `(time, symbol, timeframe, usage)`
 - [ ] Add/update query indexing for `(symbol, timeframe, usage, time)`
 
 ---
