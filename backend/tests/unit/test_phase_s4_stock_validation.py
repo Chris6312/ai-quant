@@ -119,6 +119,30 @@ def test_spread_too_wide_fails() -> None:
     )
 
 
+def test_inverted_spread_fails() -> None:
+    assert _screen(liquidity_snapshot=_liquidity_snapshot(bid=101.0, ask=99.0)) == (
+        "spread_inverted",
+    )
+
+
+def test_nan_price_fails() -> None:
+    assert _screen(liquidity_snapshot=_liquidity_snapshot(price=float("nan"))) == (
+        "price_non_finite",
+    )
+
+
+def test_infinite_dollar_volume_fails() -> None:
+    assert _screen(liquidity_snapshot=_liquidity_snapshot(dollar_volume=float("inf"))) == (
+        "dollar_volume_non_finite",
+    )
+
+
+def test_nan_spread_input_fails() -> None:
+    assert _screen(liquidity_snapshot=_liquidity_snapshot(bid=float("nan"))) == (
+        "spread_input_non_finite",
+    )
+
+
 def test_halted_or_excluded_fails() -> None:
     assert _screen(liquidity_snapshot=_liquidity_snapshot(is_halted=True)) == (
         "symbol_halted",
@@ -211,6 +235,48 @@ def test_missing_inputs_are_included_in_aggregate_result() -> None:
         "tradability_snapshot_missing",
         "earnings_risk_snapshot_missing",
         "sector_classification_missing",
+    ]
+
+
+def test_snapshot_symbol_mismatch_fails() -> None:
+    result = screen_stock_candidate(
+        candidate=_candidate("AAPL"),
+        thresholds=StockScreeningThresholds(),
+        liquidity_snapshot=_liquidity_snapshot(symbol="MSFT"),
+        tradability_snapshot=_tradability_snapshot(),
+        earnings_risk_snapshot=_earnings_snapshot(),
+        sector="Technology",
+    )
+
+    assert result.passed is False
+    assert [failure.code for failure in result.failures] == ["snapshot_symbol_mismatch"]
+    assert result.failures[0].reason == (
+        "Snapshot symbol mismatch: expected AAPL, got MSFT"
+    )
+
+
+def test_symbol_mismatch_is_included_in_aggregate_result() -> None:
+    result = screen_stock_candidate(
+        candidate=_candidate("AAPL"),
+        thresholds=StockScreeningThresholds(),
+        liquidity_snapshot=_liquidity_snapshot(
+            symbol="MSFT",
+            price=float("nan"),
+            bid=101.0,
+            ask=99.0,
+        ),
+        tradability_snapshot=_tradability_snapshot(symbol="TSLA"),
+        earnings_risk_snapshot=_earnings_snapshot(symbol="NVDA"),
+        sector="Technology",
+    )
+
+    assert result.passed is False
+    assert [failure.code for failure in result.failures] == [
+        "snapshot_symbol_mismatch",
+        "snapshot_symbol_mismatch",
+        "snapshot_symbol_mismatch",
+        "price_non_finite",
+        "spread_inverted",
     ]
 
 
