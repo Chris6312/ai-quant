@@ -14,13 +14,23 @@ from app.config.settings import get_settings
 from app.db.base import Base
 from app.db.models import (  # noqa: F401
     CandleRow,
-    CongressTradeRow,
     CryptoDailySentimentRow,
+    CongressTradeRow,
     InsiderTradeRow,
     PositionRow,
     PredictionRow,
     PredictionShapRow,
     ResearchSignalRow,
+    StockCandleRow,
+    StockCongressEventRow,
+    StockInsiderEventRow,
+    StockNewsEventRow,
+    StockPaperFillRow,
+    StockPaperPositionRow,
+    StockStrategyProfileRow,
+    StockSymbolRow,
+    StockUniverseCandidateRow,
+    StockWatchlistRow,
     WatchlistRow,
 )
 
